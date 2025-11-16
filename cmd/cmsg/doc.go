@@ -14,14 +14,22 @@
 //	    Message type (default "user")
 //	    Valid types: user, assistant, system
 //
+//	-template string
+//	    Go template for content transformation
+//	    Template receives stdin content as string data ({{.}})
+//
+//	-image string
+//	    Path to image file to include in message
+//	    Image is base64-encoded with auto-detected media type
+//
 // # Message Format
 //
 // Output is a single-line JSON object representing a Claude message:
 //
-//	{"type":"user","content":"the input text"}
+//	{"type":"user","message":{"role":"user","content":[{"type":"text","text":"the input text"}]}}
 //
-// The entire stdin is read and placed into the content field. For
-// streaming scenarios, call cmsg once per logical message.
+// The entire stdin is read and placed into the text field of a content block.
+// For streaming scenarios, call cmsg once per logical message.
 //
 // # Streaming Compatibility
 //
@@ -52,6 +60,16 @@
 //
 //	cat prompt.txt | cmsg | tee session.ndjson
 //	cat response.txt | cmsg -type assistant | tee -a session.ndjson
+//
+// Use templates to transform content:
+//
+//	echo "code review" | cmsg -template "Please review: {{.}}"
+//	cat file.go | cmsg -template "Analyze this code:\n\n{{.}}"
+//
+// Include images in messages:
+//
+//	echo "What's in this image?" | cmsg -image screenshot.png
+//	cmsg -image diagram.jpg -template "Explain this diagram"
 //
 // # Integration
 //
