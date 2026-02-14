@@ -82,6 +82,7 @@ body {
   border-bottom: 2px solid transparent;
   color: var(--dim);
   cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
 }
 .tab:hover { color: var(--fg); }
 .tab.active { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
@@ -163,12 +164,35 @@ input::placeholder { color: var(--faint); }
 /* results */
 .results { list-style: none; }
 
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 .hit {
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   position: relative;
+  animation: fade-up 0.2s ease-out both;
 }
+.hit:nth-child(1)  { animation-delay: 0ms; }
+.hit:nth-child(2)  { animation-delay: 30ms; }
+.hit:nth-child(3)  { animation-delay: 60ms; }
+.hit:nth-child(4)  { animation-delay: 90ms; }
+.hit:nth-child(5)  { animation-delay: 120ms; }
+.hit:nth-child(6)  { animation-delay: 150ms; }
+.hit:nth-child(7)  { animation-delay: 180ms; }
+.hit:nth-child(8)  { animation-delay: 210ms; }
+.hit:nth-child(9)  { animation-delay: 240ms; }
+.hit:nth-child(10) { animation-delay: 270ms; }
+
+@keyframes reorder-flash {
+  0%   { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+.hit.reordered { animation: reorder-flash 0.4s ease-out; }
+
 .hit:first-child { border-top: 1px solid var(--border); }
 .hit:hover { background: var(--hover); margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
 .hit.selected { background: var(--hover); border-left: 3px solid var(--accent); padding-left: 8px; margin-left: -8px; }
@@ -243,7 +267,7 @@ input::placeholder { color: var(--faint); }
   border-left: 1px solid var(--border);
   z-index: 40;
   transform: translateX(100%);
-  transition: transform 0.25s ease-out;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -325,6 +349,7 @@ input::placeholder { color: var(--faint); }
   font-size: 12px;
   line-height: 1.6;
   border-left: 2px solid var(--border);
+  animation: fade-up 0.15s ease-out both;
 }
 .conv-entry.role-user { border-left-color: var(--cyan); background: transparent; }
 .conv-entry.role-assistant { border-left-color: var(--dim); }
@@ -371,6 +396,60 @@ input::placeholder { color: var(--faint); }
 }
 .conv-error { color: var(--danger); }
 .conv-success { color: var(--green); }
+
+/* compact boundary divider */
+.conv-compact-boundary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 10px;
+  color: var(--faint);
+}
+.conv-compact-boundary::before,
+.conv-compact-boundary::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.conv-compact-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* compact summary */
+.conv-compact-summary {
+  border-left: 2px solid var(--border);
+  padding: 6px 10px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--dim);
+  cursor: pointer;
+}
+.conv-compact-summary:hover { background: var(--hover); }
+
+/* system entry */
+.conv-entry.role-system {
+  border-left-color: var(--faint);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+/* custom-title badge */
+.conv-custom-title {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  display: inline-block;
+}
+
+/* compactions badge in hit item */
+.hit-compactions { color: var(--yellow); }
 
 /* detail overlay for mobile */
 .detail-overlay {
@@ -430,6 +509,113 @@ input::placeholder { color: var(--faint); }
   justify-content: center;
 }
 .graph-zoom button:hover { border-color: var(--accent); }
+
+/* graph: timeline scrubber */
+.graph-scrubber {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+.graph-scrubber input[type="range"] {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 2px;
+  background: var(--border);
+  outline: none;
+  cursor: pointer;
+}
+.graph-scrubber input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  background: var(--fg);
+  border: none;
+  cursor: grab;
+}
+.graph-scrubber input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  background: var(--fg);
+  border: none;
+  border-radius: 0;
+  cursor: grab;
+}
+.graph-scrubber-time {
+  min-width: 120px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.graph-play-btn {
+  font: inherit;
+  font-size: 11px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  padding: 2px 8px;
+  cursor: pointer;
+  min-width: 32px;
+}
+.graph-play-btn:hover { border-color: var(--accent); color: var(--fg); }
+.graph-play-btn.active { color: var(--green); border-color: var(--green); }
+
+/* graph: node info + active indicator */
+.graph-node .node-info {
+  font-size: 8px;
+  fill: var(--faint);
+}
+.graph-node.active rect { stroke: var(--green); stroke-width: 2; }
+.graph-node.active .node-dot {
+  fill: var(--green);
+}
+
+/* graph: tooltip */
+.graph-tooltip {
+  position: absolute;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  max-width: 280px;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.graph-tooltip.visible { opacity: 1; }
+.graph-tooltip-title { font-weight: 600; margin-bottom: 2px; }
+.graph-tooltip-stat { color: var(--dim); }
+
+/* graph: animated link dots */
+@keyframes travel {
+  0%   { offset-distance: 0%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+.graph-link-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  position: absolute;
+  offset-rotate: 0deg;
+  animation: travel 0.8s ease-in-out forwards;
+  pointer-events: none;
+}
+.graph-link-dot.msg { background: var(--accent); }
+.graph-link-dot.obs { background: var(--faint); }
+
+/* graph: link glow on appear */
+@keyframes link-appear {
+  0%   { opacity: 0; }
+  30%  { opacity: 1; }
+  100% { opacity: 0.7; }
+}
+.graph-edge-new { animation: link-appear 0.6s ease-out forwards; }
 
 /* tables */
 .map-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -543,6 +729,7 @@ input::placeholder { color: var(--faint); }
     border-left: none;
     border-top: 1px solid var(--border);
     transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .detail-panel.open { transform: translateY(0); }
 

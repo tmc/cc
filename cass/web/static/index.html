@@ -373,6 +373,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused }) {
         ${h.workspace && html`<span class="hit-workspace">${shortProject(h.workspace)}</span>`}
         ${h.started_at && html`<span class="hit-time">${relTime(h.started_at)}${h.ended_at && relTime(h.ended_at) !== relTime(h.started_at) ? ' → ' + relTime(h.ended_at) : ''}</span>`}
         ${stats.length > 0 && html`<span class="hit-stats">${stats.join(' | ')}</span>`}
+        ${h.compactions > 0 && html`<span class="hit-compactions">${h.compactions} compaction${h.compactions > 1 ? 's' : ''}</span>`}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
       </div>
       <${ToolMicroBar} breakdown=${h.tool_breakdown} />
@@ -456,6 +457,56 @@ function SessionDetailPanel({ hit, onClose }) {
 
   function renderConversation() {
     return entries.map((entry, idx) => {
+      // Compact boundary: horizontal divider with metadata badge.
+      if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
+        const meta = entry.compactMetadata;
+        const label = meta
+          ? (meta.trigger || 'auto') + (meta.preTokens ? ' | ' + fmtNum(meta.preTokens) + ' tok' : '')
+          : 'compacted';
+        return html`
+          <div class="conv-compact-boundary" key=${idx}>
+            <span class="conv-compact-badge">compacted (${label})</span>
+          </div>
+        `;
+      }
+
+      // Compact summary: collapsible italic summary text.
+      if (entry.isCompactSummary) {
+        const summaryText = entry.summary
+          || (entry.message && typeof entry.message.content === 'string' ? entry.message.content : '')
+          || '';
+        if (summaryText) {
+          const key = 'cs-' + idx;
+          const isExp = expanded[key];
+          return html`
+            <div class="conv-compact-summary" key=${idx} onClick=${() => toggleExpand(key)}>
+              <div class="conv-role">
+                <span>compact summary</span>
+                <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
+              </div>
+              <div class="conv-content ${isExp ? '' : 'collapsed'}">${summaryText.slice(0, isExp ? 5000 : 200)}</div>
+            </div>
+          `;
+        }
+      }
+
+      // Custom title rename.
+      if (entry.type === 'custom-title' && entry.customTitle) {
+        return html`<div class="conv-custom-title" key=${idx}>renamed: ${entry.customTitle}</div>`;
+      }
+
+      // System entries (non-compact).
+      if (entry.type === 'system' && !entry.message) {
+        const text = entry.content || entry.summary || '';
+        if (!text) return null;
+        return html`
+          <div class="conv-entry role-system" key=${idx}>
+            <div class="conv-role">system</div>
+            <div class="conv-content">${text.slice(0, 500)}</div>
+          </div>
+        `;
+      }
+
       const msg = entry.message;
       if (!msg) return null;
       const role = msg.role || entry.type || 'unknown';
@@ -535,6 +586,7 @@ function SessionDetailPanel({ hit, onClose }) {
             ${hit.files_edited && html`<span>${hit.files_edited} files</span>`}
             ${hit.duration_secs && html`<span>${fmtDuration(hit.duration_secs)}</span>`}
             ${(hit.input_tokens || hit.output_tokens) && html`<span>${fmtNum((hit.input_tokens||0)+(hit.output_tokens||0))} tok</span>`}
+            ${hit.compactions > 0 && html`<span class="hit-compactions">${hit.compactions} compaction${hit.compactions > 1 ? 's' : ''}</span>`}
           </div>
         </div>
         ${streaming && html`
@@ -555,26 +607,94 @@ function SessionDetailPanel({ hit, onClose }) {
 // --- Graph Panel ---
 
 function GraphPanel() {
-  const [links, setLinks] = useState([]);
-  const [labels, setLabels] = useState({});
+  const [allLinks, setAllLinks] = useState([]);
+  const [nodeData, setNodeData] = useState({});  // id -> {workspace, title, started_at, ended_at, tool_calls, turns, tokens, is_active}
+  const [timeRange, setTimeRange] = useState({ min: 0, max: 0 });
   const [since, setSince] = useState('24h');
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState(1);
+  const [graphQuery, setGraphQuery] = useState('');
+  const [wsFilter, setWsFilter] = useState('');
+
+  // Scrubber state.
+  const [scrubberPos, setScrubberPos] = useState(1);  // 0..1 normalized
+  const [playing, setPlaying] = useState(false);
+  const playRef = useRef(null);
+
+  // Tooltip state.
+  const [tooltip, setTooltip] = useState(null);  // {id, x, y}
+  const containerRef = useRef(null);
+
+  // Track which links just appeared for animation.
+  const prevVisibleCount = useRef(0);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const l = await api('links?' + qs({ since }));
-      setLinks(l || []);
-      const ids = new Set();
-      (l || []).forEach(link => {
-        if (link.source_session) ids.add(link.source_session.slice(0, 8));
-        if (link.target_session) ids.add(link.target_session.slice(0, 8));
-      });
-      if (ids.size > 0) {
-        const lb = await api('labels?' + qs({ ids: [...ids].join(',') }));
-        setLabels(lb || {});
+      // Normalize link: ensure .source and .target are short IDs.
+      function normLink(lk) {
+        return {
+          source: (lk.source || lk.source_session || '?').slice(0, 8),
+          target: (lk.target || lk.target_session || '?').slice(0, 8),
+          kind: lk.kind, action: lk.action, text: lk.text, timestamp: lk.timestamp,
+        };
       }
+
+      let nodes = [], links = [], tRange = null;
+      try {
+        const g = await api('graph?' + qs({ since }));
+        nodes = g.nodes || [];
+        links = (g.links || []).map(normLink);
+        tRange = g.time_range;
+      } catch {
+        // Fallback to old 2-call pattern.
+        const l = await api('links?' + qs({ since }));
+        links = (l || []).map(normLink);
+        const ids = new Set();
+        links.forEach(lk => { ids.add(lk.source); ids.add(lk.target); });
+        if (ids.size > 0) {
+          const lb = await api('labels?' + qs({ ids: [...ids].join(',') }));
+          nodes = [...ids].map(id => {
+            const info = (lb || {})[id] || {};
+            return { id, workspace: info.workspace || '', title: info.title || '' };
+          });
+        }
+      }
+
+      // Build node lookup.
+      const nd = {};
+      nodes.forEach(n => { nd[n.id] = n; });
+
+      // Ensure all link endpoints have a node entry.
+      links.forEach(l => {
+        if (!nd[l.source]) nd[l.source] = { id: l.source };
+        if (!nd[l.target]) nd[l.target] = { id: l.target };
+      });
+
+      // Compute time range from link timestamps.
+      let tMin = Infinity, tMax = -Infinity;
+      if (tRange) {
+        tMin = new Date(tRange.min).getTime();
+        tMax = new Date(tRange.max).getTime();
+      } else {
+        links.forEach(l => {
+          if (l.timestamp) {
+            const t = new Date(l.timestamp).getTime();
+            if (t < tMin) tMin = t;
+            if (t > tMax) tMax = t;
+          }
+        });
+      }
+      if (!isFinite(tMin)) tMin = Date.now() - 3600000;
+      if (!isFinite(tMax)) tMax = Date.now();
+      // Add a small buffer so the last link is visible at max.
+      if (tMax <= tMin) tMax = tMin + 1000;
+
+      setAllLinks(links);
+      setNodeData(nd);
+      setTimeRange({ min: tMin, max: tMax });
+      setScrubberPos(1);
+      prevVisibleCount.current = links.length;
     } catch (e) { console.error('graph:', e); }
     setLoading(false);
   }, [since]);
@@ -585,32 +705,190 @@ function GraphPanel() {
     return () => window.removeEventListener('cass:refresh', load);
   }, [load]);
 
+  // Playback timer.
+  useEffect(() => {
+    if (!playing) { if (playRef.current) cancelAnimationFrame(playRef.current); return; }
+    const duration = 5000; // 5s real time for full playback
+    const start = performance.now();
+    const startPos = 0;
+    function tick(now) {
+      const elapsed = now - start;
+      const pos = Math.min(1, startPos + elapsed / duration);
+      setScrubberPos(pos);
+      if (pos < 1) { playRef.current = requestAnimationFrame(tick); }
+      else { setPlaying(false); }
+    }
+    setScrubberPos(0);
+    playRef.current = requestAnimationFrame(tick);
+    return () => { if (playRef.current) cancelAnimationFrame(playRef.current); };
+  }, [playing]);
+
   function onWheel(e) {
     e.preventDefault();
     setZoom(z => Math.max(0.3, Math.min(3, z + (e.deltaY > 0 ? -0.1 : 0.1))));
   }
 
-  if (loading) return html`<div class="loading">loading graph...</div>`;
-  if (links.length === 0) return html`<div class="empty">no inter-session links found</div>`;
+  // Compute scrubber cutoff time.
+  const cutoffTime = timeRange.min + (timeRange.max - timeRange.min) * scrubberPos;
 
-  const nodeSet = new Set();
-  links.forEach(l => {
-    nodeSet.add(l.source_session ? l.source_session.slice(0, 8) : '?');
-    nodeSet.add(l.target_session.slice(0, 8));
-  });
-  const nodes = [...nodeSet];
-  const cx = 400, cy = 250, radius = 180;
+  // Filter links by scrubber position and node visibility.
+  const visibleLinks = useMemo(() => {
+    return allLinks.filter(l => {
+      // Both endpoints must be in the filtered set.
+      if (!filteredNodeSet.has(l.source) || !filteredNodeSet.has(l.target)) return false;
+      // Scrubber time filter.
+      if (scrubberPos < 1 && l.timestamp) {
+        if (new Date(l.timestamp).getTime() > cutoffTime) return false;
+      }
+      return true;
+    });
+  }, [allLinks, cutoffTime, scrubberPos, filteredNodeSet]);
+
+  // Track newly appearing links for animation.
+  const newLinkIndices = useMemo(() => {
+    const prev = prevVisibleCount.current;
+    const curr = visibleLinks.length;
+    const indices = new Set();
+    if (curr > prev && playing) {
+      for (let i = prev; i < curr; i++) indices.add(i);
+    }
+    prevVisibleCount.current = curr;
+    return indices;
+  }, [visibleLinks.length, playing]);
+
+  // Count links per node for sizing.
+  const nodeLinkCount = useMemo(() => {
+    const counts = {};
+    visibleLinks.forEach(l => {
+      counts[l.source] = (counts[l.source] || 0) + 1;
+      counts[l.target] = (counts[l.target] || 0) + 1;
+    });
+    return counts;
+  }, [visibleLinks]);
+
+  // Unique workspaces from node data for filter chips.
+  const workspaces = useMemo(() => {
+    const ws = new Set();
+    Object.values(nodeData).forEach(n => { if (n.workspace) ws.add(n.workspace); });
+    return [...ws].sort();
+  }, [nodeData]);
+
+  // Filter nodes by search query and workspace.
+  const filteredNodeIds = useMemo(() => {
+    const all = Object.keys(nodeData);
+    const q = graphQuery.toLowerCase();
+    return all.filter(id => {
+      const n = nodeData[id];
+      // Workspace filter.
+      if (wsFilter && (!n.workspace || n.workspace !== wsFilter)) return false;
+      // Text search: match against ID, title, workspace.
+      if (q) {
+        const haystack = [id, n.title || '', n.workspace || ''].join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [nodeData, graphQuery, wsFilter]);
+
+  // Only show links where both endpoints are visible.
+  const filteredNodeSet = useMemo(() => new Set(filteredNodeIds), [filteredNodeIds]);
+
+  if (loading) return html`<div class="loading">loading graph...</div>`;
+
+  const allNodeIds = Object.keys(nodeData);
+  if (allNodeIds.length === 0) return html`<div class="empty">no inter-session links found</div>`;
+
+  // Layout uses only filtered nodes.
+  const cx = 400, cy = 260, radius = 190;
   const nodePos = {};
-  nodes.forEach((n, i) => {
-    const angle = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
+  filteredNodeIds.forEach((n, i) => {
+    const angle = (2 * Math.PI * i) / filteredNodeIds.length - Math.PI / 2;
     nodePos[n] = { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) };
   });
 
+  // Node label: short ID + project.
   function nodeLabel(id) {
-    const lb = labels[id];
-    if (lb && lb.workspace) return id + ' ' + shortProject(lb.workspace);
-    return id;
+    const n = nodeData[id];
+    if (n && n.workspace) return id.slice(0, 8) + ' ' + shortProject(n.workspace);
+    return id.slice(0, 8);
   }
+
+  // Node sub-info: tool_calls + last activity.
+  function nodeInfo(id) {
+    const n = nodeData[id];
+    if (!n) return '';
+    const parts = [];
+    if (n.tool_calls) parts.push(n.tool_calls + ' tools');
+    if (n.turns) parts.push(n.turns + ' turns');
+    if (n.started_at) {
+      // started_at may be unix seconds (number) or RFC3339 string.
+      const ts = typeof n.started_at === 'number' ? new Date(n.started_at * 1000).toISOString() : n.started_at;
+      parts.push(relTime(ts));
+    }
+    return parts.join(' · ');
+  }
+
+  function isActive(id) {
+    const n = nodeData[id];
+    if (!n) return false;
+    return !!n.is_active;
+  }
+
+  // Node box size scales with link count.
+  function nodeWidth(id) {
+    const label = nodeLabel(id);
+    const base = Math.max(90, label.length * 7 + 16);
+    const links = nodeLinkCount[id] || 0;
+    return base + Math.min(links * 4, 40);
+  }
+  function nodeHeight(id) {
+    const info = nodeInfo(id);
+    return info ? 40 : 28;
+  }
+
+  function onNodeEnter(id, e) {
+    const n = nodeData[id];
+    if (!n) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTooltip({
+      id,
+      x: e.clientX - rect.left + 12,
+      y: e.clientY - rect.top - 8,
+    });
+  }
+  function onNodeLeave() { setTooltip(null); }
+
+  function renderTooltip() {
+    if (!tooltip) return null;
+    const n = nodeData[tooltip.id];
+    if (!n) return null;
+    const tok = (n.tokens || 0);
+    const startTs = n.started_at
+      ? (typeof n.started_at === 'number' ? new Date(n.started_at * 1000).toISOString() : n.started_at)
+      : null;
+    return html`
+      <div class="graph-tooltip visible"
+        style="left:${tooltip.x}px;top:${tooltip.y}px">
+        <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
+        ${n.workspace && html`<div class="graph-tooltip-stat">${shortProject(n.workspace)}</div>`}
+        <div class="graph-tooltip-stat">
+          ${[
+            n.tool_calls && n.tool_calls + ' tools',
+            n.turns && n.turns + ' turns',
+            tok >= 1000 && fmtNum(tok) + ' tok',
+          ].filter(Boolean).join(' · ') || 'no stats'}
+        </div>
+        ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
+        ${isActive(tooltip.id) && html`<div style="color:var(--green);margin-top:2px">active</div>`}
+      </div>
+    `;
+  }
+
+  // Format scrubber time display.
+  const scrubberLabel = new Date(cutoffTime).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
 
   const timePresets = [
     { label: '1h', value: '1h' }, { label: '24h', value: '24h' },
@@ -619,7 +897,9 @@ function GraphPanel() {
 
   return html`
     <div>
-      <div class="filters" style="margin-bottom:12px">
+      <div class="filters" style="margin-bottom:4px">
+        <input class="filter-input" placeholder="search graph..." value=${graphQuery}
+          onInput=${e => setGraphQuery(e.target.value)} style="width:180px" />
         <div class="filter-chips">
           ${timePresets.map(t => html`
             <button class="filter-chip ${since === t.value ? 'active' : ''}"
@@ -628,9 +908,23 @@ function GraphPanel() {
         </div>
         <button class="btn btn-sm" onClick=${load}>refresh</button>
       </div>
-      <div class="graph-container" onWheel=${onWheel}>
+      ${workspaces.length > 1 && html`
+        <div class="filters" style="margin-bottom:8px">
+          <span style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">workspace</span>
+          <div class="filter-chips">
+            <button class="filter-chip ${wsFilter === '' ? 'active' : ''}"
+              onClick=${() => setWsFilter('')}>all</button>
+            ${workspaces.map(ws => html`
+              <button class="filter-chip ${wsFilter === ws ? 'active' : ''}"
+                onClick=${() => setWsFilter(wsFilter === ws ? '' : ws)}
+                title=${ws}>${shortProject(ws)}</button>
+            `)}
+          </div>
+        </div>
+      `}
+      <div class="graph-container" onWheel=${onWheel} ref=${containerRef} style="position:relative">
         <div class="graph-inner" style="transform:scale(${zoom})">
-          <svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+          <svg viewBox="0 0 800 540" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <marker id="arrowMsg" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
                 <path d="M0,0 L8,3 L0,6" fill="var(--accent)" />
@@ -639,39 +933,66 @@ function GraphPanel() {
                 <path d="M0,0 L8,3 L0,6" fill="var(--faint)" />
               </marker>
             </defs>
-            ${links.map((l, i) => {
-              const src = l.source_session ? l.source_session.slice(0, 8) : '?';
-              const dst = l.target_session.slice(0, 8);
+            ${visibleLinks.map((l, i) => {
+              const src = l.source || '?';
+              const dst = l.target || '?';
               const p1 = nodePos[src] || { x: cx, y: cy };
               const p2 = nodePos[dst] || { x: cx, y: cy };
-              const cls = l.kind === 'observation' ? 'graph-edge-obs' : 'graph-edge-msg';
-              // Quadratic bezier for curved edges.
+              const isObs = l.kind === 'observation';
+              const cls = (isObs ? 'graph-edge-obs' : 'graph-edge-msg') + (newLinkIndices.has(i) ? ' graph-edge-new' : '');
               const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
               const dx = p2.x - p1.x, dy = p2.y - p1.y;
               const len = Math.max(Math.sqrt(dx*dx + dy*dy), 1);
               const cpx = mx - dy * 30 / len, cpy = my + dx * 30 / len;
-              return html`<path key=${i} d="M${p1.x},${p1.y} Q${cpx},${cpy} ${p2.x},${p2.y}" class=${cls} />`;
-            })}
-            ${nodes.map(n => {
-              const p = nodePos[n];
-              const label = nodeLabel(n);
-              const w = Math.max(80, label.length * 7 + 16);
+              const pathId = 'lp' + i;
               return html`
-                <g class="graph-node" transform="translate(${p.x - w/2},${p.y - 14})" key=${n}>
-                  <rect width=${w} height="28" />
-                  <text x=${w/2} y="18" text-anchor="middle">${label}</text>
+                <g key=${i}>
+                  <path id=${pathId} d="M${p1.x},${p1.y} Q${cpx},${cpy} ${p2.x},${p2.y}" class=${cls} />
+                  ${newLinkIndices.has(i) && html`
+                    <circle r="3" fill=${isObs ? 'var(--faint)' : 'var(--accent)'}>
+                      <animateMotion dur="0.8s" fill="freeze" begin="0s">
+                        <mpath href=${'#' + pathId} />
+                      </animateMotion>
+                    </circle>
+                  `}
+                </g>
+              `;
+            })}
+            ${filteredNodeIds.map(n => {
+              const p = nodePos[n];
+              if (!p) return null;
+              const w = nodeWidth(n);
+              const h = nodeHeight(n);
+              const label = nodeLabel(n);
+              const info = nodeInfo(n);
+              const active = isActive(n);
+              return html`
+                <g class="graph-node ${active ? 'active' : ''}" transform="translate(${p.x - w/2},${p.y - h/2})" key=${n}
+                  onMouseEnter=${(e) => onNodeEnter(n, e)} onMouseLeave=${onNodeLeave}>
+                  <rect width=${w} height=${h} />
+                  ${active && html`<rect class="node-dot" x="2" y=${h/2 - 3} width="3" height="6" rx="1" />`}
+                  <text x=${w/2} y=${info ? 14 : 18} text-anchor="middle">${label}</text>
+                  ${info && html`<text class="node-info" x=${w/2} y="28" text-anchor="middle">${info}</text>`}
                 </g>
               `;
             })}
           </svg>
         </div>
+        ${renderTooltip()}
         <div class="graph-zoom">
           <button onClick=${() => setZoom(z => Math.min(3, z + 0.2))}>+</button>
           <button onClick=${() => setZoom(1)}>1:1</button>
           <button onClick=${() => setZoom(z => Math.max(0.3, z - 0.2))}>-</button>
         </div>
       </div>
-      <div class="result-count">${nodes.length} nodes, ${links.length} links</div>
+      <div class="graph-scrubber">
+        <button class="graph-play-btn ${playing ? 'active' : ''}"
+          onClick=${() => setPlaying(p => !p)}>${playing ? '||' : '>'}</button>
+        <input type="range" min="0" max="1000" value=${Math.round(scrubberPos * 1000)}
+          onInput=${e => { setScrubberPos(parseInt(e.target.value) / 1000); setPlaying(false); }} />
+        <span class="graph-scrubber-time">${scrubberLabel}</span>
+      </div>
+      <div class="result-count">${filteredNodeIds.length}${filteredNodeIds.length !== allNodeIds.length ? '/' + allNodeIds.length : ''} nodes, ${visibleLinks.length}/${allLinks.length} links</div>
     </div>
   `;
 }
