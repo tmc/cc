@@ -280,6 +280,32 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		whereClause = "WHERE " + strings.Join(where, " AND ")
 	}
 
+	// Resolve effective sort mode.
+	sort := req.Sort
+	if sort == "" {
+		if req.Query != "" {
+			sort = cass.SortRelevance
+		} else {
+			sort = cass.SortRecent
+		}
+	}
+
+	var orderClause string
+	switch sort {
+	case cass.SortRelevance:
+		if req.Query != "" {
+			orderClause = "ORDER BY score"
+		} else {
+			orderClause = "ORDER BY s.ended_at DESC"
+		}
+	case cass.SortStarted:
+		orderClause = "ORDER BY s.started_at DESC"
+	case cass.SortOldest:
+		orderClause = "ORDER BY s.started_at ASC"
+	default: // SortRecent
+		orderClause = "ORDER BY s.ended_at DESC"
+	}
+
 	// Build query with BM25 ranking when doing FTS.
 	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits`
 	var query string
@@ -290,18 +316,18 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 			FROM session_fts
 			JOIN sessions s ON s.rowid = session_fts.rowid
 			%s
-			ORDER BY score
+			%s
 			LIMIT ? OFFSET ?
-		`, statsCols, whereClause)
+		`, statsCols, whereClause, orderClause)
 	} else {
 		query = fmt.Sprintf(`
 			SELECT s.id, s.agent, s.title, substr(s.content, 1, 200) as snip,
 				0.0 as score, s.workspace, s.source_path, s.started_at%s
 			FROM sessions s
 			%s
-			ORDER BY s.started_at DESC
+			%s
 			LIMIT ? OFFSET ?
-		`, statsCols, whereClause)
+		`, statsCols, whereClause, orderClause)
 	}
 	args = append(args, req.Limit, req.Offset)
 

@@ -38,6 +38,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			req.Offset = n
 		}
 	}
+	if v := q.Get("sort"); v != "" {
+		req.Sort = cass.SortMode(v)
+	}
 	if v := q.Get("since"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			req.Filters.After = time.Now().Add(-d)

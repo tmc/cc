@@ -307,6 +307,41 @@ body {
 
 .filter-input::placeholder { color: var(--fg-placeholder); }
 
+/* ===== SORT PILLS ===== */
+
+.sort-group {
+  display: inline-flex;
+  gap: 1px;
+  background: var(--border-primary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-left: var(--space-2);
+}
+
+.sort-pill {
+  padding: var(--space-1) var(--space-3);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  background: var(--bg-surface);
+  color: var(--fg-tertiary);
+  border: none;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease);
+  white-space: nowrap;
+}
+
+.sort-pill:hover {
+  background: var(--bg-hover);
+  color: var(--fg-secondary);
+}
+
+.sort-pill.active {
+  background: var(--accent-light);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
 /* ===== RESULTS ===== */
 
 .results { list-style: none; }
@@ -421,6 +456,31 @@ body {
   font-size: 11px;
   font-weight: 500;
 }
+
+/* Smooth entry animation — no flash, gentle fade+slide */
+.results { position: relative; }
+.hit {
+  animation: hitEnter 0.3s var(--ease) both;
+}
+
+@keyframes hitEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Stagger animation for sequential results */
+.results .hit:nth-child(1) { animation-delay: 0ms; }
+.results .hit:nth-child(2) { animation-delay: 30ms; }
+.results .hit:nth-child(3) { animation-delay: 60ms; }
+.results .hit:nth-child(4) { animation-delay: 90ms; }
+.results .hit:nth-child(5) { animation-delay: 120ms; }
+.results .hit:nth-child(n+6) { animation-delay: 150ms; }
 
 .result-count {
   text-align: center;

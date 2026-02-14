@@ -73,10 +73,21 @@ const (
 	SearchHybrid                     // Reserved for combined search.
 )
 
+// SortMode controls result ordering.
+type SortMode string
+
+const (
+	SortRecent    SortMode = "recent"    // ended_at DESC (most recently active).
+	SortRelevance SortMode = "relevance" // BM25 rank (only meaningful with a query).
+	SortStarted   SortMode = "started"   // started_at DESC.
+	SortOldest    SortMode = "oldest"    // started_at ASC.
+)
+
 // SearchRequest encapsulates query parameters.
 type SearchRequest struct {
 	Query   string
 	Mode    SearchMode
+	Sort    SortMode
 	Filters Filters
 	Limit   int
 	Offset  int

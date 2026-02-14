@@ -143,6 +143,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 	since := fs.Duration("since", 0, "sessions within duration (e.g. 12h, 24h, 168h)")
 	after := fs.String("after", "", "sessions after date (RFC3339 or YYYY-MM-DD)")
 	before := fs.String("before", "", "sessions before date (RFC3339 or YYYY-MM-DD)")
+	sort := fs.String("sort", "", "sort order: recent, relevance, started, oldest")
 	limit := fs.Int("n", 20, "max results")
 	fs.Parse(args)
 
@@ -163,6 +164,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 
 	req := cass.SearchRequest{
 		Query: query,
+		Sort:  cass.SortMode(*sort),
 		Limit: *limit,
 		Filters: cass.Filters{
 			Agent:     *agent,
