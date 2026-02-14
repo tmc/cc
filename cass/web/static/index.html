@@ -129,6 +129,7 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [updateCount, setUpdateCount] = useState(0);
   const searchRef = useRef(null);
   const toastId = useRef(0);
 
@@ -137,6 +138,7 @@ function App() {
     const p = params || {};
     setUrlParams(p);
     pushURL(t, p);
+    setUpdateCount(0);
   }
 
   function updateParams(params) {
@@ -160,6 +162,7 @@ function App() {
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
     es.addEventListener('session_change', () => {
+      setUpdateCount(c => c + 1);
       window.dispatchEvent(new CustomEvent('cass:refresh'));
     });
     es.addEventListener('index_complete', (e) => {
@@ -204,7 +207,7 @@ function App() {
   return html`
     <div class="app">
       <div class="header">
-        <h1>cass <span>session search</span></h1>
+        <h1>cass <span>session search</span>${updateCount > 0 ? html`<span class="update-counter"> · ${updateCount} update${updateCount !== 1 ? 's' : ''}</span>` : null}</h1>
         <div class="live-badge">
           <div class="live-dot ${connected ? 'connected' : ''}"></div>
           ${connected ? 'live' : 'disconnected'}
@@ -806,10 +809,8 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
   }, [since]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => {
-    window.addEventListener('cass:refresh', load);
-    return () => window.removeEventListener('cass:refresh', load);
-  }, [load]);
+  // Graph does NOT auto-refresh on SSE — layout is expensive and causes visual jumps.
+  // Use the refresh button instead.
 
   // Playback timer.
   useEffect(() => {
