@@ -15,7 +15,9 @@ func TestWorkspaceFromPath(t *testing.T) {
 		{
 			name: "standard absolute path",
 			path: "/home/user/.claude/projects/-Volumes-tmc-go-src-github-com-tmc-cc/abc123.jsonl",
-			want: "/Volumes/tmc/go/src/github/com/tmc/cc",
+			// decodePath checks filesystem: /Volumes/tmc/go/src/github.com exists
+			// so "github-com" resolves to "github.com" not "github/com".
+			want: "/Volumes/tmc/go/src/github.com/tmc/cc",
 		},
 		{
 			name: "home directory path",

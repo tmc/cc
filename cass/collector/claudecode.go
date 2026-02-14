@@ -201,6 +201,12 @@ func titleFromSummary(s cc.SessionSummary) string {
 
 // workspaceFromPath extracts the original workspace path from the encoded
 // Claude Code project directory name (e.g. "-Volumes-tmc-go-src-..." -> "/Volumes/tmc/go/src/...").
+//
+// Claude Code encodes paths by replacing "/" with "-". This is ambiguous when
+// directory names contain literal dashes (e.g. "chrome-to-har"). We resolve
+// the ambiguity by checking the filesystem: at each dash, we try treating it
+// as a path separator first (most dashes are separators); if that directory
+// exists we commit to it, otherwise we keep the dash as literal and continue.
 func workspaceFromPath(sessionPath string) string {
 	// Session files live under ~/.claude/projects/<encoded-path>/...
 	dir := filepath.Dir(sessionPath)
@@ -218,9 +224,55 @@ func workspaceFromPath(sessionPath string) string {
 	if encoded == "" || encoded == "." {
 		return ""
 	}
-	// Decode: leading dash means root /, internal dashes are path separators.
+	return decodePath(encoded)
+}
+
+// decodePath reconstructs the original filesystem path from an encoded
+// Claude Code project directory name. Claude Code encodes paths by
+// replacing both "/" and "." with "-", so each dash is ambiguous.
+// We resolve by checking the filesystem, using backtracking to handle
+// multi-dash directory names like "chrome-to-har" and dotted names
+// like "github.com".
+func decodePath(encoded string) string {
+	var prefix string
 	if strings.HasPrefix(encoded, "-") {
-		return "/" + strings.ReplaceAll(encoded[1:], "-", "/")
+		prefix = "/"
+		encoded = encoded[1:]
 	}
-	return strings.ReplaceAll(encoded, "-", "/")
+
+	segments := strings.Split(encoded, "-")
+	if len(segments) == 0 {
+		return prefix
+	}
+
+	if result, ok := decodeSegments(prefix+segments[0], segments[1:]); ok {
+		return result
+	}
+	// Fallback: simple "/" replacement.
+	return prefix + strings.Join(segments, "/")
+}
+
+// decodeSegments tries all possible decodings of dash-separated segments
+// by checking the filesystem. Returns the decoded path and whether it
+// (or a prefix of it) exists on disk.
+func decodeSegments(current string, remaining []string) (string, bool) {
+	if len(remaining) == 0 {
+		_, err := os.Stat(current)
+		return current, err == nil
+	}
+
+	seg := remaining[0]
+	rest := remaining[1:]
+
+	// Try "/" (path separator), "." (dot in name), "-" (literal dash).
+	// For each, recurse and return the first result that resolves to
+	// a real path.
+	for _, sep := range []string{"/", ".", "-"} {
+		candidate := current + sep + seg
+		if result, ok := decodeSegments(candidate, rest); ok {
+			return result, true
+		}
+	}
+
+	return "", false
 }
