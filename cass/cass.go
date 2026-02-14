@@ -15,6 +15,7 @@ type Session struct {
 	StartedAt  time.Time      `json:"started_at"`
 	EndedAt    time.Time      `json:"ended_at"`
 	Messages   []Message      `json:"messages"`
+	Stats      SessionStats   `json:"stats"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
@@ -105,6 +106,18 @@ type Hit struct {
 	Workspace  string  `json:"workspace,omitempty"`
 	SourcePath string  `json:"source_path,omitempty"`
 	StartedAt  string  `json:"started_at,omitempty"`
+
+	// Stats summary (populated when available).
+	ToolCalls    int `json:"tool_calls,omitempty"`
+	Turns        int `json:"turns,omitempty"`
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
+	FilesEdited  int `json:"files_edited,omitempty"`
+	LinesWritten int `json:"lines_written,omitempty"`
+	DurationSecs int `json:"duration_secs,omitempty"`
+	IT2Sends     int `json:"it2_sends,omitempty"`
+	IT2Screens   int `json:"it2_screens,omitempty"`
+	IT2Splits    int `json:"it2_splits,omitempty"`
 }
 
 // SessionLink represents an interaction between two iTerm2 sessions.
@@ -118,6 +131,43 @@ type SessionLink struct {
 	Action        string `json:"action"`          // "send-text", "send-key", "get-screen", or "get-buffer".
 	Text          string `json:"text,omitempty"`  // Content (for send-text/send-key).
 	Timestamp     string `json:"timestamp,omitempty"`
+}
+
+// SessionStats holds extracted metrics for a session.
+type SessionStats struct {
+	// Tool usage.
+	ToolCalls    int            `json:"tool_calls"`
+	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"` // Tool name -> count.
+
+	// Token usage.
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	CacheReads   int `json:"cache_reads"`
+
+	// Code metrics.
+	FilesRead    int `json:"files_read"`
+	FilesWritten int `json:"files_written"`
+	FilesEdited  int `json:"files_edited"`
+	LinesWritten int `json:"lines_written"` // Approximate lines from Write/Edit.
+
+	// Session metrics.
+	Turns          int `json:"turns"`            // User message count.
+	DurationSecs   int `json:"duration_secs"`
+	SubagentSpawns int `json:"subagent_spawns"`
+
+	// it2 interactions.
+	IT2Splits  int `json:"it2_splits"`
+	IT2Sends   int `json:"it2_sends"`   // send-text + send-key.
+	IT2Screens int `json:"it2_screens"` // get-screen.
+	IT2Buffers int `json:"it2_buffers"` // get-buffer.
+	IT2Badges  int `json:"it2_badges"`  // set-badge.
+	IT2Watches int `json:"it2_watches"` // watch.
+
+	// Team interactions (claude teams infrastructure).
+	TeamInboxReads  int `json:"team_inbox_reads"`  // Inbox message reads.
+	TeamInboxSends  int `json:"team_inbox_sends"`  // Inbox message sends.
+	TeamTaskOps     int `json:"team_task_ops"`      // Task create/update/list.
+	TeamSpawns      int `json:"team_spawns"`        // Agent spawns via ccspawn.
 }
 
 // DeleteFilter specifies which sessions to remove.

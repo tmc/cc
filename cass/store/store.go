@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -47,7 +48,26 @@ func (s *Store) migrate() error {
 			started_at INTEGER NOT NULL DEFAULT 0,
 			ended_at INTEGER NOT NULL DEFAULT 0,
 			content TEXT NOT NULL DEFAULT '',
-			indexed_at INTEGER NOT NULL DEFAULT 0
+			indexed_at INTEGER NOT NULL DEFAULT 0,
+			tool_calls INTEGER NOT NULL DEFAULT 0,
+			input_tokens INTEGER NOT NULL DEFAULT 0,
+			output_tokens INTEGER NOT NULL DEFAULT 0,
+			files_read INTEGER NOT NULL DEFAULT 0,
+			files_written INTEGER NOT NULL DEFAULT 0,
+			files_edited INTEGER NOT NULL DEFAULT 0,
+			lines_written INTEGER NOT NULL DEFAULT 0,
+			turns INTEGER NOT NULL DEFAULT 0,
+			duration_secs INTEGER NOT NULL DEFAULT 0,
+			subagent_spawns INTEGER NOT NULL DEFAULT 0,
+			it2_splits INTEGER NOT NULL DEFAULT 0,
+			it2_sends INTEGER NOT NULL DEFAULT 0,
+			it2_screens INTEGER NOT NULL DEFAULT 0,
+			it2_buffers INTEGER NOT NULL DEFAULT 0,
+			team_inbox_reads INTEGER NOT NULL DEFAULT 0,
+			team_inbox_sends INTEGER NOT NULL DEFAULT 0,
+			team_task_ops INTEGER NOT NULL DEFAULT 0,
+			team_spawns INTEGER NOT NULL DEFAULT 0,
+			stats_json TEXT NOT NULL DEFAULT '{}'
 		);
 
 		CREATE TABLE IF NOT EXISTS session_links (
@@ -117,8 +137,11 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 	defer tx.Rollback()
 
 	sessStmt, err := tx.PrepareContext(ctx, `
-		INSERT OR REPLACE INTO sessions (id, agent, title, workspace, source_path, started_at, ended_at, content, indexed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT OR REPLACE INTO sessions (id, agent, title, workspace, source_path, started_at, ended_at, content, indexed_at,
+			tool_calls, input_tokens, output_tokens, files_read, files_written, files_edited, lines_written,
+			turns, duration_secs, subagent_spawns, it2_splits, it2_sends, it2_screens, it2_buffers,
+			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns, stats_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare sessions: %w", err)
@@ -137,6 +160,7 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 	now := time.Now().Unix()
 	for _, sess := range sessions {
 		content := buildContent(sess)
+		statsJSON, _ := json.Marshal(sess.Stats)
 		_, err := sessStmt.ExecContext(ctx,
 			sess.ID,
 			sess.Agent,
@@ -147,6 +171,25 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			sess.EndedAt.Unix(),
 			content,
 			now,
+			sess.Stats.ToolCalls,
+			sess.Stats.InputTokens,
+			sess.Stats.OutputTokens,
+			sess.Stats.FilesRead,
+			sess.Stats.FilesWritten,
+			sess.Stats.FilesEdited,
+			sess.Stats.LinesWritten,
+			sess.Stats.Turns,
+			sess.Stats.DurationSecs,
+			sess.Stats.SubagentSpawns,
+			sess.Stats.IT2Splits,
+			sess.Stats.IT2Sends,
+			sess.Stats.IT2Screens,
+			sess.Stats.IT2Buffers,
+			sess.Stats.TeamInboxReads,
+			sess.Stats.TeamInboxSends,
+			sess.Stats.TeamTaskOps,
+			sess.Stats.TeamSpawns,
+			string(statsJSON),
 		)
 		if err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
@@ -222,26 +265,27 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	}
 
 	// Build query with BM25 ranking when doing FTS.
+	statsCols := `, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.it2_sends, s.it2_screens, s.it2_splits`
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
 			SELECT s.id, s.agent, s.title, snippet(session_fts, 1, '>>>', '<<<', '...', 40) as snip,
-				bm25(session_fts, 5.0, 1.0, 2.0) as score, s.workspace, s.source_path, s.started_at
+				bm25(session_fts, 5.0, 1.0, 2.0) as score, s.workspace, s.source_path, s.started_at%s
 			FROM session_fts
 			JOIN sessions s ON s.rowid = session_fts.rowid
 			%s
 			ORDER BY score
 			LIMIT ? OFFSET ?
-		`, whereClause)
+		`, statsCols, whereClause)
 	} else {
 		query = fmt.Sprintf(`
 			SELECT s.id, s.agent, s.title, substr(s.content, 1, 200) as snip,
-				0.0 as score, s.workspace, s.source_path, s.started_at
+				0.0 as score, s.workspace, s.source_path, s.started_at%s
 			FROM sessions s
 			%s
 			ORDER BY s.started_at DESC
 			LIMIT ? OFFSET ?
-		`, whereClause)
+		`, statsCols, whereClause)
 	}
 	args = append(args, req.Limit, req.Offset)
 
@@ -255,7 +299,9 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	for rows.Next() {
 		var h cass.Hit
 		var startedUnix int64
-		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix); err != nil {
+		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
+			&h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
+			&h.IT2Sends, &h.IT2Screens, &h.IT2Splits); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		if startedUnix > 0 {
@@ -419,6 +465,51 @@ func (s *Store) Links(ctx context.Context, sessionID string) ([]cass.SessionLink
 		links = append(links, l)
 	}
 	return links, rows.Err()
+}
+
+// SessionLabel returns a short label for a session identified by iTerm2 session ID prefix.
+type SessionLabel struct {
+	ItermSession string `json:"iterm_session"`
+	Workspace    string `json:"workspace"`
+	Title        string `json:"title"`
+}
+
+// ResolveLabels looks up human-readable labels for a set of iTerm2 session ID prefixes.
+func (s *Store) ResolveLabels(ctx context.Context, prefixes []string) (map[string]SessionLabel, error) {
+	if len(prefixes) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]SessionLabel, len(prefixes))
+
+	// Build a query that matches prefixes.
+	var where []string
+	var args []any
+	for _, p := range prefixes {
+		where = append(where, "iterm_session LIKE ?")
+		args = append(args, p+"%")
+	}
+	query := fmt.Sprintf(`SELECT iterm_session, workspace, title FROM session_mapping WHERE %s`, strings.Join(where, " OR "))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var l SessionLabel
+		if err := rows.Scan(&l.ItermSession, &l.Workspace, &l.Title); err != nil {
+			return nil, err
+		}
+		// Store by the prefix that matched.
+		for _, p := range prefixes {
+			if strings.HasPrefix(l.ItermSession, p) {
+				result[p] = l
+				break
+			}
+		}
+	}
+	return result, rows.Err()
 }
 
 // buildContent concatenates all message content for full-text indexing.

@@ -130,8 +130,9 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 	// Generate a stable ID from source path.
 	id := sessionID(path)
 
-	// Extract inter-session communication links.
+	// Extract inter-session communication links and stats.
 	links := ExtractLinks(entries)
+	stats := ExtractStats(entries)
 
 	// Build metadata.
 	meta := map[string]any{}
@@ -163,6 +164,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 		StartedAt:  sum.FirstTime,
 		EndedAt:    sum.LastTime,
 		Messages:   messages,
+		Stats:      stats,
 		Metadata:   meta,
 	}, nil
 }
@@ -184,6 +186,9 @@ func sessionID(path string) string {
 }
 
 func titleFromSummary(s cc.SessionSummary) string {
+	if s.CustomTitle != "" {
+		return s.CustomTitle
+	}
 	if s.FirstPrompt != "" {
 		t := s.FirstPrompt
 		if len(t) > 80 {

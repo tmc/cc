@@ -193,6 +193,11 @@ func (s *Service) Mappings(ctx context.Context, filter string) ([]store.SessionM
 	return s.store.Mappings(ctx, filter)
 }
 
+// ResolveLabels looks up human-readable labels for iTerm2 session ID prefixes.
+func (s *Service) ResolveLabels(ctx context.Context, prefixes []string) (map[string]store.SessionLabel, error) {
+	return s.store.ResolveLabels(ctx, prefixes)
+}
+
 // Close releases resources.
 func (s *Service) Close() error {
 	return s.store.Close()
