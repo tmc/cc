@@ -270,19 +270,30 @@ func ExtractTeamLinks(entries []cc.Entry) []cass.SessionLink {
 				}
 			}
 		case "user":
-			// Incoming teammate messages.
+			// Incoming teammate messages — extract summary for display.
 			text := e.Message.TextContent()
-			matches := teammateMessagePattern.FindAllStringSubmatch(text, -1)
-			for _, m := range matches {
+			summaryByID := map[string]string{}
+			for _, m := range teammateSummaryPattern.FindAllStringSubmatch(text, -1) {
+				summaryByID[m[1]] = m[2]
+			}
+			for _, m := range teammateMessagePattern.FindAllStringSubmatch(text, -1) {
 				from := m[1]
 				key := "team-message:" + from + ":" + sender
 				if !seen[key] {
 					seen[key] = true
+					linkText := summaryByID[from]
+					if linkText == "" {
+						linkText = "[from " + from + "]"
+					}
+					if len(linkText) > 200 {
+						linkText = linkText[:200] + "..."
+					}
 					links = append(links, cass.SessionLink{
 						SourceSession: from,
 						TargetSession: sender,
 						Kind:          "team",
 						Action:        "team-message",
+						Text:          linkText,
 						TeamName:      teamName,
 						Timestamp:     ts,
 					})

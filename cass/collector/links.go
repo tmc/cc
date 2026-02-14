@@ -102,7 +102,7 @@ func findLinks(text string, e cc.Entry, seen map[string]bool) []cass.SessionLink
 				Action:        pat.action,
 			}
 			if !e.Timestamp.IsZero() {
-				link.Timestamp = e.Timestamp.Format("2006-01-02T15:04:05Z07:00")
+				link.Timestamp = e.Timestamp.Format(tsFormat)
 			}
 			// send-text and send-key have message content in capture group 2.
 			if pat.kind == "message" && len(m) > 2 {
