@@ -40,8 +40,15 @@ var teamPatterns = []struct {
 	{regexp.MustCompile(`cctl\s+spawn`), "spawns"},
 }
 
+// tsFormat is the timestamp format used for link timestamps.
+const tsFormat = "2006-01-02T15:04:05Z07:00"
+
 // teammateMessagePattern matches <teammate-message> XML tags in user message content.
-var teammateMessagePattern = regexp.MustCompile(`<teammate-message\s+teammate_id="([^"]*)"`)
+// Requires a non-empty teammate_id.
+var teammateMessagePattern = regexp.MustCompile(`<teammate-message\s+teammate_id="([^"]+)"`)
+
+// teammateSummaryPattern extracts the summary attribute from teammate-message tags.
+var teammateSummaryPattern = regexp.MustCompile(`<teammate-message\s+teammate_id="([^"]+)"[^>]*\bsummary="([^"]*)"`)
 
 // ExtractStats computes session metrics from entries.
 func ExtractStats(entries []cc.Entry) cass.SessionStats {
@@ -63,10 +70,12 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 		switch e.Message.Role {
 		case "user":
 			s.Turns++
-			// Count incoming teammate messages.
+			// Count incoming teammate messages (non-empty teammate_id only).
 			text := e.Message.TextContent()
-			if matches := teammateMessagePattern.FindAllStringSubmatch(text, -1); len(matches) > 0 {
-				s.TeamMessagesRecvd += len(matches)
+			for _, m := range teammateMessagePattern.FindAllStringSubmatch(text, -1) {
+				if m[1] != "" {
+					s.TeamMessagesRecvd++
+				}
 			}
 		case "assistant":
 			// Token usage.
@@ -208,7 +217,7 @@ func ExtractTeamLinks(entries []cc.Entry) []cass.SessionLink {
 
 		ts := ""
 		if !e.Timestamp.IsZero() {
-			ts = e.Timestamp.Format("2006-01-02T15:04:05Z07:00")
+			ts = e.Timestamp.Format(tsFormat)
 		}
 
 		switch e.Message.Role {
