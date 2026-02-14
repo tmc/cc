@@ -100,6 +100,13 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 					cmd := extractBashCommand(b.Input)
 					countIT2Commands(cmd, &s)
 					countTeamCommands(cmd, &s)
+				// Agent teams native tool names.
+				case "TeamCreate":
+					s.TeamSpawns++
+				case "SendMessage", "AgentMessage":
+					s.TeamInboxSends++
+				case "AgentTask":
+					s.TeamTaskOps++
 				}
 			}
 		}

@@ -38,6 +38,10 @@ type Entry struct {
 	IsVisibleInTranscriptOnly bool `json:"isVisibleInTranscriptOnly,omitempty"`
 	IsMeta                    bool `json:"isMeta,omitempty"`
 
+	// Agent teams fields.
+	TeamName  string `json:"teamName,omitempty"`
+	AgentName string `json:"agentName,omitempty"`
+
 	// Progress fields.
 	Content string          `json:"content,omitempty"`
 	Level   string          `json:"level,omitempty"`
