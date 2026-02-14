@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CASS — Coding Agent Session Search</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="app"></div>
@@ -20,7 +20,7 @@ ansiUp.use_classes = true;
 // --- API helpers ---
 
 async function api(path, opts) {
-  const r = await fetch('/api/' + path, opts);
+  const r = await fetch('api/' + path, opts);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -145,11 +145,17 @@ function App() {
     const p = params || {};
     setUrlParams(p);
     pushURL(t, p);
+    document.body.classList.toggle('graph-active', t === 'graph');
   }
 
   function updateParams(params) {
     pushURL(tab, params);
   }
+
+  // Sync body class for graph full-viewport mode.
+  useEffect(() => {
+    document.body.classList.toggle('graph-active', tab === 'graph');
+  }, [tab]);
 
   // Browser back/forward.
   useEffect(() => {
@@ -172,7 +178,7 @@ function App() {
 
   // SSE connection.
   useEffect(() => {
-    const es = new EventSource('/events');
+    const es = new EventSource('events');
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
     es.addEventListener('session_change', () => {
@@ -600,7 +606,7 @@ function SessionDetailPanel({ hit, onClose }) {
 
     const controller = new AbortController();
 
-    fetch('/api/session/' + hit.session_id, {
+    fetch('api/session/' + hit.session_id, {
       headers: { 'Accept': 'text/event-stream' },
       signal: controller.signal,
     }).then(res => {
@@ -876,6 +882,9 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
   const [since, setSinceRaw] = useState(urlParams.since || '24h');
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef(null);
   const [graphQuery, setGraphQueryRaw] = useState(urlParams.q || '');
   const [wsFilter, setWsFilterRaw] = useState(urlParams.ws || '');
 
@@ -997,7 +1006,41 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
 
   function onWheel(e) {
     e.preventDefault();
-    setZoom(z => Math.max(0.3, Math.min(3, z + (e.deltaY > 0 ? -0.1 : 0.1))));
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setZoom(z => {
+      const next = Math.max(0.3, Math.min(3, z + delta));
+      // Zoom toward cursor: adjust pan so the point under the cursor stays fixed.
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+        const frac = (next - z) / z;
+        setPanOffset(p => ({ x: p.x - cx * frac, y: p.y - cy * frac }));
+      }
+      return next;
+    });
+  }
+
+  function onPointerDown(e) {
+    // Only pan on primary button and not on interactive elements.
+    if (e.button !== 0) return;
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'BUTTON') return;
+    dragStart.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e) {
+    if (!dragStart.current || !dragging) return;
+    setPanOffset({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
+  }
+  function onPointerUp(e) {
+    dragStart.current = null;
+    setDragging(false);
+  }
+
+  function resetView() {
+    setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
   }
 
   // Unique workspaces from node data for filter chips.
@@ -1349,7 +1392,7 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
   ];
 
   return html`
-    <div>
+    <div class="graph-panel">
       <div class="filters" style="margin-bottom:4px">
         <input class="filter-input" placeholder="search graph..." value=${graphQuery}
           onInput=${e => setGraphQuery(e.target.value)} style="width:180px" />
@@ -1375,8 +1418,10 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
           </div>
         </div>
       `}
-      <div class="graph-container" onWheel=${onWheel} ref=${containerRef} style="position:relative">
-        <div class="graph-inner" style="transform:scale(${zoom})">
+      <div class="graph-container" onWheel=${onWheel} ref=${containerRef}
+        onPointerDown=${onPointerDown} onPointerMove=${onPointerMove} onPointerUp=${onPointerUp}
+        style=${"position:relative" + (dragging ? ";cursor:grabbing" : ";cursor:grab")}>
+        <div class="graph-inner" style="transform:translate(${panOffset.x}px,${panOffset.y}px) scale(${zoom});transform-origin:0 0">
           <svg viewBox="${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <marker id="arrowMsg" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
@@ -1502,9 +1547,9 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
         ${renderTooltip()}
         <div class="graph-zoom">
           <button onClick=${() => setZoom(z => Math.min(3, z + 0.2))}>+</button>
-          <button onClick=${() => setZoom(1)} title="Reset zoom">1:1</button>
+          <button onClick=${resetView} title="Reset zoom and pan">1:1</button>
           <button onClick=${() => setZoom(z => Math.max(0.3, z - 0.2))}>-</button>
-          <button onClick=${() => setZoom(1)} title="Fit all nodes" style="margin-left:2px;font-size:10px">fit</button>
+          <button onClick=${resetView} title="Fit all nodes" style="margin-left:2px;font-size:10px">fit</button>
         </div>
       </div>
       <div class="graph-scrubber">
@@ -1737,7 +1782,7 @@ function InboxViewer({ teamName, inboxes, members }) {
     if (!msgText.trim() || sending) return;
     setSending(true);
     try {
-      await fetch('/api/teams/' + encodeURIComponent(teamName) + '/inbox/' + encodeURIComponent(selectedAgent), {
+      await fetch('api/teams/' + encodeURIComponent(teamName) + '/inbox/' + encodeURIComponent(selectedAgent), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ from: 'web-ui', text: msgText.trim() }),

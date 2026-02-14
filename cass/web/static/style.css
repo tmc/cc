@@ -46,7 +46,14 @@ body {
   max-width: 960px;
   margin: 0 auto;
   padding: 16px 20px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
+
+.app { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+body.graph-active { max-width: 100%; padding-left: 12px; padding-right: 12px; }
+body.graph-active .tabs { margin-bottom: 8px; }
 
 /* header */
 .header {
@@ -559,9 +566,11 @@ mark.search-hl {
 .ws-count { color: var(--dim); width: 30px; text-align: right; flex-shrink: 0; }
 
 /* graph */
-.graph-container { border: 1px solid var(--border); overflow: hidden; position: relative; }
-.graph-inner { transition: transform 0.2s ease; transform-origin: center center; }
-.graph-container svg { width: 100%; min-height: 400px; }
+.graph-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.graph-container { border: 1px solid var(--border); overflow: hidden; position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; touch-action: none; user-select: none; }
+.graph-inner { transform-origin: 0 0; flex: 1; min-height: 0; display: flex; }
+.graph-container:not(:active) .graph-inner { transition: transform 0.15s ease; }
+.graph-container svg { width: 100%; flex: 1; min-height: 200px; }
 .graph-node rect { fill: var(--bg); stroke: var(--border); stroke-width: 1; rx: 2; }
 .graph-node text { font-family: var(--mono); font-size: 9px; fill: var(--fg); }
 .graph-node:hover rect { stroke: var(--accent); stroke-width: 2; z-index: 10; }
