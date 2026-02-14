@@ -17,6 +17,10 @@ type Session struct {
 	Messages   []Message      `json:"messages"`
 	Stats      SessionStats   `json:"stats"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
+
+	// Agent teams context.
+	TeamName  string `json:"team_name,omitempty"`
+	AgentName string `json:"agent_name,omitempty"`
 }
 
 // Message is a single message within a session.
@@ -97,6 +101,7 @@ type SearchRequest struct {
 type Filters struct {
 	Agent     string    // Filter by agent slug.
 	Workspace string    // Filter by workspace path.
+	Team      string    // Filter by agent team name.
 	After     time.Time // Sessions started after this time.
 	Before    time.Time // Sessions started before this time.
 }
@@ -134,6 +139,10 @@ type Hit struct {
 	IT2Splits    int `json:"it2_splits,omitempty"`
 
 	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"`
+
+	// Agent teams context.
+	TeamName  string `json:"team_name,omitempty"`
+	AgentName string `json:"agent_name,omitempty"`
 }
 
 // SessionLink represents an interaction between two iTerm2 sessions.

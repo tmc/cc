@@ -143,6 +143,8 @@ func (s *Store) migrate() error {
 	// Best-effort migrations for columns added after initial schema.
 	for _, col := range []string{
 		"ALTER TABLE sessions ADD COLUMN sparkline TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE sessions ADD COLUMN team_name TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE sessions ADD COLUMN agent_name TEXT NOT NULL DEFAULT ''",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -161,8 +163,9 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		INSERT OR REPLACE INTO sessions (id, agent, title, workspace, source_path, started_at, ended_at, content, indexed_at,
 			tool_calls, input_tokens, output_tokens, files_read, files_written, files_edited, lines_written,
 			turns, duration_secs, subagent_spawns, it2_splits, it2_sends, it2_screens, it2_buffers,
-			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns, sparkline, stats_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns, sparkline, stats_json,
+			team_name, agent_name)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare sessions: %w", err)
@@ -212,6 +215,8 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			sess.Stats.TeamSpawns,
 			sess.Stats.Sparkline,
 			string(statsJSON),
+			sess.TeamName,
+			sess.AgentName,
 		)
 		if err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
@@ -280,6 +285,10 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		where = append(where, "s.workspace LIKE ?")
 		args = append(args, "%"+req.Filters.Workspace+"%")
 	}
+	if req.Filters.Team != "" {
+		where = append(where, "s.team_name = ?")
+		args = append(args, req.Filters.Team)
+	}
 
 	whereClause := ""
 	if len(where) > 0 {
@@ -313,7 +322,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	}
 
 	// Build query with BM25 ranking when doing FTS.
-	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json`
+	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name`
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -350,7 +359,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		var statsJSON string
 		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
 			&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
-			&h.Sparkline, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON); err != nil {
+			&h.Sparkline, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		if startedUnix > 0 {

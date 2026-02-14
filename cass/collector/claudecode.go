@@ -155,6 +155,20 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 		meta["iterm_session"] = itermSID
 	}
 
+	// Extract agent teams context from entries.
+	var teamName, agentName string
+	for _, e := range entries {
+		if e.TeamName != "" && teamName == "" {
+			teamName = e.TeamName
+		}
+		if e.AgentName != "" && agentName == "" {
+			agentName = e.AgentName
+		}
+		if teamName != "" && agentName != "" {
+			break
+		}
+	}
+
 	return cass.Session{
 		ID:         id,
 		Agent:      "claude-code",
@@ -166,6 +180,8 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 		Messages:   messages,
 		Stats:      stats,
 		Metadata:   meta,
+		TeamName:   teamName,
+		AgentName:  agentName,
 	}, nil
 }
 

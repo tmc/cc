@@ -22,6 +22,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Filters: cass.Filters{
 			Agent:     q.Get("agent"),
 			Workspace: q.Get("workspace"),
+			Team:      q.Get("team"),
 		},
 	}
 
