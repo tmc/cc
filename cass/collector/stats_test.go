@@ -89,6 +89,30 @@ func TestClassifyTeamRole(t *testing.T) {
 			wantAgent: "researcher",
 			wantLead:  false,
 		},
+		{
+			name: "contradictory entries: early teamName without agentName then agentName appears",
+			entries: []cc.Entry{
+				// First entry has teamName but no agentName (looks like lead).
+				teamEntry(userEntry("starting up", ts), "work-team", ""),
+				// Later entry adds agentName (actually a member).
+				teamEntry(userEntry("doing work", ts.Add(time.Second)), "work-team", "researcher"),
+			},
+			wantTeam:  "work-team",
+			wantAgent: "researcher",
+			wantLead:  false,
+		},
+		{
+			name: "contradictory entries: lead with TeamCreate overrides agentName",
+			entries: []cc.Entry{
+				// Has agentName set (unusual for lead, but TeamCreate is definitive).
+				teamEntry(toolUseEntry("TeamCreate", map[string]any{
+					"team_name": "work-team",
+				}, ts), "work-team", "lead-agent"),
+			},
+			wantTeam:  "work-team",
+			wantAgent: "lead-agent",
+			wantLead:  true,
+		},
 	}
 
 	for _, tt := range tests {

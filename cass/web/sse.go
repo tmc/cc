@@ -102,25 +102,29 @@ func (b *SSEBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ReindexFunc is called by the file watcher to incrementally re-index changed files.
+type ReindexFunc func(ctx context.Context, paths []string) (int, error)
+
 // FileWatcher watches session files and publishes SSE events on changes.
-// It does not re-index on its own to avoid holding the SQLite write lock;
-// re-indexing should be triggered explicitly via POST /api/index.
+// When a ReindexFunc is set, it re-indexes changed files before publishing.
 type FileWatcher struct {
-	broker *SSEBroker
-	log    *slog.Logger
-	w      *fsnotify.Watcher
+	broker  *SSEBroker
+	log     *slog.Logger
+	w       *fsnotify.Watcher
+	reindex ReindexFunc
 }
 
 // NewFileWatcher creates a watcher for Claude Code session files.
-func NewFileWatcher(broker *SSEBroker, log *slog.Logger) (*FileWatcher, error) {
+func NewFileWatcher(broker *SSEBroker, log *slog.Logger, reindex ReindexFunc) (*FileWatcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("create watcher: %w", err)
 	}
 	return &FileWatcher{
-		broker: broker,
-		log:    log,
-		w:      w,
+		broker:  broker,
+		log:     log,
+		w:       w,
+		reindex: reindex,
 	}, nil
 }
 
@@ -189,20 +193,29 @@ func (fw *FileWatcher) processPending(ctx context.Context, files map[string]stru
 		return
 	}
 
-	// Publish the change event without re-indexing. The web server should
-	// avoid holding the SQLite write lock; re-indexing is done explicitly
-	// via POST /api/index or the CLI. The UI can re-query on this event.
 	var paths []string
 	for f := range files {
 		paths = append(paths, f)
 	}
-	fw.log.Info("session files changed", "count", len(paths))
+
+	// Incrementally re-index the changed files so the UI sees fresh data.
+	indexed := 0
+	if fw.reindex != nil {
+		n, err := fw.reindex(ctx, paths)
+		if err != nil {
+			fw.log.Warn("incremental reindex", "err", err)
+		} else {
+			indexed = n
+		}
+	}
+
+	fw.log.Info("session files changed", "count", len(paths), "indexed", indexed)
 
 	fw.broker.Publish(Event{
 		Type: "session_change",
 		Data: map[string]any{
 			"files_changed": len(paths),
-			"paths":         paths,
+			"indexed":       indexed,
 			"timestamp":     time.Now().Format(time.RFC3339),
 		},
 	})

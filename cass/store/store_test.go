@@ -182,6 +182,105 @@ func TestMetadata(t *testing.T) {
 	}
 }
 
+func TestTeamFieldsRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sessions := []cass.Session{
+		{
+			ID:         "team-lead-1",
+			Agent:      "claude-code",
+			Title:      "Team lead session",
+			TeamName:   "work-team",
+			IsTeamLead: true,
+			Messages:   []cass.Message{{Role: "user", Content: "start team"}},
+			Metadata: map[string]any{
+				"session_links": []cass.SessionLink{
+					{
+						SourceSession: "team-lead",
+						TargetSession: "researcher",
+						Kind:          "team",
+						Action:        "team-spawn",
+						TeamName:      "work-team",
+					},
+				},
+			},
+		},
+		{
+			ID:         "team-member-1",
+			Agent:      "claude-code",
+			Title:      "Member session",
+			TeamName:   "work-team",
+			AgentName:  "researcher",
+			IsTeamLead: false,
+			Messages:   []cass.Message{{Role: "user", Content: "do research"}},
+		},
+	}
+
+	if err := s.BatchIndex(ctx, sessions); err != nil {
+		t.Fatal(err)
+	}
+
+	// Search for the lead session.
+	result, err := s.Search(ctx, cass.SearchRequest{Query: "start team", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("got %d hits, want 1", len(result.Hits))
+	}
+	lead := result.Hits[0]
+	if !lead.IsTeamLead {
+		t.Error("IsTeamLead = false, want true")
+	}
+	if lead.TeamName != "work-team" {
+		t.Errorf("TeamName = %q, want %q", lead.TeamName, "work-team")
+	}
+
+	// Search for the member session.
+	result, err = s.Search(ctx, cass.SearchRequest{Query: "do research", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("got %d hits, want 1", len(result.Hits))
+	}
+	member := result.Hits[0]
+	if member.IsTeamLead {
+		t.Error("IsTeamLead = true for member, want false")
+	}
+	if member.AgentName != "researcher" {
+		t.Errorf("AgentName = %q, want %q", member.AgentName, "researcher")
+	}
+
+	// Verify team filter works.
+	result, err = s.Search(ctx, cass.SearchRequest{
+		Filters: cass.Filters{Team: "work-team"},
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalCount != 2 {
+		t.Errorf("team filter got %d results, want 2", result.TotalCount)
+	}
+
+	// Verify links round-trip with team_name.
+	links, err := s.Links(ctx, "team-lead-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != 1 {
+		t.Fatalf("got %d links, want 1", len(links))
+	}
+	if links[0].TeamName != "work-team" {
+		t.Errorf("link TeamName = %q, want %q", links[0].TeamName, "work-team")
+	}
+	if links[0].Action != "team-spawn" {
+		t.Errorf("link Action = %q, want %q", links[0].Action, "team-spawn")
+	}
+}
+
 func TestUpsert(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

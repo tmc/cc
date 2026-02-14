@@ -208,6 +208,38 @@ func (s *Service) Graph(ctx context.Context, since time.Time) (*cass.GraphData, 
 	return s.store.GraphData(ctx, since)
 }
 
+// IndexPaths re-indexes session files by their parent directories.
+// Used by the file watcher for incremental updates without a full scan.
+func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, error) {
+	// Deduplicate parent directories.
+	dirs := make(map[string]struct{})
+	for _, p := range filePaths {
+		dirs[filepath.Dir(p)] = struct{}{}
+	}
+	dirList := make([]string, 0, len(dirs))
+	for d := range dirs {
+		dirList = append(dirList, d)
+	}
+
+	c := &collector.ClaudeCode{}
+	ch := make(chan cass.Session, 64)
+	go func() {
+		_ = c.Scan(ctx, cass.ScanConfig{Paths: dirList}, ch)
+	}()
+
+	var batch []cass.Session
+	for sess := range ch {
+		batch = append(batch, sess)
+	}
+	if len(batch) == 0 {
+		return 0, nil
+	}
+	if err := s.store.BatchIndex(ctx, batch); err != nil {
+		return 0, fmt.Errorf("index paths: %w", err)
+	}
+	return len(batch), nil
+}
+
 // Close releases resources.
 func (s *Service) Close() error {
 	return s.store.Close()

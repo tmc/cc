@@ -95,7 +95,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	// Start file watcher.
-	watcher, err := NewFileWatcher(s.broker, s.log)
+	watcher, err := NewFileWatcher(s.broker, s.log, s.svc.IndexPaths)
 	if err != nil {
 		s.log.Warn("file watcher unavailable", "err", err)
 	} else {
