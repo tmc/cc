@@ -752,6 +752,191 @@ input::placeholder { color: var(--faint); }
   .toast-container { left: 12px; right: 12px; bottom: 12px; }
 }
 
+/* teams panel */
+.teams-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.team-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.team-card:hover { border-color: var(--accent); background: var(--hover); }
+.team-card-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.team-card-name { font-weight: 600; font-size: 14px; }
+.team-card-count { font-size: 11px; color: var(--dim); }
+.team-card-desc { font-size: 11px; color: var(--dim); margin-bottom: 8px; }
+.team-card-members { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+}
+.team-member-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.team-member.active .team-member-dot {
+  animation: blink 1s infinite;
+}
+.team-member-name { color: var(--fg); }
+.team-member-role { color: var(--faint); font-size: 10px; }
+
+/* team detail layout */
+.team-detail-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.team-detail-back {
+  font: inherit;
+  font-size: 11px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.team-detail-back:hover { border-color: var(--accent); color: var(--accent); }
+.team-detail-name { font-weight: 600; font-size: 16px; }
+.team-detail-desc { font-size: 12px; color: var(--dim); }
+.team-detail-body {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  min-height: 400px;
+}
+
+/* topology SVG */
+.team-topology {
+  border: 1px solid var(--border);
+  padding: 8px;
+}
+.team-topology svg { width: 100%; }
+.team-topo-node text { font-family: var(--mono); font-size: 10px; fill: var(--fg); }
+.team-topo-node .topo-label { font-weight: 600; }
+.team-topo-node .topo-role { font-size: 8px; fill: var(--faint); }
+.team-topo-link { stroke: var(--border); stroke-width: 1; fill: none; }
+
+/* inbox viewer */
+.inbox-container { display: flex; flex-direction: column; border: 1px solid var(--border); min-height: 0; }
+.inbox-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.inbox-select {
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+}
+.inbox-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inbox-msg {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-left: 2px solid var(--border);
+  line-height: 1.5;
+}
+.inbox-msg-from { font-size: 10px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; }
+.inbox-msg-time { font-size: 10px; color: var(--faint); float: right; }
+.inbox-msg-text { white-space: pre-wrap; word-break: break-word; }
+
+/* structured message types */
+.inbox-msg.msg-idle_notification { border-left-color: var(--faint); color: var(--dim); font-style: italic; }
+.inbox-msg.msg-task_assignment { border-left-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 5%, transparent); }
+.inbox-msg.msg-shutdown_request { border-left-color: var(--orange); background: color-mix(in srgb, var(--orange) 5%, transparent); }
+.inbox-msg.msg-permission_request { border-left-color: var(--yellow); background: color-mix(in srgb, var(--yellow) 5%, transparent); }
+
+.inbox-msg .msg-subject { font-weight: 600; margin-bottom: 2px; }
+.inbox-msg .msg-badge {
+  display: inline-block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  margin-bottom: 4px;
+}
+
+/* inbox compose */
+.inbox-compose {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.inbox-compose input {
+  flex: 1;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+.inbox-compose button {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  cursor: pointer;
+}
+.inbox-compose button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* hit-team clickable */
+.hit-team { color: var(--magenta); font-size: 11px; cursor: pointer; }
+.hit-team:hover { text-decoration: underline; }
+
+/* team context in session detail */
+.detail-team-context {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+.detail-team-context-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--faint);
+  margin-bottom: 4px;
+}
+
+/* team sessions list in detail */
+.team-sessions { margin-top: 12px; }
+.team-sessions .stat-label { margin-bottom: 8px; }
+.team-session-item {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  cursor: pointer;
+}
+.team-session-item:hover { background: var(--hover); }
+
+@media (max-width: 640px) {
+  .team-detail-body { grid-template-columns: 1fr; }
+  .teams-list { grid-template-columns: 1fr; }
+}
+
 /* reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
