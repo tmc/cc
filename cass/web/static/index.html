@@ -287,6 +287,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion }) {
   const [workspace, setWorkspaceRaw] = useState(urlParams.workspace || '');
   const [since, setSinceRaw] = useState(urlParams.since || '');
   const [sort, setSortRaw] = useState(urlParams.sort || '');
+  const [team, setTeamRaw] = useState(urlParams.team || '');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -297,14 +298,15 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion }) {
   function setWorkspace(v) { setWorkspaceRaw(v); }
   function setSince(v) { setSinceRaw(v); }
   function setSort(v) { setSortRaw(v); }
+  function setTeam(v) { setTeamRaw(v); }
 
   // Push URL on state changes (debounced with the search).
   const urlRef = useRef(null);
   useEffect(() => {
     clearTimeout(urlRef.current);
-    urlRef.current = setTimeout(() => updateParams({ q: query, agent, workspace, since, sort }), 300);
+    urlRef.current = setTimeout(() => updateParams({ q: query, agent, workspace, since, sort, team }), 300);
     return () => clearTimeout(urlRef.current);
-  }, [query, agent, workspace, since, sort]);
+  }, [query, agent, workspace, since, sort, team]);
 
   // Restore state from URL on browser navigation.
   useEffect(() => {
@@ -314,6 +316,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion }) {
     setWorkspaceRaw(urlParams.workspace || '');
     setSinceRaw(urlParams.since || '');
     setSortRaw(urlParams.sort || '');
+    setTeamRaw(urlParams.team || '');
   }, [navVersion]);
 
   const effectiveSort = sort || (query ? 'relevance' : 'recent');
@@ -321,20 +324,20 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion }) {
   const doSearch = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { q: query, agent, workspace, since, sort: sort || '', limit: '30' };
+      const params = { q: query, agent, workspace, since, sort: sort || '', team, limit: '30' };
       const r = await api('search?' + qs(params));
       setResults(r);
     } catch (e) {
       console.error('search:', e);
     }
     setLoading(false);
-  }, [query, agent, workspace, since, sort]);
+  }, [query, agent, workspace, since, sort, team]);
 
   // Debounced live search.
   useEffect(() => {
     const id = setTimeout(doSearch, 250);
     return () => clearTimeout(id);
-  }, [query, agent, workspace, since, sort]);
+  }, [query, agent, workspace, since, sort, team]);
 
   // Auto-refresh on SSE.
   useEffect(() => {
@@ -390,6 +393,8 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion }) {
           onInput=${e => setAgent(e.target.value)} style="width:100px" />
         <input class="filter-input" placeholder="workspace" value=${workspace}
           onInput=${e => setWorkspace(e.target.value)} />
+        <input class="filter-input" placeholder="team" value=${team}
+          onInput=${e => setTeam(e.target.value)} style="width:100px" />
         <span class="sort-group">
           ${sortModes.map(m => html`
             <button class="sort-pill ${effectiveSort === m.value ? 'active' : ''}"
@@ -442,6 +447,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused }) {
       <div class="hit-header">
         <span class="hit-num">${num}.</span>
         <span class="hit-agent">[${h.agent}]</span>
+        ${h.team_name && html`<span class="hit-team">${h.team_name}${h.agent_name ? ':' + h.agent_name : ''}</span>`}
         <span class="hit-title">${h.title || 'Untitled'}</span>
         ${h.sparkline && html`<span class="hit-sparkline">${h.sparkline}</span>`}
       </div>
@@ -654,6 +660,7 @@ function SessionDetailPanel({ hit, onClose }) {
           </div>
           <div class="detail-badges">
             <span class="hit-agent">[${hit.agent}]</span>
+            ${hit.team_name && html`<span class="hit-team">${hit.team_name}${hit.agent_name ? ':' + hit.agent_name : ''}</span>`}
             ${hit.workspace && html`<span class="hit-workspace">${shortProject(hit.workspace)}</span>`}
             ${hit.started_at && html`<span class="hit-time">${relTime(hit.started_at)}${hit.ended_at ? ' → ' + relTime(hit.ended_at) : ''}</span>`}
           </div>
@@ -816,15 +823,38 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
     setZoom(z => Math.max(0.3, Math.min(3, z + (e.deltaY > 0 ? -0.1 : 0.1))));
   }
 
+  // Unique workspaces from node data for filter chips.
+  const workspaces = useMemo(() => {
+    const ws = new Set();
+    Object.values(nodeData).forEach(n => { if (n.workspace) ws.add(n.workspace); });
+    return [...ws].sort();
+  }, [nodeData]);
+
+  // Filter nodes by search query and workspace.
+  const filteredNodeIds = useMemo(() => {
+    const all = Object.keys(nodeData);
+    const q = graphQuery.toLowerCase();
+    return all.filter(id => {
+      const n = nodeData[id];
+      if (wsFilter && (!n.workspace || n.workspace !== wsFilter)) return false;
+      if (q) {
+        const haystack = [id, n.title || '', n.workspace || ''].join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [nodeData, graphQuery, wsFilter]);
+
+  // Only show links where both endpoints are visible.
+  const filteredNodeSet = useMemo(() => new Set(filteredNodeIds), [filteredNodeIds]);
+
   // Compute scrubber cutoff time.
   const cutoffTime = timeRange.min + (timeRange.max - timeRange.min) * scrubberPos;
 
   // Filter links by scrubber position and node visibility.
   const visibleLinks = useMemo(() => {
     return allLinks.filter(l => {
-      // Both endpoints must be in the filtered set.
       if (!filteredNodeSet.has(l.source) || !filteredNodeSet.has(l.target)) return false;
-      // Scrubber time filter.
       if (scrubberPos < 1 && l.timestamp) {
         if (new Date(l.timestamp).getTime() > cutoffTime) return false;
       }
@@ -853,33 +883,6 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
     });
     return counts;
   }, [visibleLinks]);
-
-  // Unique workspaces from node data for filter chips.
-  const workspaces = useMemo(() => {
-    const ws = new Set();
-    Object.values(nodeData).forEach(n => { if (n.workspace) ws.add(n.workspace); });
-    return [...ws].sort();
-  }, [nodeData]);
-
-  // Filter nodes by search query and workspace.
-  const filteredNodeIds = useMemo(() => {
-    const all = Object.keys(nodeData);
-    const q = graphQuery.toLowerCase();
-    return all.filter(id => {
-      const n = nodeData[id];
-      // Workspace filter.
-      if (wsFilter && (!n.workspace || n.workspace !== wsFilter)) return false;
-      // Text search: match against ID, title, workspace.
-      if (q) {
-        const haystack = [id, n.title || '', n.workspace || ''].join(' ').toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [nodeData, graphQuery, wsFilter]);
-
-  // Only show links where both endpoints are visible.
-  const filteredNodeSet = useMemo(() => new Set(filteredNodeIds), [filteredNodeIds]);
 
   if (loading) return html`<div class="loading">loading graph...</div>`;
 

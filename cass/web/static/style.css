@@ -225,6 +225,7 @@ input::placeholder { color: var(--faint); }
 .hit-stats { color: var(--dim); }
 .hit-time { color: var(--faint); }
 .hit-it2 { color: var(--accent); }
+.hit-team { color: var(--magenta); font-size: 11px; }
 
 /* tool micro-bar */
 .tool-bar {
