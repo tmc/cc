@@ -1090,32 +1090,174 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
     return groups;
   }, [filteredNodeIds, nodeData]);
 
-  // Layout: workspace clusters arranged in a circle, nodes within each cluster in a sub-circle.
-  const cx = 400, cy = 260;
-  const nodePos = {};
-  const wsRegions = []; // {ws, x, y, r, nodes} for drawing group outlines.
+  // Force-directed layout: initialize from workspace clusters, then simulate.
+  const nodePos = useMemo(() => {
+    const pos = {};
+    const wsKeys = Object.keys(wsGroups);
+    const n = filteredNodeIds.length;
+    if (n === 0) return pos;
 
-  const wsKeys = Object.keys(wsGroups);
-  const clusterRadius = wsKeys.length <= 1 ? 0 : Math.min(190, 100 + wsKeys.length * 20);
+    // Scale layout area based on node count.
+    const area = Math.max(600, Math.sqrt(n) * 120);
+    const cx = area / 2, cy = area / 2;
+    const clusterRadius = wsKeys.length <= 1 ? 0 : Math.min(area * 0.35, 80 + wsKeys.length * 25);
 
-  wsKeys.forEach((ws, gi) => {
-    const group = wsGroups[ws];
-    const clusterAngle = wsKeys.length <= 1 ? 0 : (2 * Math.PI * gi) / wsKeys.length - Math.PI / 2;
-    const gcx = cx + clusterRadius * Math.cos(clusterAngle);
-    const gcy = cy + clusterRadius * Math.sin(clusterAngle);
+    // Initialize positions from workspace-clustered arrangement.
+    wsKeys.forEach((ws, gi) => {
+      const group = wsGroups[ws];
+      const clusterAngle = wsKeys.length <= 1 ? 0 : (2 * Math.PI * gi) / wsKeys.length - Math.PI / 2;
+      const gcx = cx + clusterRadius * Math.cos(clusterAngle);
+      const gcy = cy + clusterRadius * Math.sin(clusterAngle);
+      if (group.length === 1) {
+        pos[group[0]] = { x: gcx, y: gcy, vx: 0, vy: 0 };
+      } else {
+        const subR = Math.min(80, 20 + group.length * 10);
+        group.forEach((id, ni) => {
+          const a = (2 * Math.PI * ni) / group.length - Math.PI / 2;
+          pos[id] = { x: gcx + subR * Math.cos(a), y: gcy + subR * Math.sin(a), vx: 0, vy: 0 };
+        });
+      }
+    });
 
-    if (group.length === 1) {
-      nodePos[group[0]] = { x: gcx, y: gcy };
-      wsRegions.push({ ws, x: gcx, y: gcy, r: 50, nodes: group });
-    } else {
-      const subR = Math.min(70, 25 + group.length * 12);
-      group.forEach((id, ni) => {
-        const a = (2 * Math.PI * ni) / group.length - Math.PI / 2;
-        nodePos[id] = { x: gcx + subR * Math.cos(a), y: gcy + subR * Math.sin(a) };
+    // Workspace centroids for gravity.
+    const wsCentroid = {};
+    wsKeys.forEach(ws => {
+      const group = wsGroups[ws];
+      let sx = 0, sy = 0;
+      group.forEach(id => { if (pos[id]) { sx += pos[id].x; sy += pos[id].y; } });
+      wsCentroid[ws] = { x: sx / group.length, y: sy / group.length };
+    });
+
+    // Force simulation: 80 iterations.
+    const ids = Object.keys(pos);
+    const repulseK = 5000;  // Repulsion constant.
+    const attractK = 0.01;  // Spring constant.
+    const gravityK = 0.005; // Workspace gravity.
+    const damping = 0.9;
+
+    for (let iter = 0; iter < 80; iter++) {
+      const alpha = 1 - iter / 80; // Cooling.
+
+      // Repulsion: all pairs push apart.
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const a = pos[ids[i]], b = pos[ids[j]];
+          let dx = b.x - a.x, dy = b.y - a.y;
+          let dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dist = 1; }
+          const force = repulseK / (dist * dist) * alpha;
+          const fx = (dx / dist) * force, fy = (dy / dist) * force;
+          a.vx -= fx; a.vy -= fy;
+          b.vx += fx; b.vy += fy;
+        }
+      }
+
+      // Attraction: connected nodes pull together.
+      visibleLinks.forEach(l => {
+        const a = pos[l.source], b = pos[l.target];
+        if (!a || !b) return;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 1) return;
+        // Target distance based on whether same workspace.
+        const nA = nodeData[l.source], nB = nodeData[l.target];
+        const sameWs = nA && nB && nA.workspace && nA.workspace === nB.workspace;
+        const ideal = sameWs ? 80 : 160;
+        const force = attractK * (dist - ideal) * alpha;
+        const fx = (dx / dist) * force, fy = (dy / dist) * force;
+        a.vx += fx; a.vy += fy;
+        b.vx -= fx; b.vy -= fy;
       });
-      wsRegions.push({ ws, x: gcx, y: gcy, r: subR + 45, nodes: group });
+
+      // Workspace gravity: light pull toward cluster centroid.
+      wsKeys.forEach(ws => {
+        const c = wsCentroid[ws];
+        wsGroups[ws].forEach(id => {
+          const p = pos[id];
+          if (!p) return;
+          p.vx += (c.x - p.x) * gravityK * alpha;
+          p.vy += (c.y - p.y) * gravityK * alpha;
+        });
+      });
+
+      // Apply velocities with damping.
+      ids.forEach(id => {
+        const p = pos[id];
+        p.vx *= damping;
+        p.vy *= damping;
+        // Clamp velocity.
+        const maxV = 20;
+        const v = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+        if (v > maxV) { p.vx = (p.vx / v) * maxV; p.vy = (p.vy / v) * maxV; }
+        p.x += p.vx;
+        p.y += p.vy;
+      });
     }
-  });
+
+    return pos;
+  }, [filteredNodeIds, wsGroups, visibleLinks, nodeData]);
+
+  // Dynamic viewBox from node positions.
+  const viewBox = useMemo(() => {
+    const ids = Object.keys(nodePos);
+    if (ids.length === 0) return { x: 0, y: 0, w: 800, h: 540 };
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    ids.forEach(id => {
+      const p = nodePos[id];
+      const w2 = nodeWidth(id) / 2 + 20;
+      const h2 = nodeHeight(id) / 2 + 20;
+      if (p.x - w2 < minX) minX = p.x - w2;
+      if (p.y - h2 < minY) minY = p.y - h2;
+      if (p.x + w2 > maxX) maxX = p.x + w2;
+      if (p.y + h2 > maxY) maxY = p.y + h2;
+    });
+    const pad = 40;
+    return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
+  }, [nodePos, filteredNodeIds, nodeData, nodeLinkCount]);
+
+  // Compute workspace regions from final positions for group outlines.
+  const wsRegions = useMemo(() => {
+    const regions = [];
+    const wsKeys = Object.keys(wsGroups);
+    wsKeys.forEach(ws => {
+      const group = wsGroups[ws];
+      let sx = 0, sy = 0, count = 0;
+      let maxR = 0;
+      group.forEach(id => {
+        const p = nodePos[id];
+        if (p) { sx += p.x; sy += p.y; count++; }
+      });
+      if (count === 0) return;
+      const cx = sx / count, cy = sy / count;
+      group.forEach(id => {
+        const p = nodePos[id];
+        if (!p) return;
+        const d = Math.sqrt((p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy));
+        if (d > maxR) maxR = d;
+      });
+      regions.push({ ws, x: cx, y: cy, r: maxR + 55, nodes: group });
+    });
+    return regions;
+  }, [wsGroups, nodePos]);
+
+  // Edge pair grouping for parallel edge offset.
+  const edgePairIndex = useMemo(() => {
+    const pairCount = {};
+    const pairSeen = {};
+    visibleLinks.forEach(l => {
+      const key = [l.source, l.target].sort().join(':');
+      pairCount[key] = (pairCount[key] || 0) + 1;
+    });
+    const result = [];
+    visibleLinks.forEach(l => {
+      const key = [l.source, l.target].sort().join(':');
+      const total = pairCount[key] || 1;
+      const idx = pairSeen[key] || 0;
+      pairSeen[key] = idx + 1;
+      result.push({ idx, total });
+    });
+    return result;
+  }, [visibleLinks]);
 
   // Node label: short ID + project.
   function nodeLabel(id) {
@@ -1145,16 +1287,16 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
     return !!n.is_active;
   }
 
-  // Node box size scales with link count.
+  // Node box size scales with link count — compact by default.
   function nodeWidth(id) {
     const label = nodeLabel(id);
-    const base = Math.max(90, label.length * 7 + 16);
+    const base = Math.max(70, label.length * 6.5 + 12);
     const links = nodeLinkCount[id] || 0;
-    return base + Math.min(links * 4, 40);
+    return base + Math.min(links * 3, 24);
   }
   function nodeHeight(id) {
     const info = nodeInfo(id);
-    return info ? 40 : 28;
+    return info ? 36 : 24;
   }
 
   function onNodeEnter(id, e) {
@@ -1235,7 +1377,7 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
       `}
       <div class="graph-container" onWheel=${onWheel} ref=${containerRef} style="position:relative">
         <div class="graph-inner" style="transform:scale(${zoom})">
-          <svg viewBox="0 0 800 540" xmlns="http://www.w3.org/2000/svg">
+          <svg viewBox="${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <marker id="arrowMsg" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
                 <path d="M0,0 L8,3 L0,6" fill="var(--accent)" />
@@ -1286,12 +1428,13 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
             ${visibleLinks.map((l, i) => {
               const src = l.source || '?';
               const dst = l.target || '?';
-              const p1 = nodePos[src] || { x: cx, y: cy };
-              const p2 = nodePos[dst] || { x: cx, y: cy };
+              const fallback = { x: viewBox.x + viewBox.w / 2, y: viewBox.y + viewBox.h / 2 };
+              const p1 = nodePos[src] || fallback;
+              const p2 = nodePos[dst] || fallback;
               // Determine edge class and arrow by action/kind type.
               const act = l.action || '';
               const kind = l.kind || '';
-              let cls, marker, dotColor;
+              let cls, marker, dotColor, isObs = false;
               if (kind === 'team' || act === 'team-spawn' || act === 'team-message') {
                 cls = 'graph-edge-team';
                 marker = 'url(#arrowTeam)';
@@ -1300,12 +1443,12 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
                 cls = 'graph-edge-obs';
                 marker = 'url(#arrowObs)';
                 dotColor = 'var(--faint)';
+                isObs = true;
               } else if (act === 'split') {
                 cls = 'graph-edge-split';
                 marker = 'url(#arrowSplit)';
                 dotColor = 'var(--green)';
               } else {
-                // send-text, send-key, and default.
                 cls = 'graph-edge-msg';
                 marker = 'url(#arrowMsg)';
                 dotColor = 'var(--accent)';
@@ -1314,12 +1457,18 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
               const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
               const dx = p2.x - p1.x, dy = p2.y - p1.y;
               const len = Math.max(Math.sqrt(dx*dx + dy*dy), 1);
-              const cpx = mx - dy * 30 / len, cpy = my + dx * 30 / len;
+              // Adaptive curve: offset based on edge pair index for parallel edges.
+              const pair = edgePairIndex[i] || { idx: 0, total: 1 };
+              const baseOffset = Math.min(30, len * 0.15);
+              const spread = pair.total > 1 ? (pair.idx - (pair.total - 1) / 2) * 12 : 0;
+              const offset = baseOffset + spread;
+              const cpx = mx - dy * offset / len, cpy = my + dx * offset / len;
               const pathId = 'lp' + i;
+              const opacity = isObs ? 0.35 : undefined;
               return html`
                 <g key=${i}>
                   <path id=${pathId} d="M${p1.x},${p1.y} Q${cpx},${cpy} ${p2.x},${p2.y}"
-                    class=${cls} marker-end=${marker} />
+                    class=${cls} marker-end=${marker} opacity=${opacity} />
                   ${newLinkIndices.has(i) && html`
                     <circle r="3" fill=${dotColor}>
                       <animateMotion dur="0.8s" fill="freeze" begin="0s">
@@ -1343,8 +1492,8 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
                   onMouseEnter=${(e) => onNodeEnter(n, e)} onMouseLeave=${onNodeLeave}>
                   <rect width=${w} height=${h} />
                   ${active && html`<rect class="node-dot" x="2" y=${h/2 - 3} width="3" height="6" rx="1" />`}
-                  <text x=${w/2} y=${info ? 14 : 18} text-anchor="middle">${label}</text>
-                  ${info && html`<text class="node-info" x=${w/2} y="28" text-anchor="middle">${info}</text>`}
+                  <text x=${w/2} y=${info ? 12 : 15} text-anchor="middle" font-size="9">${label}</text>
+                  ${info && html`<text class="node-info" x=${w/2} y="24" text-anchor="middle">${info}</text>`}
                 </g>
               `;
             })}
@@ -1353,8 +1502,9 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
         ${renderTooltip()}
         <div class="graph-zoom">
           <button onClick=${() => setZoom(z => Math.min(3, z + 0.2))}>+</button>
-          <button onClick=${() => setZoom(1)}>1:1</button>
+          <button onClick=${() => setZoom(1)} title="Reset zoom">1:1</button>
           <button onClick=${() => setZoom(z => Math.max(0.3, z - 0.2))}>-</button>
+          <button onClick=${() => setZoom(1)} title="Fit all nodes" style="margin-left:2px;font-size:10px">fit</button>
         </div>
       </div>
       <div class="graph-scrubber">
