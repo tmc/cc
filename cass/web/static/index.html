@@ -159,9 +159,7 @@ function App() {
     const es = new EventSource('/events');
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
-    es.addEventListener('session_change', (e) => {
-      const data = JSON.parse(e.data);
-      showToast(data.files_changed + ' session(s) updated');
+    es.addEventListener('session_change', () => {
       window.dispatchEvent(new CustomEvent('cass:refresh'));
     });
     es.addEventListener('index_complete', (e) => {
