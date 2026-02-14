@@ -116,31 +116,27 @@ function SearchPanel() {
   const [agent, setAgent] = useState('');
   const [workspace, setWorkspace] = useState('');
   const [since, setSince] = useState('');
-  const [sort, setSort] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
 
-  // Effective sort: auto-select based on whether there's a query.
-  const effectiveSort = sort || (query ? 'relevance' : 'recent');
-
   const doSearch = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { q: query, agent, workspace, since, sort: sort || '', limit: '30' };
+      const params = { q: query, agent, workspace, since, limit: '30' };
       const r = await api('search?' + qs(params));
       setResults(r);
     } catch (e) {
       console.error('search:', e);
     }
     setLoading(false);
-  }, [query, agent, workspace, since, sort]);
+  }, [query, agent, workspace, since]);
 
   // Debounced live search on any input change.
   useEffect(() => {
     const id = setTimeout(doSearch, 250);
     return () => clearTimeout(id);
-  }, [query, agent, workspace, since, sort]);
+  }, [query, agent, workspace, since]);
 
   // Auto-refresh on SSE events.
   useEffect(() => {
@@ -149,20 +145,12 @@ function SearchPanel() {
     return () => window.removeEventListener('cass:refresh', handler);
   }, [doSearch]);
 
-  const sortModes = [
-    { value: 'recent', label: 'Recent' },
-    { value: 'relevance', label: 'Relevance' },
-    { value: 'started', label: 'Started' },
-    { value: 'oldest', label: 'Oldest' },
-  ];
-
   return html`
     <div>
       <div class="search-bar">
         <input class="search-input" type="text" placeholder="search sessions..."
           value=${query} onInput=${e => setQuery(e.target.value)}
           autofocus />
-        <button class="btn" onClick=${doSearch}>search</button>
       </div>
       <div class="filters">
         <input class="filter-input" placeholder="agent" value=${agent}
@@ -171,14 +159,6 @@ function SearchPanel() {
           onInput=${e => setWorkspace(e.target.value)} />
         <input class="filter-input" placeholder="since (e.g. 24h)" value=${since}
           onInput=${e => setSince(e.target.value)} />
-        <span class="sort-group">
-          ${sortModes.map(m => html`
-            <button class="sort-pill ${effectiveSort === m.value ? 'active' : ''}"
-              onClick=${() => setSort(sort === m.value ? '' : m.value)}>
-              ${m.label}
-            </button>
-          `)}
-        </span>
       </div>
       ${loading && html`<div class="loading">searching...</div>`}
       ${selected && html`<${SessionDetail} hit=${selected} onClose=${() => setSelected(null)} />`}
@@ -277,7 +257,7 @@ function SessionDetail({ hit, onClose }) {
         <div class="session-entries">
           ${entries.map(e => html`
             <div style="margin-bottom:8px">
-              <span style="color:var(--cyan)">[${e.type}]</span>
+              <span style="color:var(--accent)">[${e.type}]</span>
               ${e.message && e.message.content && html`
                 <span> ${typeof e.message.content === 'string'
                   ? e.message.content.slice(0, 200)
@@ -498,7 +478,7 @@ function StatsPanel() {
     <div class="stat-card">
       <div class="stat-label">${label}</div>
       <div class="stat-value">${value}</div>
-      ${sub && html`<div style="font-size:11px;color:var(--fg-muted);margin-top:4px">${sub}</div>`}
+      ${sub && html`<div style="font-size:11px;color:var(--dim);margin-top:4px">${sub}</div>`}
     </div>
   `;
 
@@ -541,7 +521,7 @@ function StatsPanel() {
         <div style="margin-top:16px">
           <div class="stat-label" style="margin-bottom:4px">sessions per day (30d)</div>
           <div style="font-family:var(--mono);font-size:16px;letter-spacing:2px">${dailySparkline}</div>
-          <div style="font-size:11px;color:var(--fg-muted);margin-top:2px">
+          <div style="font-size:11px;color:var(--dim);margin-top:2px">
             ${days[0]} — ${days[days.length - 1]} (peak: ${Math.max(...dayVals)}/day)
           </div>
         </div>
