@@ -486,8 +486,9 @@ input::placeholder { color: var(--faint); }
 .graph-node rect { fill: var(--bg); stroke: var(--border); stroke-width: 1; rx: 2; }
 .graph-node text { font-family: var(--mono); font-size: 10px; fill: var(--fg); }
 .graph-node:hover rect { stroke: var(--accent); stroke-width: 2; }
-.graph-edge-msg { stroke: var(--accent); stroke-width: 1; fill: none; marker-end: url(#arrowMsg); }
-.graph-edge-obs { stroke: var(--faint); stroke-width: 1; fill: none; stroke-dasharray: 4,3; marker-end: url(#arrowObs); }
+.graph-edge-msg { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+.graph-edge-obs { stroke: var(--faint); stroke-width: 1; fill: none; stroke-dasharray: 4,3; }
+.graph-edge-split { stroke: var(--green); stroke-width: 1; fill: none; stroke-dasharray: 2,3; }
 .graph-zoom {
   position: absolute;
   bottom: 8px;

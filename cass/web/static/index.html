@@ -70,6 +70,35 @@ function fmtNum(n) {
   return '' + n;
 }
 
+// --- URL state ---
+
+const TABS = ['search', 'graph', 'map', 'stats'];
+
+function tabFromPath() {
+  const p = location.pathname.replace(/^\/+|\/+$/g, '');
+  return TABS.includes(p) ? p : 'search';
+}
+
+function paramsFromURL() {
+  return Object.fromEntries(new URLSearchParams(location.search));
+}
+
+function pushURL(tab, params) {
+  const path = tab === 'search' ? '/' : '/' + tab;
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v) p.set(k, v);
+  }
+  const search = p.toString();
+  const url = path + (search ? '?' + search : '');
+  if (url !== location.pathname + location.search) {
+    history.pushState(null, '', url);
+  }
+  // Update document title.
+  const q = params?.q;
+  document.title = q ? `${q} — cass ${tab}` : `cass — ${tab}`;
+}
+
 // Tool color map for micro-bars.
 const TOOL_COLORS = {
   Bash: 'var(--cyan)', Read: 'var(--green)', Write: 'var(--yellow)',
@@ -94,12 +123,36 @@ function ToolMicroBar({ breakdown }) {
 // --- App ---
 
 function App() {
-  const [tab, setTab] = useState('search');
+  const [tab, setTabRaw] = useState(tabFromPath);
+  const [urlParams, setUrlParams] = useState(paramsFromURL);
+  const [navVersion, setNavVersion] = useState(0);  // Incremented on popstate to signal panels.
   const [connected, setConnected] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const searchRef = useRef(null);
   const toastId = useRef(0);
+
+  function setTab(t, params) {
+    setTabRaw(t);
+    const p = params || {};
+    setUrlParams(p);
+    pushURL(t, p);
+  }
+
+  function updateParams(params) {
+    pushURL(tab, params);
+  }
+
+  // Browser back/forward.
+  useEffect(() => {
+    function onPop() {
+      setTabRaw(tabFromPath());
+      setUrlParams(paramsFromURL());
+      setNavVersion(v => v + 1);
+    }
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // SSE connection.
   useEffect(() => {
@@ -157,23 +210,23 @@ function App() {
         </div>
       </div>
       <div class="tabs" role="tablist">
-        ${['search', 'graph', 'map', 'stats'].map(t => html`
+        ${TABS.map(t => html`
           <button class="tab ${tab === t ? 'active' : ''}" onClick=${() => setTab(t)}
             role="tab" aria-selected=${tab === t}>${t}</button>
         `)}
       </div>
-      ${tab === 'search' && html`<${SearchPanel} searchRef=${searchRef} />`}
-      ${tab === 'graph' && html`<${GraphPanel} />`}
-      ${tab === 'map' && html`<${MapPanel} />`}
-      ${tab === 'stats' && html`<${StatsPanel} />`}
+      ${tab === 'search' && html`<${SearchPanel} searchRef=${searchRef} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
+      ${tab === 'graph' && html`<${GraphPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
+      ${tab === 'map' && html`<${MapPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
+      ${tab === 'stats' && html`<${StatsPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
 
       <div class="toast-container" aria-live="polite">
         ${toasts.map(t => html`<div class="toast ${t.show ? 'show' : ''}" key=${t.id}>${t.msg}</div>`)}
       </div>
 
       <${CommandPalette} open=${paletteOpen} onClose=${() => setPaletteOpen(false)}
-        onNavigate=${(id) => { setTab(id); setPaletteOpen(false); }}
-        onFocusSearch=${() => { setTab('search'); setPaletteOpen(false); setTimeout(() => searchRef.current?.focus(), 50); }} />
+        onNavigate=${(id) => { setTab(id, {}); setPaletteOpen(false); }}
+        onFocusSearch=${() => { setTab('search', urlParams); setPaletteOpen(false); setTimeout(() => searchRef.current?.focus(), 50); }} />
     </div>
   `;
 }
@@ -228,16 +281,40 @@ function CommandPalette({ open, onClose, onNavigate, onFocusSearch }) {
 
 // --- Search Panel ---
 
-function SearchPanel({ searchRef }) {
-  const [query, setQuery] = useState('');
-  const [agent, setAgent] = useState('');
-  const [workspace, setWorkspace] = useState('');
-  const [since, setSince] = useState('');
-  const [sort, setSort] = useState('');
+function SearchPanel({ searchRef, urlParams, updateParams, navVersion }) {
+  const [query, setQueryRaw] = useState(urlParams.q || '');
+  const [agent, setAgentRaw] = useState(urlParams.agent || '');
+  const [workspace, setWorkspaceRaw] = useState(urlParams.workspace || '');
+  const [since, setSinceRaw] = useState(urlParams.since || '');
+  const [sort, setSortRaw] = useState(urlParams.sort || '');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
   const [selectedIdx, setSelectedIdx] = useState(-1);
+
+  function setQuery(v) { setQueryRaw(v); }
+  function setAgent(v) { setAgentRaw(v); }
+  function setWorkspace(v) { setWorkspaceRaw(v); }
+  function setSince(v) { setSinceRaw(v); }
+  function setSort(v) { setSortRaw(v); }
+
+  // Push URL on state changes (debounced with the search).
+  const urlRef = useRef(null);
+  useEffect(() => {
+    clearTimeout(urlRef.current);
+    urlRef.current = setTimeout(() => updateParams({ q: query, agent, workspace, since, sort }), 300);
+    return () => clearTimeout(urlRef.current);
+  }, [query, agent, workspace, since, sort]);
+
+  // Restore state from URL on browser navigation.
+  useEffect(() => {
+    if (navVersion === 0) return;
+    setQueryRaw(urlParams.q || '');
+    setAgentRaw(urlParams.agent || '');
+    setWorkspaceRaw(urlParams.workspace || '');
+    setSinceRaw(urlParams.since || '');
+    setSortRaw(urlParams.sort || '');
+  }, [navVersion]);
 
   const effectiveSort = sort || (query ? 'relevance' : 'recent');
 
@@ -606,15 +683,26 @@ function SessionDetailPanel({ hit, onClose }) {
 
 // --- Graph Panel ---
 
-function GraphPanel() {
+function GraphPanel({ urlParams, updateParams, navVersion }) {
   const [allLinks, setAllLinks] = useState([]);
   const [nodeData, setNodeData] = useState({});  // id -> {workspace, title, started_at, ended_at, tool_calls, turns, tokens, is_active}
   const [timeRange, setTimeRange] = useState({ min: 0, max: 0 });
-  const [since, setSince] = useState('24h');
+  const [since, setSinceRaw] = useState(urlParams.since || '24h');
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState(1);
-  const [graphQuery, setGraphQuery] = useState('');
-  const [wsFilter, setWsFilter] = useState('');
+  const [graphQuery, setGraphQueryRaw] = useState(urlParams.q || '');
+  const [wsFilter, setWsFilterRaw] = useState(urlParams.ws || '');
+
+  function setGraphQuery(v) { setGraphQueryRaw(v); updateParams({ since, q: v, ws: wsFilter }); }
+  function setSince(v) { setSinceRaw(v); updateParams({ since: v, q: graphQuery, ws: wsFilter }); }
+  function setWsFilter(v) { setWsFilterRaw(v); updateParams({ since, q: graphQuery, ws: v }); }
+
+  useEffect(() => {
+    if (navVersion === 0) return;
+    setSinceRaw(urlParams.since || '24h');
+    setGraphQueryRaw(urlParams.q || '');
+    setWsFilterRaw(urlParams.ws || '');
+  }, [navVersion]);
 
   // Scrubber state.
   const [scrubberPos, setScrubberPos] = useState(1);  // 0..1 normalized
@@ -798,12 +886,42 @@ function GraphPanel() {
   const allNodeIds = Object.keys(nodeData);
   if (allNodeIds.length === 0) return html`<div class="empty">no inter-session links found</div>`;
 
-  // Layout uses only filtered nodes.
-  const cx = 400, cy = 260, radius = 190;
+  // Group nodes by workspace for clustered layout.
+  const wsGroups = useMemo(() => {
+    const groups = {};
+    filteredNodeIds.forEach(id => {
+      const ws = (nodeData[id] && nodeData[id].workspace) || '(unknown)';
+      if (!groups[ws]) groups[ws] = [];
+      groups[ws].push(id);
+    });
+    return groups;
+  }, [filteredNodeIds, nodeData]);
+
+  // Layout: workspace clusters arranged in a circle, nodes within each cluster in a sub-circle.
+  const cx = 400, cy = 260;
   const nodePos = {};
-  filteredNodeIds.forEach((n, i) => {
-    const angle = (2 * Math.PI * i) / filteredNodeIds.length - Math.PI / 2;
-    nodePos[n] = { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) };
+  const wsRegions = []; // {ws, x, y, r, nodes} for drawing group outlines.
+
+  const wsKeys = Object.keys(wsGroups);
+  const clusterRadius = wsKeys.length <= 1 ? 0 : Math.min(190, 100 + wsKeys.length * 20);
+
+  wsKeys.forEach((ws, gi) => {
+    const group = wsGroups[ws];
+    const clusterAngle = wsKeys.length <= 1 ? 0 : (2 * Math.PI * gi) / wsKeys.length - Math.PI / 2;
+    const gcx = cx + clusterRadius * Math.cos(clusterAngle);
+    const gcy = cy + clusterRadius * Math.sin(clusterAngle);
+
+    if (group.length === 1) {
+      nodePos[group[0]] = { x: gcx, y: gcy };
+      wsRegions.push({ ws, x: gcx, y: gcy, r: 50, nodes: group });
+    } else {
+      const subR = Math.min(70, 25 + group.length * 12);
+      group.forEach((id, ni) => {
+        const a = (2 * Math.PI * ni) / group.length - Math.PI / 2;
+        nodePos[id] = { x: gcx + subR * Math.cos(a), y: gcy + subR * Math.sin(a) };
+      });
+      wsRegions.push({ ws, x: gcx, y: gcy, r: subR + 45, nodes: group });
+    }
   });
 
   // Node label: short ID + project.
@@ -932,14 +1050,41 @@ function GraphPanel() {
               <marker id="arrowObs" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
                 <path d="M0,0 L8,3 L0,6" fill="var(--faint)" />
               </marker>
+              <marker id="arrowSplit" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6" fill="var(--green)" />
+              </marker>
             </defs>
+            ${wsRegions.length > 1 && wsRegions.map((r, i) => html`
+              <g key=${'ws' + i} class="graph-ws-group">
+                <rect x=${r.x - r.r} y=${r.y - r.r} width=${r.r * 2} height=${r.r * 2}
+                  rx="4" fill="none" stroke="var(--border)" stroke-width="1" stroke-dasharray="4,4" />
+                <text x=${r.x} y=${r.y - r.r + 12} text-anchor="middle"
+                  font-size="9" fill="var(--faint)" font-family="var(--mono)">${shortProject(r.ws)}</text>
+              </g>
+            `)}
             ${visibleLinks.map((l, i) => {
               const src = l.source || '?';
               const dst = l.target || '?';
               const p1 = nodePos[src] || { x: cx, y: cy };
               const p2 = nodePos[dst] || { x: cx, y: cy };
-              const isObs = l.kind === 'observation';
-              const cls = (isObs ? 'graph-edge-obs' : 'graph-edge-msg') + (newLinkIndices.has(i) ? ' graph-edge-new' : '');
+              // Determine edge class and arrow by action type.
+              const act = l.action || '';
+              let cls, marker, dotColor;
+              if (act === 'get-screen' || act === 'get-buffer') {
+                cls = 'graph-edge-obs';
+                marker = 'url(#arrowObs)';
+                dotColor = 'var(--faint)';
+              } else if (act === 'split') {
+                cls = 'graph-edge-split';
+                marker = 'url(#arrowSplit)';
+                dotColor = 'var(--green)';
+              } else {
+                // send-text, send-key, and default.
+                cls = 'graph-edge-msg';
+                marker = 'url(#arrowMsg)';
+                dotColor = 'var(--accent)';
+              }
+              if (newLinkIndices.has(i)) cls += ' graph-edge-new';
               const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
               const dx = p2.x - p1.x, dy = p2.y - p1.y;
               const len = Math.max(Math.sqrt(dx*dx + dy*dy), 1);
@@ -947,9 +1092,10 @@ function GraphPanel() {
               const pathId = 'lp' + i;
               return html`
                 <g key=${i}>
-                  <path id=${pathId} d="M${p1.x},${p1.y} Q${cpx},${cpy} ${p2.x},${p2.y}" class=${cls} />
+                  <path id=${pathId} d="M${p1.x},${p1.y} Q${cpx},${cpy} ${p2.x},${p2.y}"
+                    class=${cls} marker-end=${marker} />
                   ${newLinkIndices.has(i) && html`
-                    <circle r="3" fill=${isObs ? 'var(--faint)' : 'var(--accent)'}>
+                    <circle r="3" fill=${dotColor}>
                       <animateMotion dur="0.8s" fill="freeze" begin="0s">
                         <mpath href=${'#' + pathId} />
                       </animateMotion>
@@ -992,19 +1138,34 @@ function GraphPanel() {
           onInput=${e => { setScrubberPos(parseInt(e.target.value) / 1000); setPlaying(false); }} />
         <span class="graph-scrubber-time">${scrubberLabel}</span>
       </div>
-      <div class="result-count">${filteredNodeIds.length}${filteredNodeIds.length !== allNodeIds.length ? '/' + allNodeIds.length : ''} nodes, ${visibleLinks.length}/${allLinks.length} links</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--dim);padding:4px 0">
+        <span>${filteredNodeIds.length}${filteredNodeIds.length !== allNodeIds.length ? '/' + allNodeIds.length : ''} nodes, ${visibleLinks.length}/${allLinks.length} links</span>
+        <span style="display:flex;gap:12px">
+          <span><span style="color:var(--accent)">——</span> message</span>
+          <span><span style="color:var(--faint)">- - -</span> screen/buffer</span>
+          <span><span style="color:var(--green)">··</span> split</span>
+          <span><span style="color:var(--green)">●</span> active</span>
+        </span>
+      </div>
     </div>
   `;
 }
 
 // --- Map Panel ---
 
-function MapPanel() {
-  const [filter, setFilter] = useState('');
+function MapPanel({ urlParams, updateParams, navVersion }) {
+  const [filter, setFilterRaw] = useState(urlParams.filter || '');
   const [mappings, setMappings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortCol, setSortCol] = useState('');
   const [sortDir, setSortDir] = useState('asc');
+
+  function setFilter(v) { setFilterRaw(v); updateParams({ filter: v }); }
+
+  useEffect(() => {
+    if (navVersion === 0) return;
+    setFilterRaw(urlParams.filter || '');
+  }, [navVersion]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1080,11 +1241,18 @@ function MapPanel() {
 
 // --- Stats Panel ---
 
-function StatsPanel() {
+function StatsPanel({ urlParams, updateParams, navVersion }) {
   const [basic, setBasic] = useState(null);
   const [agg, setAgg] = useState(null);
-  const [since, setSince] = useState('');
+  const [since, setSinceRaw] = useState(urlParams.since || '');
   const [indexing, setIndexing] = useState(false);
+
+  function setSince(v) { setSinceRaw(v); updateParams({ since: v }); }
+
+  useEffect(() => {
+    if (navVersion === 0) return;
+    setSinceRaw(urlParams.since || '');
+  }, [navVersion]);
 
   const load = useCallback(async () => {
     try {
