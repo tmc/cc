@@ -203,6 +203,11 @@ func (s *Service) ResolveLabels(ctx context.Context, prefixes []string) (map[str
 	return s.store.ResolveLabels(ctx, prefixes)
 }
 
+// Graph returns combined node and link data for the session communication graph.
+func (s *Service) Graph(ctx context.Context, since time.Time) (*cass.GraphData, error) {
+	return s.store.GraphData(ctx, since)
+}
+
 // Close releases resources.
 func (s *Service) Close() error {
 	return s.store.Close()

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/tmc/cc/cass/service"
 )
 
 // Event is a server-sent event.
@@ -104,21 +103,21 @@ func (b *SSEBroker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // FileWatcher watches session files and publishes SSE events on changes.
+// It does not re-index on its own to avoid holding the SQLite write lock;
+// re-indexing should be triggered explicitly via POST /api/index.
 type FileWatcher struct {
-	svc    *service.Service
 	broker *SSEBroker
 	log    *slog.Logger
 	w      *fsnotify.Watcher
 }
 
 // NewFileWatcher creates a watcher for Claude Code session files.
-func NewFileWatcher(svc *service.Service, broker *SSEBroker, log *slog.Logger) (*FileWatcher, error) {
+func NewFileWatcher(broker *SSEBroker, log *slog.Logger) (*FileWatcher, error) {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("create watcher: %w", err)
 	}
 	return &FileWatcher{
-		svc:    svc,
 		broker: broker,
 		log:    log,
 		w:      w,
@@ -190,18 +189,20 @@ func (fw *FileWatcher) processPending(ctx context.Context, files map[string]stru
 		return
 	}
 
-	// Re-index to pick up changes.
-	count, err := fw.svc.Index(ctx, false)
-	if err != nil {
-		fw.log.Error("reindex on change", "err", err)
-		return
+	// Publish the change event without re-indexing. The web server should
+	// avoid holding the SQLite write lock; re-indexing is done explicitly
+	// via POST /api/index or the CLI. The UI can re-query on this event.
+	var paths []string
+	for f := range files {
+		paths = append(paths, f)
 	}
+	fw.log.Info("session files changed", "count", len(paths))
 
 	fw.broker.Publish(Event{
 		Type: "session_change",
 		Data: map[string]any{
-			"files_changed": len(files),
-			"indexed":       count,
+			"files_changed": len(paths),
+			"paths":         paths,
 			"timestamp":     time.Now().Format(time.RFC3339),
 		},
 	})

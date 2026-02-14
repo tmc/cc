@@ -128,6 +128,7 @@ type Hit struct {
 	LinesWritten int `json:"lines_written,omitempty"`
 	DurationSecs int    `json:"duration_secs,omitempty"`
 	Sparkline    string `json:"sparkline,omitempty"`
+	Compactions  int    `json:"compactions,omitempty"`
 	IT2Sends     int    `json:"it2_sends,omitempty"`
 	IT2Screens   int `json:"it2_screens,omitempty"`
 	IT2Splits    int `json:"it2_splits,omitempty"`
@@ -169,6 +170,7 @@ type SessionStats struct {
 	Turns          int `json:"turns"`            // User message count.
 	DurationSecs   int `json:"duration_secs"`
 	SubagentSpawns int `json:"subagent_spawns"`
+	Compactions    int `json:"compactions"`      // Context compaction count.
 
 	// it2 interactions.
 	IT2Splits  int `json:"it2_splits"`
@@ -187,6 +189,31 @@ type SessionStats struct {
 	// Activity sparkline: message counts bucketed into time slots.
 	// Encoded as a string of Unicode block chars (▁▂▃▄▅▆▇█).
 	Sparkline string `json:"sparkline,omitempty"`
+}
+
+// GraphData holds combined node and link data for the session graph.
+type GraphData struct {
+	Nodes     []GraphNode   `json:"nodes"`
+	Links     []SessionLink `json:"links"`
+	TimeRange TimeRange     `json:"time_range"`
+}
+
+// GraphNode represents a session in the communication graph.
+type GraphNode struct {
+	ID        string `json:"id"`         // iTerm2 session ID (short prefix).
+	Workspace string `json:"workspace"`
+	Title     string `json:"title"`
+	StartedAt int64  `json:"started_at,omitempty"`
+	ToolCalls int    `json:"tool_calls,omitempty"`
+	Turns     int    `json:"turns,omitempty"`
+	Tokens    int    `json:"tokens,omitempty"` // input + output.
+	IsActive  bool   `json:"is_active"`
+}
+
+// TimeRange is the min/max timestamp range for graph data.
+type TimeRange struct {
+	Min string `json:"min"`
+	Max string `json:"max"`
 }
 
 // DeleteFilter specifies which sessions to remove.

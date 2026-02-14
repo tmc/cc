@@ -74,6 +74,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/labels", s.handleLabels)
 	mux.HandleFunc("POST /api/index", s.handleIndex)
 	mux.HandleFunc("GET /api/session/{id}", s.handleSessionStream)
+	mux.HandleFunc("GET /api/graph", s.handleGraph)
 
 	// SSE endpoint.
 	mux.HandleFunc("GET /events", s.broker.ServeHTTP)
@@ -90,7 +91,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	// Start file watcher.
-	watcher, err := NewFileWatcher(s.svc, s.broker, s.log)
+	watcher, err := NewFileWatcher(s.broker, s.log)
 	if err != nil {
 		s.log.Warn("file watcher unavailable", "err", err)
 	} else {

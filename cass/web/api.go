@@ -318,5 +318,29 @@ func parseTime(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unsupported time format: %s", s)
 }
 
+func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	// Optional time filter.
+	var since time.Time
+	if v := q.Get("since"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			since = time.Now().Add(-d)
+		}
+	}
+	if v := q.Get("after"); v != "" {
+		if t, err := parseTime(v); err == nil {
+			since = t
+		}
+	}
+
+	graph, err := s.svc.Graph(r.Context(), since)
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, graph)
+}
+
 // Ensure context is used (for future middleware).
 var _ = context.Background

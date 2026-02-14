@@ -24,6 +24,12 @@ func New(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
+	// SQLite only supports one writer at a time. Limit the pool to avoid
+	// holding idle connections that extend WAL checkpoints or cause SQLITE_BUSY.
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxIdleTime(30 * time.Second)
+
 	// Enable WAL mode for concurrent reads and busy timeout for contention.
 	for _, pragma := range []string{
 		"PRAGMA journal_mode=WAL",
@@ -355,8 +361,11 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		}
 		if statsJSON != "" {
 			var stats cass.SessionStats
-			if json.Unmarshal([]byte(statsJSON), &stats) == nil && len(stats.ToolBreakdown) > 0 {
-				h.ToolBreakdown = stats.ToolBreakdown
+			if json.Unmarshal([]byte(statsJSON), &stats) == nil {
+				if len(stats.ToolBreakdown) > 0 {
+					h.ToolBreakdown = stats.ToolBreakdown
+				}
+				h.Compactions = stats.Compactions
 			}
 		}
 		hits = append(hits, h)
@@ -700,6 +709,115 @@ func (s *Store) ResolveLabels(ctx context.Context, prefixes []string) (map[strin
 		}
 	}
 	return result, rows.Err()
+}
+
+// GraphData returns combined links and node metadata for the session graph.
+// If since is non-zero, only links after that time are included.
+func (s *Store) GraphData(ctx context.Context, since time.Time) (*cass.GraphData, error) {
+	// Get all links, optionally filtered by time.
+	links, err := s.Links(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("graph links: %w", err)
+	}
+
+	// Filter by time.
+	cutoff := ""
+	if !since.IsZero() {
+		cutoff = since.Format(time.RFC3339)
+	}
+	var filtered []cass.SessionLink
+	var minTS, maxTS string
+	for _, l := range links {
+		if cutoff != "" && l.Timestamp != "" && l.Timestamp < cutoff {
+			continue
+		}
+		filtered = append(filtered, l)
+		if l.Timestamp != "" {
+			if minTS == "" || l.Timestamp < minTS {
+				minTS = l.Timestamp
+			}
+			if maxTS == "" || l.Timestamp > maxTS {
+				maxTS = l.Timestamp
+			}
+		}
+	}
+
+	// Collect unique session IDs (iTerm2 short prefixes) from links.
+	seen := map[string]bool{}
+	for _, l := range filtered {
+		if l.SourceSession != "" {
+			seen[l.SourceSession] = true
+		}
+		if l.TargetSession != "" {
+			seen[l.TargetSession] = true
+		}
+	}
+
+	var prefixes []string
+	for id := range seen {
+		prefixes = append(prefixes, id)
+	}
+
+	// Resolve labels from session_mapping.
+	labels, err := s.ResolveLabels(ctx, prefixes)
+	if err != nil {
+		return nil, fmt.Errorf("graph labels: %w", err)
+	}
+
+	// Look up session stats for nodes that have a cass_session mapping.
+	nodeStats := map[string]struct {
+		ToolCalls int
+		Turns     int
+		Tokens    int
+		IsActive  bool
+	}{}
+	for id, label := range labels {
+		// Query from sessions table via the mapping's cass_session.
+		var toolCalls, turns, inputTokens, outputTokens, endedAt int
+		row := s.db.QueryRowContext(ctx,
+			`SELECT s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.ended_at
+			 FROM session_mapping m
+			 JOIN sessions s ON s.id = m.cass_session
+			 WHERE m.iterm_session LIKE ?
+			 LIMIT 1`,
+			label.ItermSession+"%")
+		if err := row.Scan(&toolCalls, &turns, &inputTokens, &outputTokens, &endedAt); err == nil {
+			// Consider active if ended in the last hour.
+			isActive := time.Since(time.Unix(int64(endedAt), 0)) < time.Hour
+			nodeStats[id] = struct {
+				ToolCalls int
+				Turns     int
+				Tokens    int
+				IsActive  bool
+			}{toolCalls, turns, inputTokens + outputTokens, isActive}
+		}
+	}
+
+	// Build nodes.
+	var nodes []cass.GraphNode
+	for _, id := range prefixes {
+		node := cass.GraphNode{ID: id}
+		if label, ok := labels[id]; ok {
+			node.Workspace = label.Workspace
+			node.Title = label.Title
+		}
+		if stats, ok := nodeStats[id]; ok {
+			node.ToolCalls = stats.ToolCalls
+			node.Turns = stats.Turns
+			node.Tokens = stats.Tokens
+			node.IsActive = stats.IsActive
+		}
+		nodes = append(nodes, node)
+	}
+
+	return &cass.GraphData{
+		Nodes: nodes,
+		Links: filtered,
+		TimeRange: cass.TimeRange{
+			Min: minTS,
+			Max: maxTS,
+		},
+	}, nil
 }
 
 // buildContent concatenates all message content for full-text indexing.
