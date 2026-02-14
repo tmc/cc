@@ -50,6 +50,9 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 	filesEdited := make(map[string]bool)
 
 	for _, e := range entries {
+		if e.Type == "system" && e.Subtype == "compact_boundary" {
+			s.Compactions++
+		}
 		if e.Message == nil {
 			continue
 		}

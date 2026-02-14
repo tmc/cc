@@ -26,10 +26,17 @@ type Entry struct {
 	// Custom title set via /rename command.
 	CustomTitle string `json:"customTitle,omitempty"`
 
+	// Subtype distinguishes entry variants (e.g. "compact_boundary").
+	Subtype string `json:"subtype,omitempty"`
+
 	// Summary fields.
-	Summary        string `json:"summary,omitempty"`
-	IsCompactSummary bool `json:"isCompactSummary,omitempty"`
-	CompactMetadata *CompactMetadata `json:"compactMetadata,omitempty"`
+	Summary          string           `json:"summary,omitempty"`
+	IsCompactSummary bool             `json:"isCompactSummary,omitempty"`
+	CompactMetadata  *CompactMetadata `json:"compactMetadata,omitempty"`
+
+	// Visibility hints.
+	IsVisibleInTranscriptOnly bool `json:"isVisibleInTranscriptOnly,omitempty"`
+	IsMeta                    bool `json:"isMeta,omitempty"`
 
 	// Progress fields.
 	Content string          `json:"content,omitempty"`

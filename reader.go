@@ -83,6 +83,7 @@ type SessionSummary struct {
 	AsstMessages int       `json:"asst_messages"`
 	ToolUses     int       `json:"tool_uses"`
 	TotalLines   int       `json:"total_lines"`
+	Compactions  int       `json:"compactions,omitempty"`
 	FirstPrompt  string    `json:"first_prompt,omitempty"`
 	CustomTitle  string    `json:"custom_title,omitempty"`
 }
@@ -115,6 +116,9 @@ func Summarize(file string, entries []Entry) SessionSummary {
 		}
 		if e.Type == "custom-title" && e.CustomTitle != "" {
 			s.CustomTitle = e.CustomTitle
+		}
+		if e.Type == "system" && e.Subtype == "compact_boundary" {
+			s.Compactions++
 		}
 		if e.Message != nil {
 			switch e.Message.Role {
