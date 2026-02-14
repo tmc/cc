@@ -131,6 +131,8 @@ type Hit struct {
 	IT2Sends     int    `json:"it2_sends,omitempty"`
 	IT2Screens   int `json:"it2_screens,omitempty"`
 	IT2Splits    int `json:"it2_splits,omitempty"`
+
+	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"`
 }
 
 // SessionLink represents an interaction between two iTerm2 sessions.

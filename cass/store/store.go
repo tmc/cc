@@ -307,7 +307,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	}
 
 	// Build query with BM25 ranking when doing FTS.
-	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits`
+	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json`
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -341,9 +341,10 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	for rows.Next() {
 		var h cass.Hit
 		var startedUnix, endedUnix int64
+		var statsJSON string
 		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
 			&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
-			&h.Sparkline, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits); err != nil {
+			&h.Sparkline, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		if startedUnix > 0 {
@@ -351,6 +352,12 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		}
 		if endedUnix > 0 {
 			h.EndedAt = time.Unix(endedUnix, 0).Format(time.RFC3339)
+		}
+		if statsJSON != "" {
+			var stats cass.SessionStats
+			if json.Unmarshal([]byte(statsJSON), &stats) == nil && len(stats.ToolBreakdown) > 0 {
+				h.ToolBreakdown = stats.ToolBreakdown
+			}
 		}
 		hits = append(hits, h)
 	}

@@ -10,7 +10,7 @@
 <div id="app"></div>
 <script type="module">
 import { html, render } from 'https://esm.sh/htm@3/preact?deps=preact@10';
-import { useState, useEffect, useCallback, useRef } from 'https://esm.sh/preact@10/hooks';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'https://esm.sh/preact@10/hooks';
 
 // --- API helpers ---
 
@@ -28,12 +28,13 @@ function qs(params) {
   return p.toString();
 }
 
-// --- Relative time ---
+// --- Utilities ---
 
 function relTime(ts) {
   if (!ts) return '';
   const d = Date.now() - new Date(ts).getTime();
   const m = Math.floor(d / 60000);
+  if (m < 1) return 'now';
   if (m < 60) return m + 'm ago';
   const h = Math.floor(m / 60);
   if (h < 24) return h + 'h ago';
@@ -54,13 +55,51 @@ function shortProject(ws) {
   return parts.slice(-2).join('/');
 }
 
-// --- Components ---
+function fmtDuration(secs) {
+  if (!secs) return '';
+  if (secs < 60) return secs + 's';
+  const m = Math.floor(secs / 60);
+  if (m < 60) return m + 'm';
+  const h = Math.floor(m / 60);
+  return h + 'h ' + (m % 60) + 'm';
+}
+
+function fmtNum(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
+  return '' + n;
+}
+
+// Tool color map for micro-bars.
+const TOOL_COLORS = {
+  Bash: 'var(--cyan)', Read: 'var(--green)', Write: 'var(--yellow)',
+  Edit: 'var(--orange)', Grep: 'var(--magenta)', Glob: 'var(--accent)',
+  Task: 'var(--dim)', WebFetch: 'var(--faint)',
+};
+
+// --- Tool micro-bar ---
+function ToolMicroBar({ breakdown }) {
+  if (!breakdown || Object.keys(breakdown).length === 0) return null;
+  const total = Object.values(breakdown).reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+  return html`
+    <div class="tool-bar">
+      ${Object.entries(breakdown).map(([name, count]) => html`
+        <div class="tool-bar-seg" style="width:${(count/total*100).toFixed(1)}%;background:${TOOL_COLORS[name]||'var(--faint)'}" title="${name}: ${count}"></div>
+      `)}
+    </div>
+  `;
+}
+
+// --- App ---
 
 function App() {
   const [tab, setTab] = useState('search');
   const [connected, setConnected] = useState(false);
-  const [toast, setToast] = useState('');
-  const toastRef = useRef(null);
+  const [toasts, setToasts] = useState([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const searchRef = useRef(null);
+  const toastId = useRef(0);
 
   // SSE connection.
   useEffect(() => {
@@ -81,10 +120,32 @@ function App() {
   }, []);
 
   function showToast(msg) {
-    setToast(msg);
-    if (toastRef.current) clearTimeout(toastRef.current);
-    toastRef.current = setTimeout(() => setToast(''), 3000);
+    const id = ++toastId.current;
+    setToasts(prev => [...prev.slice(-2), { id, msg, show: true }]);
+    setTimeout(() => {
+      setToasts(prev => prev.map(t => t.id === id ? { ...t, show: false } : t));
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 300);
+    }, 3000);
   }
+
+  // Global keyboard shortcuts.
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen(p => !p);
+        return;
+      }
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        if (e.key === 'Escape') { e.target.blur(); setPaletteOpen(false); }
+        return;
+      }
+      if (e.key === '/') { e.preventDefault(); setTab('search'); setTimeout(() => searchRef.current?.focus(), 50); return; }
+      if (e.key === 'Escape') { setPaletteOpen(false); return; }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return html`
     <div class="app">
@@ -95,104 +156,196 @@ function App() {
           ${connected ? 'live' : 'disconnected'}
         </div>
       </div>
-      <div class="tabs">
+      <div class="tabs" role="tablist">
         ${['search', 'graph', 'map', 'stats'].map(t => html`
-          <button class="tab ${tab === t ? 'active' : ''}" onClick=${() => setTab(t)}>
-            ${t}
-          </button>
+          <button class="tab ${tab === t ? 'active' : ''}" onClick=${() => setTab(t)}
+            role="tab" aria-selected=${tab === t}>${t}</button>
         `)}
       </div>
-      ${tab === 'search' && html`<${SearchPanel} />`}
+      ${tab === 'search' && html`<${SearchPanel} searchRef=${searchRef} />`}
       ${tab === 'graph' && html`<${GraphPanel} />`}
       ${tab === 'map' && html`<${MapPanel} />`}
       ${tab === 'stats' && html`<${StatsPanel} />`}
-      <div class="toast ${toast ? 'show' : ''}">${toast}</div>
+
+      <div class="toast-container" aria-live="polite">
+        ${toasts.map(t => html`<div class="toast ${t.show ? 'show' : ''}" key=${t.id}>${t.msg}</div>`)}
+      </div>
+
+      <${CommandPalette} open=${paletteOpen} onClose=${() => setPaletteOpen(false)}
+        onNavigate=${(id) => { setTab(id); setPaletteOpen(false); }}
+        onFocusSearch=${() => { setTab('search'); setPaletteOpen(false); setTimeout(() => searchRef.current?.focus(), 50); }} />
     </div>
   `;
 }
 
-function SearchPanel() {
+// --- Command Palette ---
+
+function CommandPalette({ open, onClose, onNavigate, onFocusSearch }) {
+  const [query, setQuery] = useState('');
+  const [focused, setFocused] = useState(0);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (open) { setQuery(''); setFocused(0); setTimeout(() => inputRef.current?.focus(), 50); }
+  }, [open]);
+
+  const actions = [
+    { label: 'Search sessions', hint: '/', action: onFocusSearch },
+    { label: 'View graph', hint: '', action: () => onNavigate('graph') },
+    { label: 'View map', hint: '', action: () => onNavigate('map') },
+    { label: 'View stats', hint: '', action: () => onNavigate('stats') },
+  ];
+
+  const filtered = query
+    ? actions.filter(a => a.label.toLowerCase().includes(query.toLowerCase()))
+    : actions;
+
+  function onKeyDown(e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setFocused(f => Math.min(f + 1, filtered.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setFocused(f => Math.max(f - 1, 0)); }
+    else if (e.key === 'Enter' && filtered[focused]) { filtered[focused].action(); }
+    else if (e.key === 'Escape') { onClose(); }
+  }
+
+  return html`
+    <div class="palette-backdrop ${open ? 'open' : ''}" onClick=${onClose}></div>
+    <div class="palette ${open ? 'open' : ''}" role="dialog" aria-label="Command palette">
+      <input ref=${inputRef} class="palette-input" type="text" placeholder="Type a command..."
+        value=${query} onInput=${e => { setQuery(e.target.value); setFocused(0); }} onKeyDown=${onKeyDown} />
+      <div class="palette-section">
+        <div class="palette-section-title">Actions</div>
+        ${filtered.map((a, i) => html`
+          <div class="palette-item ${i === focused ? 'focused' : ''}" onClick=${a.action}
+            onMouseEnter=${() => setFocused(i)}>
+            <span>${a.label}</span>
+            ${a.hint && html`<span class="palette-item-hint">${a.hint}</span>`}
+          </div>
+        `)}
+      </div>
+    </div>
+  `;
+}
+
+// --- Search Panel ---
+
+function SearchPanel({ searchRef }) {
   const [query, setQuery] = useState('');
   const [agent, setAgent] = useState('');
   const [workspace, setWorkspace] = useState('');
   const [since, setSince] = useState('');
+  const [sort, setSort] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [selectedIdx, setSelectedIdx] = useState(-1);
+
+  const effectiveSort = sort || (query ? 'relevance' : 'recent');
 
   const doSearch = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { q: query, agent, workspace, since, limit: '30' };
+      const params = { q: query, agent, workspace, since, sort: sort || '', limit: '30' };
       const r = await api('search?' + qs(params));
       setResults(r);
     } catch (e) {
       console.error('search:', e);
     }
     setLoading(false);
-  }, [query, agent, workspace, since]);
+  }, [query, agent, workspace, since, sort]);
 
-  // Debounced live search on any input change.
+  // Debounced live search.
   useEffect(() => {
     const id = setTimeout(doSearch, 250);
     return () => clearTimeout(id);
-  }, [query, agent, workspace, since]);
+  }, [query, agent, workspace, since, sort]);
 
-  // Auto-refresh on SSE events.
+  // Auto-refresh on SSE.
   useEffect(() => {
     const handler = () => doSearch();
     window.addEventListener('cass:refresh', handler);
     return () => window.removeEventListener('cass:refresh', handler);
   }, [doSearch]);
 
+  // j/k keyboard navigation.
+  useEffect(() => {
+    function onKey(e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      const hits = results?.hits;
+      if (!hits || hits.length === 0) return;
+      if (e.key === 'j') { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, hits.length - 1)); }
+      else if (e.key === 'k') { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
+      else if (e.key === 'Enter' && selectedIdx >= 0) { e.preventDefault(); setSelected(hits[selectedIdx]); }
+      else if (e.key === 'Escape' && selected) { e.preventDefault(); setSelected(null); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [results, selectedIdx, selected]);
+
+  const timePresets = [
+    { label: '1h', value: '1h' },
+    { label: '24h', value: '24h' },
+    { label: '7d', value: '168h' },
+    { label: '30d', value: '720h' },
+  ];
+
+  const sortModes = [
+    { value: 'recent', label: 'Recent' },
+    { value: 'relevance', label: 'Relevance' },
+    { value: 'started', label: 'Started' },
+    { value: 'oldest', label: 'Oldest' },
+  ];
+
   return html`
     <div>
       <div class="search-bar">
-        <input class="search-input" type="text" placeholder="search sessions..."
-          value=${query} onInput=${e => setQuery(e.target.value)}
-          autofocus />
+        <input ref=${searchRef} class="search-input" type="text" placeholder="search sessions..."
+          value=${query} onInput=${e => setQuery(e.target.value)} autofocus />
+        <span class="search-kbd">/</span>
       </div>
       <div class="filters">
+        <div class="filter-chips">
+          ${timePresets.map(t => html`
+            <button class="filter-chip ${since === t.value ? 'active' : ''}"
+              onClick=${() => setSince(since === t.value ? '' : t.value)}>${t.label}</button>
+          `)}
+        </div>
         <input class="filter-input" placeholder="agent" value=${agent}
-          onInput=${e => setAgent(e.target.value)} />
+          onInput=${e => setAgent(e.target.value)} style="width:100px" />
         <input class="filter-input" placeholder="workspace" value=${workspace}
           onInput=${e => setWorkspace(e.target.value)} />
-        <input class="filter-input" placeholder="since (e.g. 24h)" value=${since}
-          onInput=${e => setSince(e.target.value)} />
+        <span class="sort-group">
+          ${sortModes.map(m => html`
+            <button class="sort-pill ${effectiveSort === m.value ? 'active' : ''}"
+              onClick=${() => setSort(sort === m.value ? '' : m.value)}>${m.label}</button>
+          `)}
+        </span>
       </div>
-      ${loading && html`<div class="loading">searching...</div>`}
-      ${selected && html`<${SessionDetail} hit=${selected} onClose=${() => setSelected(null)} />`}
-      ${results && html`
+
+      ${loading && !results && html`<div class="loading">searching...</div>`}
+      ${results && html`<div class="result-count" style="text-align:right;padding:0 0 8px">${results.total_count || 0} results</div>`}
+      ${results && results.hits && results.hits.length > 0 && html`
         <ul class="results">
-          ${results.hits && results.hits.map((h, i) => html`
-            <${HitItem} key=${h.session_id} hit=${h} num=${i + 1} onClick=${() => setSelected(h)} />
+          ${results.hits.map((h, i) => html`
+            <${HitItem} key=${h.session_id} hit=${h} num=${i + 1}
+              isSelected=${selected?.session_id === h.session_id}
+              isFocused=${i === selectedIdx}
+              onClick=${() => { setSelected(h); setSelectedIdx(i); }} />
           `)}
         </ul>
-        <div class="result-count">${results.total_count || 0} results</div>
       `}
       ${results && (!results.hits || results.hits.length === 0) && !loading && html`
         <div class="empty">no results</div>
       `}
+
+      <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => setSelected(null)}></div>
+      <${SessionDetailPanel} hit=${selected} onClose=${() => setSelected(null)} />
     </div>
   `;
 }
 
-function fmtDuration(secs) {
-  if (!secs) return '';
-  if (secs < 60) return secs + 's';
-  const m = Math.floor(secs / 60);
-  if (m < 60) return m + 'm';
-  const h = Math.floor(m / 60);
-  return h + 'h ' + (m % 60) + 'm';
-}
+// --- Hit Item ---
 
-function fmtNum(n) {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
-  return '' + n;
-}
-
-function HitItem({ hit: h, num, onClick }) {
+function HitItem({ hit: h, num, onClick, isSelected, isFocused }) {
   const stats = [];
   if (h.tool_calls) stats.push(h.tool_calls + ' tools');
   if (h.turns > 1) stats.push(h.turns + ' turns');
@@ -208,11 +361,11 @@ function HitItem({ hit: h, num, onClick }) {
   if (h.it2_screens) it2.push(h.it2_screens + ' reads');
 
   return html`
-    <li class="hit" onClick=${onClick}>
+    <li class="hit ${isSelected ? 'selected' : ''}" onClick=${onClick} tabindex="0">
       <div class="hit-header">
         <span class="hit-num">${num}.</span>
         <span class="hit-agent">[${h.agent}]</span>
-        <span class="hit-title">${h.title}</span>
+        <span class="hit-title">${h.title || 'Untitled'}</span>
         ${h.sparkline && html`<span class="hit-sparkline">${h.sparkline}</span>`}
       </div>
       ${h.snippet && html`<div class="hit-snippet">${h.snippet}</div>`}
@@ -222,69 +375,197 @@ function HitItem({ hit: h, num, onClick }) {
         ${stats.length > 0 && html`<span class="hit-stats">${stats.join(' | ')}</span>`}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
       </div>
+      <${ToolMicroBar} breakdown=${h.tool_breakdown} />
     </li>
   `;
 }
 
-function SessionDetail({ hit, onClose }) {
-  const [entries, setEntries] = useState(null);
-  const [loading, setLoading] = useState(true);
+// --- Session Detail Panel (slide-in, SSE streaming, conversation view) ---
+
+function SessionDetailPanel({ hit, onClose }) {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [entryCount, setEntryCount] = useState(0);
+  const [expanded, setExpanded] = useState({});
+  const bodyRef = useRef(null);
 
   useEffect(() => {
+    if (!hit) { setEntries([]); setEntryCount(0); return; }
     setLoading(true);
-    api('session/' + hit.session_id).then(e => {
-      setEntries(e);
-      setLoading(false);
+    setStreaming(true);
+    setEntries([]);
+    setEntryCount(0);
+    setExpanded({});
+
+    const controller = new AbortController();
+
+    fetch('/api/session/' + hit.session_id, {
+      headers: { 'Accept': 'text/event-stream' },
+      signal: controller.signal,
+    }).then(res => {
+      if (!res.ok) throw new Error('failed');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      function read() {
+        reader.read().then(({ done, value }) => {
+          if (done) { setLoading(false); setStreaming(false); return; }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          const batch = [];
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') { setLoading(false); setStreaming(false); return; }
+              try { batch.push(JSON.parse(data)); } catch {}
+            }
+          }
+          if (batch.length > 0) {
+            setEntries(prev => [...prev, ...batch]);
+            setEntryCount(c => c + batch.length);
+          }
+          read();
+        }).catch(() => { setLoading(false); setStreaming(false); });
+      }
+      read();
     }).catch(err => {
-      console.error('session load:', err);
-      setLoading(false);
+      if (err.name === 'AbortError') return;
+      // Fallback to JSON.
+      api('session/' + hit.session_id).then(e => {
+        setEntries(Array.isArray(e) ? e : []);
+        setEntryCount(Array.isArray(e) ? e.length : 0);
+      }).catch(() => {}).finally(() => { setLoading(false); setStreaming(false); });
     });
-  }, [hit.session_id]);
+
+    return () => controller.abort();
+  }, [hit?.session_id]);
+
+  // Auto-scroll during streaming.
+  useEffect(() => {
+    if (streaming && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [entries.length, streaming]);
+
+  function toggleExpand(key) {
+    setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function renderConversation() {
+    return entries.map((entry, idx) => {
+      const msg = entry.message;
+      if (!msg) return null;
+      const role = msg.role || entry.type || 'unknown';
+      const content = msg.content;
+
+      if (Array.isArray(content)) {
+        return content.map((block, bi) => {
+          const key = idx + '-' + bi;
+          if (block.type === 'tool_use') {
+            const isExp = expanded[key];
+            return html`
+              <div class="conv-entry role-tool_use" key=${key} onClick=${() => toggleExpand(key)}>
+                <div class="conv-role">
+                  <span class="conv-tool-name">${block.name || 'tool'}</span>
+                  <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
+                </div>
+                ${isExp && html`<div class="conv-content" style="font-size:11px">${typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2)}</div>`}
+              </div>
+            `;
+          }
+          if (block.type === 'tool_result') {
+            const isErr = block.is_error;
+            const text = typeof block.content === 'string' ? block.content
+              : Array.isArray(block.content) ? block.content.map(c => c.text || '').join('\n')
+              : JSON.stringify(block.content);
+            const isExp = expanded[key];
+            return html`
+              <div class="conv-entry role-tool_result" key=${key} onClick=${() => toggleExpand(key)}>
+                <div class="conv-role">
+                  <span class="${isErr ? 'conv-error' : 'conv-success'}">${isErr ? 'error' : 'result'}</span>
+                  <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
+                </div>
+                <div class="conv-content ${isExp ? '' : 'collapsed'}">${text.slice(0, isExp ? 5000 : 200)}</div>
+              </div>
+            `;
+          }
+          if (block.type === 'text' || block.text) {
+            return html`
+              <div class="conv-entry role-${role}" key=${key}>
+                <div class="conv-role">${role}</div>
+                <div class="conv-content">${(block.text || '').slice(0, 2000)}</div>
+              </div>
+            `;
+          }
+          return null;
+        });
+      }
+
+      if (typeof content === 'string' && content.length > 0) {
+        return html`
+          <div class="conv-entry role-${role}" key=${idx}>
+            <div class="conv-role">${role}</div>
+            <div class="conv-content">${content.slice(0, 2000)}</div>
+          </div>
+        `;
+      }
+      return null;
+    });
+  }
 
   return html`
-    <div class="session-detail">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h3>${hit.title}</h3>
-        <button class="btn" onClick=${onClose}>close</button>
-      </div>
-      <div class="hit-meta" style="margin-bottom:12px">
-        <span class="hit-agent">[${hit.agent}]</span>
-        <span class="hit-workspace">${hit.workspace}</span>
-        <span class="hit-time">${hit.started_at}</span>
-      </div>
-      ${loading && html`<div class="loading">loading session...</div>`}
-      ${entries && html`
-        <div class="session-entries">
-          ${entries.map(e => html`
-            <div style="margin-bottom:8px">
-              <span style="color:var(--accent)">[${e.type}]</span>
-              ${e.message && e.message.content && html`
-                <span> ${typeof e.message.content === 'string'
-                  ? e.message.content.slice(0, 200)
-                  : JSON.stringify(e.message.content).slice(0, 200)
-                }</span>
-              `}
-            </div>
-          `)}
+    <div class="detail-panel ${hit ? 'open' : ''}" role="complementary" aria-label="Session detail">
+      ${hit && html`
+        <div class="detail-header">
+          <div class="detail-header-top">
+            <div class="detail-title">${hit.title || 'Untitled'}</div>
+            <button class="detail-close" onClick=${onClose}>close</button>
+          </div>
+          <div class="detail-badges">
+            <span class="hit-agent">[${hit.agent}]</span>
+            ${hit.workspace && html`<span class="hit-workspace">${shortProject(hit.workspace)}</span>`}
+            ${hit.started_at && html`<span class="hit-time">${relTime(hit.started_at)}${hit.ended_at ? ' → ' + relTime(hit.ended_at) : ''}</span>`}
+          </div>
+          <div class="detail-stat-row">
+            ${hit.tool_calls && html`<span>${hit.tool_calls} tools</span>`}
+            ${hit.turns > 1 && html`<span>${hit.turns} turns</span>`}
+            ${hit.files_edited && html`<span>${hit.files_edited} files</span>`}
+            ${hit.duration_secs && html`<span>${fmtDuration(hit.duration_secs)}</span>`}
+            ${(hit.input_tokens || hit.output_tokens) && html`<span>${fmtNum((hit.input_tokens||0)+(hit.output_tokens||0))} tok</span>`}
+          </div>
+        </div>
+        ${streaming && html`
+          <div class="detail-streaming">
+            <div class="streaming-dot"></div>
+            streaming... ${entryCount} entries
+          </div>
+        `}
+        <div class="detail-body" ref=${bodyRef}>
+          ${loading && entries.length === 0 && html`<div class="loading">loading session...</div>`}
+          <div class="conversation">${renderConversation()}</div>
         </div>
       `}
     </div>
   `;
 }
 
+// --- Graph Panel ---
+
 function GraphPanel() {
   const [links, setLinks] = useState([]);
   const [labels, setLabels] = useState({});
   const [since, setSince] = useState('24h');
   const [loading, setLoading] = useState(true);
+  const [zoom, setZoom] = useState(1);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const l = await api('links?' + qs({ since }));
       setLinks(l || []);
-
-      // Collect node IDs and resolve labels.
       const ids = new Set();
       (l || []).forEach(link => {
         if (link.source_session) ids.add(link.source_session.slice(0, 8));
@@ -294,9 +575,7 @@ function GraphPanel() {
         const lb = await api('labels?' + qs({ ids: [...ids].join(',') }));
         setLabels(lb || {});
       }
-    } catch (e) {
-      console.error('graph:', e);
-    }
+    } catch (e) { console.error('graph:', e); }
     setLoading(false);
   }, [since]);
 
@@ -306,19 +585,20 @@ function GraphPanel() {
     return () => window.removeEventListener('cass:refresh', load);
   }, [load]);
 
+  function onWheel(e) {
+    e.preventDefault();
+    setZoom(z => Math.max(0.3, Math.min(3, z + (e.deltaY > 0 ? -0.1 : 0.1))));
+  }
+
   if (loading) return html`<div class="loading">loading graph...</div>`;
   if (links.length === 0) return html`<div class="empty">no inter-session links found</div>`;
 
-  // Collect unique nodes.
   const nodeSet = new Set();
   links.forEach(l => {
-    const src = l.source_session ? l.source_session.slice(0, 8) : '?';
-    nodeSet.add(src);
+    nodeSet.add(l.source_session ? l.source_session.slice(0, 8) : '?');
     nodeSet.add(l.target_session.slice(0, 8));
   });
   const nodes = [...nodeSet];
-
-  // Layout: arrange in a circle.
   const cx = 400, cy = 250, radius = 180;
   const nodePos = {};
   nodes.forEach((n, i) => {
@@ -332,62 +612,85 @@ function GraphPanel() {
     return id;
   }
 
+  const timePresets = [
+    { label: '1h', value: '1h' }, { label: '24h', value: '24h' },
+    { label: '7d', value: '168h' }, { label: '30d', value: '720h' },
+  ];
+
   return html`
     <div>
       <div class="filters" style="margin-bottom:12px">
-        <input class="filter-input" placeholder="since (e.g. 24h)" value=${since}
-          onInput=${e => setSince(e.target.value)} />
-        <button class="btn" onClick=${load}>refresh</button>
+        <div class="filter-chips">
+          ${timePresets.map(t => html`
+            <button class="filter-chip ${since === t.value ? 'active' : ''}"
+              onClick=${() => setSince(t.value)}>${t.label}</button>
+          `)}
+        </div>
+        <button class="btn btn-sm" onClick=${load}>refresh</button>
       </div>
-      <div class="graph-container">
-        <svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <marker id="arrowMsg" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-              <path d="M0,0 L8,3 L0,6" fill="var(--accent)" />
-            </marker>
-            <marker id="arrowObs" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-              <path d="M0,0 L8,3 L0,6" fill="var(--yellow)" />
-            </marker>
-          </defs>
-          ${links.map(l => {
-            const src = l.source_session ? l.source_session.slice(0, 8) : '?';
-            const dst = l.target_session.slice(0, 8);
-            const p1 = nodePos[src] || { x: cx, y: cy };
-            const p2 = nodePos[dst] || { x: cx, y: cy };
-            const cls = l.kind === 'observation' ? 'graph-edge-obs' : 'graph-edge-msg';
-            return html`<line x1=${p1.x} y1=${p1.y} x2=${p2.x} y2=${p2.y} class=${cls} />`;
-          })}
-          ${nodes.map(n => {
-            const p = nodePos[n];
-            const label = nodeLabel(n);
-            const w = Math.max(80, label.length * 7 + 16);
-            return html`
-              <g class="graph-node" transform="translate(${p.x - w/2},${p.y - 14})">
-                <rect width=${w} height="28" />
-                <text x=${w/2} y="18" text-anchor="middle">${label}</text>
-              </g>
-            `;
-          })}
-        </svg>
+      <div class="graph-container" onWheel=${onWheel}>
+        <div class="graph-inner" style="transform:scale(${zoom})">
+          <svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrowMsg" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6" fill="var(--accent)" />
+              </marker>
+              <marker id="arrowObs" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6" fill="var(--faint)" />
+              </marker>
+            </defs>
+            ${links.map((l, i) => {
+              const src = l.source_session ? l.source_session.slice(0, 8) : '?';
+              const dst = l.target_session.slice(0, 8);
+              const p1 = nodePos[src] || { x: cx, y: cy };
+              const p2 = nodePos[dst] || { x: cx, y: cy };
+              const cls = l.kind === 'observation' ? 'graph-edge-obs' : 'graph-edge-msg';
+              // Quadratic bezier for curved edges.
+              const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+              const dx = p2.x - p1.x, dy = p2.y - p1.y;
+              const len = Math.max(Math.sqrt(dx*dx + dy*dy), 1);
+              const cpx = mx - dy * 30 / len, cpy = my + dx * 30 / len;
+              return html`<path key=${i} d="M${p1.x},${p1.y} Q${cpx},${cpy} ${p2.x},${p2.y}" class=${cls} />`;
+            })}
+            ${nodes.map(n => {
+              const p = nodePos[n];
+              const label = nodeLabel(n);
+              const w = Math.max(80, label.length * 7 + 16);
+              return html`
+                <g class="graph-node" transform="translate(${p.x - w/2},${p.y - 14})" key=${n}>
+                  <rect width=${w} height="28" />
+                  <text x=${w/2} y="18" text-anchor="middle">${label}</text>
+                </g>
+              `;
+            })}
+          </svg>
+        </div>
+        <div class="graph-zoom">
+          <button onClick=${() => setZoom(z => Math.min(3, z + 0.2))}>+</button>
+          <button onClick=${() => setZoom(1)}>1:1</button>
+          <button onClick=${() => setZoom(z => Math.max(0.3, z - 0.2))}>-</button>
+        </div>
       </div>
       <div class="result-count">${nodes.length} nodes, ${links.length} links</div>
     </div>
   `;
 }
 
+// --- Map Panel ---
+
 function MapPanel() {
   const [filter, setFilter] = useState('');
   const [mappings, setMappings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [sortCol, setSortCol] = useState('');
+  const [sortDir, setSortDir] = useState('asc');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const m = await api('mappings?' + qs({ filter }));
       setMappings(m || []);
-    } catch (e) {
-      console.error('mappings:', e);
-    }
+    } catch (e) { console.error('mappings:', e); }
     setLoading(false);
   }, [filter]);
 
@@ -397,6 +700,27 @@ function MapPanel() {
     return () => window.removeEventListener('cass:refresh', load);
   }, [load]);
 
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  }
+
+  const sorted = useMemo(() => {
+    if (!sortCol || mappings.length === 0) return mappings;
+    return [...mappings].sort((a, b) => {
+      const va = a[sortCol] || '', vb = b[sortCol] || '';
+      const cmp = typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb));
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [mappings, sortCol, sortDir]);
+
+  const columns = [
+    { key: 'iterm_session', label: 'iTerm2' },
+    { key: 'cass_session', label: 'CASS' },
+    { key: 'workspace', label: 'Project' },
+    { key: 'title', label: 'Title' },
+  ];
+
   return html`
     <div>
       <div class="filters" style="margin-bottom:12px">
@@ -405,19 +729,20 @@ function MapPanel() {
       </div>
       ${loading && html`<div class="loading">loading mappings...</div>`}
       ${!loading && mappings.length === 0 && html`<div class="empty">no session mappings found</div>`}
-      ${mappings.length > 0 && html`
+      ${sorted.length > 0 && html`
         <table class="map-table">
           <thead>
             <tr>
-              <th>iTerm2</th>
-              <th>CASS</th>
-              <th>Project</th>
-              <th>Title</th>
+              ${columns.map(c => html`
+                <th class="${sortCol === c.key ? 'sorted' : ''}" onClick=${() => toggleSort(c.key)}>
+                  ${c.label} <span class="sort-arrow">${sortCol === c.key ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+                </th>
+              `)}
             </tr>
           </thead>
           <tbody>
-            ${mappings.map(m => html`
-              <tr>
+            ${sorted.map(m => html`
+              <tr key=${m.iterm_session}>
                 <td>${m.iterm_session ? m.iterm_session.slice(0, 8) : ''}</td>
                 <td>${m.cass_session ? m.cass_session.slice(0, 8) : ''}</td>
                 <td style="color:var(--green)">${shortProject(m.workspace)}</td>
@@ -426,11 +751,13 @@ function MapPanel() {
             `)}
           </tbody>
         </table>
-        <div class="result-count">${mappings.length} mappings</div>
+        <div class="result-count">${sorted.length} mappings</div>
       `}
     </div>
   `;
 }
+
+// --- Stats Panel ---
 
 function StatsPanel() {
   const [basic, setBasic] = useState(null);
@@ -446,9 +773,7 @@ function StatsPanel() {
       ]);
       setBasic(b);
       setAgg(a);
-    } catch (e) {
-      console.error('stats:', e);
-    }
+    } catch (e) { console.error('stats:', e); }
   }, [since]);
 
   useEffect(() => { load(); }, [load]);
@@ -459,12 +784,8 @@ function StatsPanel() {
 
   async function reindex(force) {
     setIndexing(true);
-    try {
-      const r = await api('index?force=' + force, { method: 'POST' });
-      load();
-    } catch (e) {
-      alert('Index error: ' + e.message);
-    }
+    try { await api('index?force=' + force, { method: 'POST' }); load(); }
+    catch (e) { alert('Index error: ' + e.message); }
     setIndexing(false);
   }
 
@@ -478,27 +799,40 @@ function StatsPanel() {
     <div class="stat-card">
       <div class="stat-label">${label}</div>
       <div class="stat-value">${value}</div>
-      ${sub && html`<div style="font-size:11px;color:var(--dim);margin-top:4px">${sub}</div>`}
+      ${sub && html`<div class="stat-sub">${sub}</div>`}
     </div>
   `;
 
-  // Sessions per day sparkline.
+  // Sessions per day SVG bar chart.
   const daily = agg.sessions_per_day || {};
   const days = Object.keys(daily).sort();
   const dayVals = days.map(d => daily[d]);
   const maxDay = Math.max(...dayVals, 1);
-  const bars = '▁▂▃▄▅▆▇█';
-  const dailySparkline = dayVals.map(v => bars[Math.min(Math.floor(v / maxDay * 7), 7)]).join('');
+
+  // Workspace leaderboard.
+  const wsEntries = agg.workspace_top
+    ? Object.entries(agg.workspace_top).sort((a, b) => b[1] - a[1])
+    : [];
+  const wsMax = wsEntries.length > 0 ? wsEntries[0][1] : 1;
+
+  const timePresets = [
+    { label: 'All', value: '' }, { label: '24h', value: '24h' },
+    { label: '7d', value: '168h' }, { label: '30d', value: '720h' },
+  ];
 
   return html`
     <div>
       <div class="filters" style="margin-bottom:12px">
-        <input class="filter-input" placeholder="since (e.g. 24h, 168h)" value=${since}
-          onInput=${e => setSince(e.target.value)} style="width:200px" />
-        <button class="btn" onClick=${() => reindex(false)} disabled=${indexing}>
+        <div class="filter-chips">
+          ${timePresets.map(t => html`
+            <button class="filter-chip ${since === t.value ? 'active' : ''}"
+              onClick=${() => setSince(t.value)}>${t.label}</button>
+          `)}
+        </div>
+        <button class="btn btn-sm" onClick=${() => reindex(false)} disabled=${indexing}>
           ${indexing ? 'indexing...' : 're-index'}
         </button>
-        <button class="btn" onClick=${() => reindex(true)} disabled=${indexing}>full</button>
+        <button class="btn btn-sm" onClick=${() => reindex(true)} disabled=${indexing}>full</button>
       </div>
 
       <div class="stats-grid">
@@ -518,29 +852,32 @@ function StatsPanel() {
       </div>
 
       ${days.length > 0 && html`
-        <div style="margin-top:16px">
-          <div class="stat-label" style="margin-bottom:4px">sessions per day (30d)</div>
-          <div style="font-family:var(--mono);font-size:16px;letter-spacing:2px">${dailySparkline}</div>
-          <div style="font-size:11px;color:var(--dim);margin-top:2px">
+        <div class="chart-section">
+          <div class="stat-label" style="margin-bottom:8px">sessions per day (30d)</div>
+          <svg viewBox="0 0 ${Math.max(days.length * 16, 100)} 80" preserveAspectRatio="none" style="height:60px">
+            ${dayVals.map((v, i) => {
+              const barH = Math.max(1, (v / maxDay) * 60);
+              const x = i * (100 / days.length);
+              const w = Math.max(1, (100 / days.length) - 1);
+              return html`<rect x="${x}%" y=${65 - barH} width="${w}%" height=${barH} fill="var(--accent)" opacity="0.7"><title>${days[i]}: ${v}</title></rect>`;
+            })}
+          </svg>
+          <div style="font-size:10px;color:var(--faint);margin-top:4px">
             ${days[0]} — ${days[days.length - 1]} (peak: ${Math.max(...dayVals)}/day)
           </div>
         </div>
       `}
 
-      ${agg.workspace_top && html`
-        <div style="margin-top:16px">
+      ${wsEntries.length > 0 && html`
+        <div class="chart-section">
           <div class="stat-label" style="margin-bottom:8px">top workspaces</div>
-          <table class="map-table">
-            <thead><tr><th>workspace</th><th>sessions</th></tr></thead>
-            <tbody>
-              ${Object.entries(agg.workspace_top).sort((a,b) => b[1] - a[1]).map(([ws, cnt]) => html`
-                <tr>
-                  <td style="color:var(--green)">${shortProject(ws)}</td>
-                  <td>${cnt}</td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
+          ${wsEntries.map(([ws, cnt]) => html`
+            <div class="ws-row" key=${ws}>
+              <span class="ws-label" title=${ws}>${shortProject(ws)}</span>
+              <div class="ws-track"><div class="ws-fill" style="width:${(cnt/wsMax*100).toFixed(1)}%"></div></div>
+              <span class="ws-count">${cnt}</span>
+            </div>
+          `)}
         </div>
       `}
     </div>
