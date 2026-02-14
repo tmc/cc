@@ -47,6 +47,21 @@ func TestWorkspaceFromPath(t *testing.T) {
 			path: "/home/user/.claude/projects/-root/session.jsonl",
 			want: "/root",
 		},
+		{
+			name: "subagent session nested under session-id dir",
+			path: "/home/user/.claude/projects/-Volumes-tmc-myproject/7b720b28-662f-4c46/subagents/agent-a95e4e0.jsonl",
+			want: "/Volumes/tmc/myproject",
+		},
+		{
+			name: "tool-results file nested under session-id dir",
+			path: "/home/user/.claude/projects/-Volumes-work/a4581d87-b3ee-474f/tool-results/toolu_abc.txt",
+			want: "/Volumes/work",
+		},
+		{
+			name: "macOS private var temp path encoding",
+			path: "/home/user/.claude/projects/-private-var-folders-kj-abc-T-tmp-xyz/session.jsonl",
+			want: "/private/var/folders/kj/abc/T/tmp/xyz",
+		},
 	}
 
 	for _, tt := range tests {
@@ -96,6 +111,33 @@ func TestTitleFromSummary(t *testing.T) {
 				File:        "/path/to/session.jsonl",
 			},
 			want: "12345678901234567890123456789012345678901234567890123456789012345678901234567890...",
+		},
+		{
+			name: "custom title preferred over prompt",
+			summary: cc.SessionSummary{
+				CustomTitle: "test-session-alpha",
+				FirstPrompt: "Fix the login bug",
+				File:        "/path/to/session.jsonl",
+			},
+			want: "test-session-alpha",
+		},
+		{
+			name: "custom title preferred over long prompt",
+			summary: cc.SessionSummary{
+				CustomTitle: "my-project",
+				FirstPrompt: "This is a very long prompt that exceeds eighty characters and should be truncated with an ellipsis at the end",
+				File:        "/path/to/session.jsonl",
+			},
+			want: "my-project",
+		},
+		{
+			name: "empty custom title falls through to prompt",
+			summary: cc.SessionSummary{
+				CustomTitle: "",
+				FirstPrompt: "Fix the login bug",
+				File:        "/path/to/session.jsonl",
+			},
+			want: "Fix the login bug",
 		},
 		{
 			name: "empty prompt falls back to filename",
