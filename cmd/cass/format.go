@@ -77,6 +77,29 @@ func formatSnippet(s string) string {
 	return snippetStyle.Render(s)
 }
 
+// durationStyle renders session duration.
+var durationStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // Magenta.
+
+// formatDuration formats seconds as a compact human-readable duration.
+// 0 -> "", 45 -> "45s", 300 -> "5m", 3900 -> "1h 5m", 7200 -> "2h"
+func formatDuration(secs int) string {
+	if secs <= 0 {
+		return ""
+	}
+	h := secs / 3600
+	m := (secs % 3600) / 60
+	switch {
+	case h > 0 && m > 0:
+		return fmt.Sprintf("%dh %dm", h, m)
+	case h > 0:
+		return fmt.Sprintf("%dh", h)
+	case m > 0:
+		return fmt.Sprintf("%dm", m)
+	default:
+		return fmt.Sprintf("%ds", secs)
+	}
+}
+
 // relativeTime formats a duration since a timestamp as a human-readable string.
 func relativeTime(ts string) string {
 	if ts == "" {

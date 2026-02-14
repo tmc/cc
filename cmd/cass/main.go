@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -138,6 +139,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	agent := fs.String("agent", "", "filter by agent slug")
 	workspace := fs.String("workspace", "", "filter by workspace path or project name")
+	pwd := fs.Bool("pwd", false, "filter to current working directory")
 	since := fs.Duration("since", 0, "sessions within duration (e.g. 12h, 24h, 168h)")
 	after := fs.String("after", "", "sessions after date (RFC3339 or YYYY-MM-DD)")
 	before := fs.String("before", "", "sessions before date (RFC3339 or YYYY-MM-DD)")
@@ -146,12 +148,25 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 
 	query := strings.Join(fs.Args(), " ")
 
+	ws := *workspace
+	if *pwd && ws == "" {
+		if wd, err := os.Getwd(); err == nil {
+			if rp, err := filepath.EvalSymlinks(wd); err == nil {
+				wd = rp
+			}
+			// The workspace path stored in the DB uses dash-encoded paths
+			// where dots in domain names become slashes (github.com → github/com).
+			// Match using the last path components to avoid this mismatch.
+			ws = filepath.Base(filepath.Dir(wd)) + "/" + filepath.Base(wd)
+		}
+	}
+
 	req := cass.SearchRequest{
 		Query: query,
 		Limit: *limit,
 		Filters: cass.Filters{
 			Agent:     *agent,
-			Workspace: *workspace,
+			Workspace: ws,
 		},
 	}
 
@@ -290,13 +305,21 @@ func printHit(num int, h cass.Hit) {
 		fmt.Printf("    %s\n", formatSnippet(h.Snippet))
 	}
 
-	// Line 3: project, time, and stats.
+	// Line 3: project, time, duration, and stats.
 	var meta []string
 	if project != "" {
 		meta = append(meta, workspaceStyle.Render(project))
 	}
 	if when != "" {
-		meta = append(meta, timeStyle.Render(when))
+		lastActivity := relativeTime(h.EndedAt)
+		if lastActivity != "" && lastActivity != when {
+			meta = append(meta, timeStyle.Render(when+" → "+lastActivity))
+		} else {
+			meta = append(meta, timeStyle.Render(when))
+		}
+	}
+	if dur := formatDuration(h.DurationSecs); dur != "" {
+		meta = append(meta, durationStyle.Render(dur))
 	}
 
 	// Stats chips.
@@ -329,6 +352,9 @@ func printHit(num int, h cass.Hit) {
 			it2 = append(it2, fmt.Sprintf("%d reads", h.IT2Screens))
 		}
 		stats = append(stats, "it2:"+strings.Join(it2, ","))
+	}
+	if h.Sparkline != "" {
+		stats = append(stats, h.Sparkline)
 	}
 	if len(stats) > 0 {
 		meta = append(meta, labelStyle.Render(strings.Join(stats, " | ")))

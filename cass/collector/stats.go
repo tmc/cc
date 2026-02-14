@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
@@ -114,7 +115,56 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 		}
 	}
 
+	s.Sparkline = buildSparkline(entries)
 	return s
+}
+
+// buildSparkline buckets entry timestamps into slots and returns a Unicode sparkline.
+func buildSparkline(entries []cc.Entry) string {
+	const buckets = 16
+	const bars = " ▁▂▃▄▅▆▇█"
+
+	if len(entries) < 2 {
+		return ""
+	}
+	first := entries[0].Timestamp
+	last := entries[len(entries)-1].Timestamp
+	if first.IsZero() || last.IsZero() || !last.After(first) {
+		return ""
+	}
+
+	span := last.Sub(first)
+	counts := make([]int, buckets)
+	for _, e := range entries {
+		if e.Timestamp.IsZero() {
+			continue
+		}
+		pos := int(e.Timestamp.Sub(first) * time.Duration(buckets) / span)
+		if pos >= buckets {
+			pos = buckets - 1
+		}
+		counts[pos]++
+	}
+
+	// Find max for scaling.
+	max := 0
+	for _, c := range counts {
+		if c > max {
+			max = c
+		}
+	}
+	if max == 0 {
+		return ""
+	}
+
+	barsRunes := []rune(bars)
+	levels := len(barsRunes) - 1
+	var sb strings.Builder
+	for _, c := range counts {
+		level := c * levels / max
+		sb.WriteRune(barsRunes[level])
+	}
+	return sb.String()
 }
 
 func countIT2Commands(cmd string, s *cass.SessionStats) {

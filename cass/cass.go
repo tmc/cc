@@ -106,6 +106,7 @@ type Hit struct {
 	Workspace  string  `json:"workspace,omitempty"`
 	SourcePath string  `json:"source_path,omitempty"`
 	StartedAt  string  `json:"started_at,omitempty"`
+	EndedAt    string  `json:"ended_at,omitempty"`
 
 	// Stats summary (populated when available).
 	ToolCalls    int `json:"tool_calls,omitempty"`
@@ -114,8 +115,9 @@ type Hit struct {
 	OutputTokens int `json:"output_tokens,omitempty"`
 	FilesEdited  int `json:"files_edited,omitempty"`
 	LinesWritten int `json:"lines_written,omitempty"`
-	DurationSecs int `json:"duration_secs,omitempty"`
-	IT2Sends     int `json:"it2_sends,omitempty"`
+	DurationSecs int    `json:"duration_secs,omitempty"`
+	Sparkline    string `json:"sparkline,omitempty"`
+	IT2Sends     int    `json:"it2_sends,omitempty"`
 	IT2Screens   int `json:"it2_screens,omitempty"`
 	IT2Splits    int `json:"it2_splits,omitempty"`
 }
@@ -168,6 +170,10 @@ type SessionStats struct {
 	TeamInboxSends  int `json:"team_inbox_sends"`  // Inbox message sends.
 	TeamTaskOps     int `json:"team_task_ops"`      // Task create/update/list.
 	TeamSpawns      int `json:"team_spawns"`        // Agent spawns via ccspawn.
+
+	// Activity sparkline: message counts bucketed into time slots.
+	// Encoded as a string of Unicode block chars (▁▂▃▄▅▆▇█).
+	Sparkline string `json:"sparkline,omitempty"`
 }
 
 // DeleteFilter specifies which sessions to remove.
