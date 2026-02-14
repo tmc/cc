@@ -9,6 +9,11 @@ import (
 	"github.com/tmc/cc/cass"
 )
 
+func mustJSON(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
+}
+
 func bashToolUseEntry(role, command string, ts time.Time) cc.Entry {
 	input, _ := json.Marshal(map[string]string{"command": command})
 	blocks := []cc.ContentBlock{
@@ -184,6 +189,27 @@ func TestExtractLinks(t *testing.T) {
 			wantCount: 1,
 		},
 		{
+			name: "resumed session source ID from first iterm session",
+			entries: []cc.Entry{
+				// Early in the session: original iTerm2 pane.
+				toolResultEntry("[it2:send-text src=" + selfSID + " dst=" + targetSID + "]"),
+				bashToolUseEntry("assistant", `it2 session send-text "`+targetSID+`" "before resume"`, ts),
+				// Session resumed in a new iTerm2 pane (different src).
+				toolResultEntry("[it2:send-text src=22222222-3333-4444-5555-666666666666 dst=99999999-AAAA-BBBB-CCCC-DDDDDDDDDDDD]"),
+				bashToolUseEntry("assistant", `it2 session send-text "99999999-AAAA-BBBB-CCCC-DDDDDDDDDDDD" "after resume"`, ts),
+			},
+			wantCount: 2,
+			check: func(t *testing.T, links []cass.SessionLink) {
+				// Both links should carry the first iTerm2 session ID as source,
+				// because ExtractLinks does a single first-pass to find selfID.
+				for i, link := range links {
+					if link.SourceSession != selfSID {
+						t.Errorf("links[%d].SourceSession = %q, want %q (first iterm session)", i, link.SourceSession, selfSID)
+					}
+				}
+			},
+		},
+		{
 			name: "timestamp formatted in link",
 			entries: []cc.Entry{
 				bashToolUseEntry("assistant", `it2 session send-text "`+targetSID+`" "msg"`, ts),
@@ -249,6 +275,74 @@ func TestExtractLinks_FalsePositiveAvoidance(t *testing.T) {
 	}
 }
 
+// TestExtractLinks_ForkedSession verifies that link extraction works when a
+// session was forked (resumed/continued from another session). The JSONL file
+// may contain entries from the parent session followed by entries from the fork.
+func TestExtractLinks_ForkedSession(t *testing.T) {
+	ts := time.Date(2025, 2, 14, 10, 0, 0, 0, time.UTC)
+	parentSID := "7B720B28-662F-4C46-B542-3DB7DB19E20F"
+	targetSID := "EEEEEEEE-FFFF-0000-1111-222222222222"
+
+	// Simulate a forked session: first entry has parentSessionId,
+	// then assistant commands appear from the fork.
+	entries := []cc.Entry{
+		// Carry-over from parent (user message with parent's sessionId).
+		{
+			SessionID: parentSID,
+			Timestamp: ts,
+			Message: &cc.Message{
+				Role:    "user",
+				Content: mustJSON("continue this work"),
+			},
+		},
+		// Fork's own assistant entry with it2 command.
+		bashToolUseEntry("assistant", `it2 session send-text "`+targetSID+`" "from fork"`, ts.Add(time.Minute)),
+	}
+
+	links := ExtractLinks(entries)
+	if len(links) != 1 {
+		t.Fatalf("got %d links, want 1", len(links))
+	}
+	if links[0].TargetSession != targetSID {
+		t.Errorf("target = %q, want %q", links[0].TargetSession, targetSID)
+	}
+	if links[0].Text != "from fork" {
+		t.Errorf("text = %q, want %q", links[0].Text, "from fork")
+	}
+}
+
+// TestExtractLinks_GetBufferFalsePositive verifies get-buffer output is not
+// scanned for target session IDs, same as get-screen.
+func TestExtractLinks_GetBufferFalsePositive(t *testing.T) {
+	observedSID := "D9DD130C-09DB-4B7B-BAB0-42B9A8CDF0FB"
+	otherSID := "11111111-2222-3333-4444-555555555555"
+
+	entries := []cc.Entry{
+		bashToolUseEntry("assistant", `it2 session get-buffer "`+observedSID+`" --lines 100`, time.Now()),
+		// Tool result contains it2 commands from the observed session's scrollback.
+		{
+			ToolUseResult: &cc.ToolUseResult{
+				Stdout: "$ it2 session send-text \"" + otherSID + "\" \"leaked command\"\n" +
+					"some other buffer content\n",
+			},
+		},
+	}
+
+	links := ExtractLinks(entries)
+
+	for _, link := range links {
+		if link.TargetSession == otherSID {
+			t.Errorf("false positive: extracted link to %q from get-buffer output", otherSID)
+		}
+	}
+	if len(links) != 1 {
+		t.Fatalf("got %d links, want 1", len(links))
+	}
+	if links[0].Action != "get-buffer" {
+		t.Errorf("action = %q, want %q", links[0].Action, "get-buffer")
+	}
+}
+
 func TestExtractItermSessionID(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -307,6 +401,17 @@ func TestExtractItermSessionID(t *testing.T) {
 			entries: []cc.Entry{
 				toolResultEntry("[it2:send-text src=AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE dst=11111111-2222-3333-4444-555555555555]"),
 				toolResultEntry("[it2:send-text src=11111111-2222-3333-4444-555555555555 dst=AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE]"),
+			},
+			want: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+		},
+		{
+			name: "resumed session returns first iterm ID",
+			entries: []cc.Entry{
+				// First iTerm2 session (original).
+				toolResultEntry("[it2:send-text src=AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE dst=11111111-2222-3333-4444-555555555555]"),
+				// Later the session was resumed in a new iTerm2 pane.
+				// The second src= is from the new pane but extractItermSessionID returns the first.
+				toolResultEntry("[it2:send-text src=22222222-3333-4444-5555-666666666666 dst=77777777-8888-9999-AAAA-BBBBBBBBBBBB]"),
 			},
 			want: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
 		},
