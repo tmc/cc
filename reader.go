@@ -120,7 +120,7 @@ func Summarize(file string, entries []Entry) SessionSummary {
 		if e.Type == "system" && e.Subtype == "compact_boundary" {
 			s.Compactions++
 		}
-		if e.Message != nil {
+		if e.Message != nil && !e.IsCompactSummary {
 			switch e.Message.Role {
 			case "user":
 				s.UserMessages++
