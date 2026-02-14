@@ -798,6 +798,7 @@ mark.search-hl {
 @media (max-width: 640px) {
   body { padding: 8px 12px; }
   .header h1 span { display: none; }
+  .header-stats { display: none; }
   .filter-input { width: 100px; }
   .search-input { font-size: 16px; }
   .search-kbd { display: none; }
