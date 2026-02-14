@@ -75,6 +75,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/index", s.handleIndex)
 	mux.HandleFunc("GET /api/session/{id}", s.handleSessionStream)
 	mux.HandleFunc("GET /api/graph", s.handleGraph)
+	mux.HandleFunc("GET /api/teams", s.handleTeams)
+	mux.HandleFunc("GET /api/teams/{name}", s.handleTeamDetail)
+	mux.HandleFunc("GET /api/teams/{name}/inbox/{agent}", s.handleTeamInbox)
+	mux.HandleFunc("POST /api/teams/{name}/inbox/{agent}", s.handleTeamInbox)
 
 	// SSE endpoint.
 	mux.HandleFunc("GET /events", s.broker.ServeHTTP)

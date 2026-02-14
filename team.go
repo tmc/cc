@@ -25,6 +25,10 @@ type TeamMember struct {
 	Name          string   `json:"name"`
 	AgentType     string   `json:"agentType"`
 	Model         string   `json:"model,omitempty"`
+	Color         string   `json:"color,omitempty"`
+	Prompt        string   `json:"prompt,omitempty"`
+	BackendType   string   `json:"backendType,omitempty"`
+	IsActive      bool     `json:"isActive,omitempty"`
 	JoinedAt      int64    `json:"joinedAt"`
 	TmuxPaneID    string   `json:"tmuxPaneId,omitempty"`
 	CWD           string   `json:"cwd"`

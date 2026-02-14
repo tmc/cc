@@ -774,31 +774,29 @@ func (s *Store) GraphData(ctx context.Context, since time.Time) (*cass.GraphData
 	}
 
 	// Look up session stats for nodes that have a cass_session mapping.
-	nodeStats := map[string]struct {
+	type nodeMeta struct {
 		ToolCalls int
 		Turns     int
 		Tokens    int
 		IsActive  bool
-	}{}
+		TeamName  string
+		AgentName string
+	}
+	nodeStats := map[string]nodeMeta{}
 	for id, label := range labels {
 		// Query from sessions table via the mapping's cass_session.
 		var toolCalls, turns, inputTokens, outputTokens, endedAt int
+		var teamName, agentName string
 		row := s.db.QueryRowContext(ctx,
-			`SELECT s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.ended_at
+			`SELECT s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.ended_at, s.team_name, s.agent_name
 			 FROM session_mapping m
 			 JOIN sessions s ON s.id = m.cass_session
 			 WHERE m.iterm_session LIKE ?
 			 LIMIT 1`,
 			label.ItermSession+"%")
-		if err := row.Scan(&toolCalls, &turns, &inputTokens, &outputTokens, &endedAt); err == nil {
-			// Consider active if ended in the last hour.
+		if err := row.Scan(&toolCalls, &turns, &inputTokens, &outputTokens, &endedAt, &teamName, &agentName); err == nil {
 			isActive := time.Since(time.Unix(int64(endedAt), 0)) < time.Hour
-			nodeStats[id] = struct {
-				ToolCalls int
-				Turns     int
-				Tokens    int
-				IsActive  bool
-			}{toolCalls, turns, inputTokens + outputTokens, isActive}
+			nodeStats[id] = nodeMeta{toolCalls, turns, inputTokens + outputTokens, isActive, teamName, agentName}
 		}
 	}
 
@@ -810,11 +808,13 @@ func (s *Store) GraphData(ctx context.Context, since time.Time) (*cass.GraphData
 			node.Workspace = label.Workspace
 			node.Title = label.Title
 		}
-		if stats, ok := nodeStats[id]; ok {
-			node.ToolCalls = stats.ToolCalls
-			node.Turns = stats.Turns
-			node.Tokens = stats.Tokens
-			node.IsActive = stats.IsActive
+		if m, ok := nodeStats[id]; ok {
+			node.ToolCalls = m.ToolCalls
+			node.Turns = m.Turns
+			node.Tokens = m.Tokens
+			node.IsActive = m.IsActive
+			node.TeamName = m.TeamName
+			node.AgentName = m.AgentName
 		}
 		nodes = append(nodes, node)
 	}

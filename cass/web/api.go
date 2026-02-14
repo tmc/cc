@@ -343,5 +343,144 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, graph)
 }
 
+func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
+	teams, err := cc.ListTeams()
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	type memberInfo struct {
+		Name      string `json:"name"`
+		AgentType string `json:"agent_type"`
+		Model     string `json:"model,omitempty"`
+		Color     string `json:"color,omitempty"`
+	}
+	type teamInfo struct {
+		Name        string       `json:"name"`
+		Description string       `json:"description,omitempty"`
+		CreatedAt   int64        `json:"created_at"`
+		Lead        string       `json:"lead"`
+		MemberCount int          `json:"member_count"`
+		Members     []memberInfo `json:"members"`
+	}
+
+	var result []teamInfo
+	for _, name := range teams {
+		cfg, err := cc.ReadTeamConfig(name)
+		if err != nil {
+			continue
+		}
+		ti := teamInfo{
+			Name:        cfg.Name,
+			Description: cfg.Description,
+			CreatedAt:   cfg.CreatedAt,
+			Lead:        cfg.LeadAgentID,
+			MemberCount: len(cfg.Members),
+		}
+		for _, m := range cfg.Members {
+			ti.Members = append(ti.Members, memberInfo{
+				Name:      m.Name,
+				AgentType: m.AgentType,
+				Model:     m.Model,
+				Color:     m.Color,
+			})
+		}
+		result = append(result, ti)
+	}
+	writeJSON(w, result)
+}
+
+func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeError(w, fmt.Errorf("missing team name"), http.StatusBadRequest)
+		return
+	}
+
+	cfg, err := cc.ReadTeamConfig(name)
+	if err != nil {
+		writeError(w, fmt.Errorf("team %q: %w", name, err), http.StatusNotFound)
+		return
+	}
+
+	// Read last N messages from each inbox.
+	inboxes := map[string][]cc.InboxMessage{}
+	for _, m := range cfg.Members {
+		msgs, err := cc.ReadInbox(name, m.Name)
+		if err != nil {
+			continue
+		}
+		// Keep last 20 messages.
+		if len(msgs) > 20 {
+			msgs = msgs[len(msgs)-20:]
+		}
+		inboxes[m.Name] = msgs
+	}
+
+	// Find sessions belonging to this team.
+	sessions, err := s.svc.Search(r.Context(), cass.SearchRequest{
+		Filters: cass.Filters{Team: name},
+		Limit:   50,
+	})
+	if err != nil {
+		sessions = &cass.SearchResult{}
+	}
+
+	writeJSON(w, map[string]any{
+		"config":   cfg,
+		"inboxes":  inboxes,
+		"sessions": sessions,
+	})
+}
+
+func (s *Server) handleTeamInbox(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	agent := r.PathValue("agent")
+	if name == "" || agent == "" {
+		writeError(w, fmt.Errorf("missing team or agent name"), http.StatusBadRequest)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var body struct {
+			From string `json:"from"`
+			Text string `json:"text"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, fmt.Errorf("parse body: %w", err), http.StatusBadRequest)
+			return
+		}
+		if body.From == "" {
+			body.From = "web"
+		}
+		msg := cc.InboxMessage{
+			From: body.From,
+			Text: body.Text,
+		}
+		if err := cc.AppendInbox(name, agent, msg); err != nil {
+			writeError(w, err, http.StatusInternalServerError)
+			return
+		}
+		s.broker.Publish(Event{
+			Type: "team_message",
+			Data: map[string]any{
+				"team":  name,
+				"agent": agent,
+				"from":  body.From,
+			},
+		})
+		writeJSON(w, map[string]string{"status": "sent"})
+		return
+	}
+
+	msgs, err := cc.ReadInbox(name, agent)
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, msgs)
+}
+
 // Ensure context is used (for future middleware).
 var _ = context.Background

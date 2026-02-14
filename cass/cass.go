@@ -217,6 +217,8 @@ type GraphNode struct {
 	Turns     int    `json:"turns,omitempty"`
 	Tokens    int    `json:"tokens,omitempty"` // input + output.
 	IsActive  bool   `json:"is_active"`
+	TeamName  string `json:"team_name,omitempty"`
+	AgentName string `json:"agent_name,omitempty"`
 }
 
 // TimeRange is the min/max timestamp range for graph data.
