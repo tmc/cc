@@ -1,0 +1,434 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/tmc/cc/cass"
+
+	_ "modernc.org/sqlite"
+)
+
+// Store implements cass.Index using SQLite with FTS5.
+type Store struct {
+	db *sql.DB
+}
+
+// New opens or creates a SQLite store at the given path.
+func New(dbPath string) (*Store, error) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	// Enable WAL mode for concurrent reads.
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set wal mode: %w", err)
+	}
+	s := &Store{db: db}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	return s, nil
+}
+
+func (s *Store) migrate() error {
+	schema := `
+		CREATE TABLE IF NOT EXISTS sessions (
+			id TEXT PRIMARY KEY,
+			agent TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			workspace TEXT NOT NULL DEFAULT '',
+			source_path TEXT NOT NULL DEFAULT '',
+			started_at INTEGER NOT NULL DEFAULT 0,
+			ended_at INTEGER NOT NULL DEFAULT 0,
+			content TEXT NOT NULL DEFAULT '',
+			indexed_at INTEGER NOT NULL DEFAULT 0
+		);
+
+		CREATE TABLE IF NOT EXISTS session_links (
+			session_id TEXT NOT NULL,
+			source_session TEXT NOT NULL DEFAULT '',
+			target_session TEXT NOT NULL,
+			kind TEXT NOT NULL DEFAULT '',
+			action TEXT NOT NULL,
+			text TEXT NOT NULL DEFAULT '',
+			timestamp TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_links_session ON session_links(session_id);
+		CREATE INDEX IF NOT EXISTS idx_links_target ON session_links(target_session);
+
+		CREATE TABLE IF NOT EXISTS session_mapping (
+			iterm_session TEXT NOT NULL,
+			claude_session TEXT NOT NULL,
+			cass_session TEXT NOT NULL,
+			workspace TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '',
+			started_at INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (iterm_session, claude_session)
+		);
+
+		CREATE TABLE IF NOT EXISTS metadata (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+
+		CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
+			title,
+			content,
+			agent,
+			content=sessions,
+			content_rowid=rowid
+		);
+
+		CREATE TRIGGER IF NOT EXISTS sessions_ai AFTER INSERT ON sessions BEGIN
+			INSERT INTO session_fts(rowid, title, content, agent)
+			VALUES (new.rowid, new.title, new.content, new.agent);
+		END;
+
+		CREATE TRIGGER IF NOT EXISTS sessions_ad AFTER DELETE ON sessions BEGIN
+			INSERT INTO session_fts(session_fts, rowid, title, content, agent)
+			VALUES ('delete', old.rowid, old.title, old.content, old.agent);
+		END;
+
+		CREATE TRIGGER IF NOT EXISTS sessions_au AFTER UPDATE ON sessions BEGIN
+			INSERT INTO session_fts(session_fts, rowid, title, content, agent)
+			VALUES ('delete', old.rowid, old.title, old.content, old.agent);
+			INSERT INTO session_fts(rowid, title, content, agent)
+			VALUES (new.rowid, new.title, new.content, new.agent);
+		END;
+	`
+	_, err := s.db.Exec(schema)
+	return err
+}
+
+// BatchIndex adds or updates sessions atomically.
+func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	sessStmt, err := tx.PrepareContext(ctx, `
+		INSERT OR REPLACE INTO sessions (id, agent, title, workspace, source_path, started_at, ended_at, content, indexed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare sessions: %w", err)
+	}
+	defer sessStmt.Close()
+
+	linkStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO session_links (session_id, source_session, target_session, kind, action, text, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare links: %w", err)
+	}
+	defer linkStmt.Close()
+
+	now := time.Now().Unix()
+	for _, sess := range sessions {
+		content := buildContent(sess)
+		_, err := sessStmt.ExecContext(ctx,
+			sess.ID,
+			sess.Agent,
+			sess.Title,
+			sess.Workspace,
+			sess.SourcePath,
+			sess.StartedAt.Unix(),
+			sess.EndedAt.Unix(),
+			content,
+			now,
+		)
+		if err != nil {
+			return fmt.Errorf("insert %s: %w", sess.ID, err)
+		}
+
+		// Store iTerm2 <-> Claude session mapping.
+		if itermSID, ok := sess.Metadata["iterm_session"].(string); ok && itermSID != "" {
+			claudeSID := ""
+			if len(sess.Messages) > 0 {
+				claudeSID = sess.Messages[0].ID
+			}
+			tx.ExecContext(ctx, `
+				INSERT OR REPLACE INTO session_mapping (iterm_session, claude_session, cass_session, workspace, title, started_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`, itermSID, claudeSID, sess.ID, sess.Workspace, sess.Title, sess.StartedAt.Unix())
+		}
+
+		// Store session links.
+		if links, ok := sess.Metadata["session_links"].([]cass.SessionLink); ok {
+			// Clear old links for this session.
+			tx.ExecContext(ctx, "DELETE FROM session_links WHERE session_id = ?", sess.ID)
+			for _, link := range links {
+				linkStmt.ExecContext(ctx,
+					sess.ID,
+					link.SourceSession,
+					link.TargetSession,
+					link.Kind,
+					link.Action,
+					link.Text,
+					link.Timestamp,
+				)
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+// Search executes a full-text query and returns matching results.
+func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchResult, error) {
+	if req.Limit <= 0 {
+		req.Limit = 20
+	}
+
+	var where []string
+	var args []any
+
+	// FTS5 match clause.
+	if req.Query != "" {
+		where = append(where, "session_fts MATCH ?")
+		args = append(args, req.Query)
+	}
+	if req.Filters.Agent != "" {
+		where = append(where, "s.agent = ?")
+		args = append(args, req.Filters.Agent)
+	}
+	if !req.Filters.After.IsZero() {
+		where = append(where, "s.started_at >= ?")
+		args = append(args, req.Filters.After.Unix())
+	}
+	if !req.Filters.Before.IsZero() {
+		where = append(where, "s.started_at <= ?")
+		args = append(args, req.Filters.Before.Unix())
+	}
+	if req.Filters.Workspace != "" {
+		where = append(where, "s.workspace LIKE ?")
+		args = append(args, "%"+req.Filters.Workspace+"%")
+	}
+
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = "WHERE " + strings.Join(where, " AND ")
+	}
+
+	// Build query with BM25 ranking when doing FTS.
+	var query string
+	if req.Query != "" {
+		query = fmt.Sprintf(`
+			SELECT s.id, s.agent, s.title, snippet(session_fts, 1, '>>>', '<<<', '...', 40) as snip,
+				bm25(session_fts, 5.0, 1.0, 2.0) as score, s.workspace, s.source_path, s.started_at
+			FROM session_fts
+			JOIN sessions s ON s.rowid = session_fts.rowid
+			%s
+			ORDER BY score
+			LIMIT ? OFFSET ?
+		`, whereClause)
+	} else {
+		query = fmt.Sprintf(`
+			SELECT s.id, s.agent, s.title, substr(s.content, 1, 200) as snip,
+				0.0 as score, s.workspace, s.source_path, s.started_at
+			FROM sessions s
+			%s
+			ORDER BY s.started_at DESC
+			LIMIT ? OFFSET ?
+		`, whereClause)
+	}
+	args = append(args, req.Limit, req.Offset)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search: %w", err)
+	}
+	defer rows.Close()
+
+	var hits []cass.Hit
+	for rows.Next() {
+		var h cass.Hit
+		var startedUnix int64
+		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		if startedUnix > 0 {
+			h.StartedAt = time.Unix(startedUnix, 0).Format(time.RFC3339)
+		}
+		hits = append(hits, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows: %w", err)
+	}
+
+	// Count total matches.
+	var countQuery string
+	countArgs := args[:len(args)-2] // strip LIMIT/OFFSET
+	if req.Query != "" {
+		countQuery = fmt.Sprintf(`
+			SELECT count(*) FROM session_fts
+			JOIN sessions s ON s.rowid = session_fts.rowid
+			%s
+		`, whereClause)
+	} else {
+		countQuery = fmt.Sprintf(`SELECT count(*) FROM sessions s %s`, whereClause)
+	}
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		total = len(hits)
+	}
+
+	return &cass.SearchResult{
+		Hits:       hits,
+		TotalCount: total,
+	}, nil
+}
+
+// Delete removes sessions matching the filter.
+func (s *Store) Delete(ctx context.Context, filter cass.DeleteFilter) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if len(filter.IDs) > 0 {
+		placeholders := strings.Repeat("?,", len(filter.IDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]any, len(filter.IDs))
+		for i, id := range filter.IDs {
+			args[i] = id
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM sessions WHERE id IN (%s)", placeholders), args...); err != nil {
+			return fmt.Errorf("delete by id: %w", err)
+		}
+	}
+
+	if filter.Agent != "" {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE agent = ?", filter.Agent); err != nil {
+			return fmt.Errorf("delete by agent: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// Close releases the database connection.
+func (s *Store) Close() error {
+	return s.db.Close()
+}
+
+// SetMeta stores a key-value pair in the metadata table.
+func (s *Store) SetMeta(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)`, key, value)
+	return err
+}
+
+// GetMeta retrieves a metadata value by key.
+func (s *Store) GetMeta(ctx context.Context, key string) (string, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return value, err
+}
+
+// SessionCount returns the number of indexed sessions.
+func (s *Store) SessionCount(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM sessions`).Scan(&count)
+	return count, err
+}
+
+// SaveMapping stores a mapping between iTerm2 session, Claude session, and CASS session IDs.
+func (s *Store) SaveMapping(ctx context.Context, itermSID, claudeSID, cassSID, workspace, title string, startedAt int64) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO session_mapping (iterm_session, claude_session, cass_session, workspace, title, started_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, itermSID, claudeSID, cassSID, workspace, title, startedAt)
+	return err
+}
+
+// Mappings returns all session mappings, optionally filtered by iTerm2 or Claude session ID.
+func (s *Store) Mappings(ctx context.Context, filter string) ([]SessionMapping, error) {
+	query := `SELECT iterm_session, claude_session, cass_session, workspace, title, started_at FROM session_mapping`
+	var args []any
+	if filter != "" {
+		query += " WHERE iterm_session LIKE ? OR claude_session LIKE ?"
+		args = append(args, "%"+filter+"%", "%"+filter+"%")
+	}
+	query += " ORDER BY started_at DESC"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mappings []SessionMapping
+	for rows.Next() {
+		var m SessionMapping
+		if err := rows.Scan(&m.ItermSession, &m.ClaudeSession, &m.CASSSession, &m.Workspace, &m.Title, &m.StartedAt); err != nil {
+			return nil, err
+		}
+		mappings = append(mappings, m)
+	}
+	return mappings, rows.Err()
+}
+
+// SessionMapping maps between iTerm2, Claude, and CASS session identifiers.
+type SessionMapping struct {
+	ItermSession  string `json:"iterm_session"`
+	ClaudeSession string `json:"claude_session"`
+	CASSSession   string `json:"cass_session"`
+	Workspace     string `json:"workspace"`
+	Title         string `json:"title"`
+	StartedAt     int64  `json:"started_at"`
+}
+
+// Links returns all session links, optionally filtered by session ID.
+func (s *Store) Links(ctx context.Context, sessionID string) ([]cass.SessionLink, error) {
+	query := `SELECT source_session, target_session, kind, action, text, timestamp FROM session_links`
+	var args []any
+	if sessionID != "" {
+		query += " WHERE session_id = ?"
+		args = append(args, sessionID)
+	}
+	query += " ORDER BY timestamp"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query links: %w", err)
+	}
+	defer rows.Close()
+
+	var links []cass.SessionLink
+	for rows.Next() {
+		var l cass.SessionLink
+		if err := rows.Scan(&l.SourceSession, &l.TargetSession, &l.Kind, &l.Action, &l.Text, &l.Timestamp); err != nil {
+			return nil, fmt.Errorf("scan link: %w", err)
+		}
+		links = append(links, l)
+	}
+	return links, rows.Err()
+}
+
+// buildContent concatenates all message content for full-text indexing.
+func buildContent(sess cass.Session) string {
+	var b strings.Builder
+	for _, msg := range sess.Messages {
+		if msg.Content != "" {
+			b.WriteString(msg.Content)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
