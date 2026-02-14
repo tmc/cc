@@ -58,12 +58,11 @@ func New(cfg Config) *Server {
 	}
 }
 
-// Start begins serving HTTP and watching for file changes.
-// It blocks until the context is cancelled or a signal is received.
-func (s *Server) Start(ctx context.Context) error {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
-	defer stop()
-
+// Handler returns the configured HTTP handler with all API routes and static
+// file serving registered. Use this to embed the CASS UI inside another server:
+//
+//	mux.Handle("/cass/", http.StripPrefix("/cass", cassServer.Handler()))
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	// API routes.
@@ -86,9 +85,18 @@ func (s *Server) Start(ctx context.Context) error {
 	// Static files.
 	mux.HandleFunc("/", s.serveStatic)
 
+	return mux
+}
+
+// Start begins serving HTTP and watching for file changes.
+// It blocks until the context is cancelled or a signal is received.
+func (s *Server) Start(ctx context.Context) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
+
 	s.srv = &http.Server{
 		Addr:    s.addr,
-		Handler: mux,
+		Handler: s.Handler(),
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
