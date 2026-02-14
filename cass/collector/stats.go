@@ -313,8 +313,19 @@ func buildSparkline(entries []cc.Entry) string {
 	if len(entries) < 2 {
 		return ""
 	}
-	first := entries[0].Timestamp
-	last := entries[len(entries)-1].Timestamp
+	// Find first and last non-zero timestamps.
+	var first, last time.Time
+	for _, e := range entries {
+		if e.Timestamp.IsZero() {
+			continue
+		}
+		if first.IsZero() || e.Timestamp.Before(first) {
+			first = e.Timestamp
+		}
+		if last.IsZero() || e.Timestamp.After(last) {
+			last = e.Timestamp
+		}
+	}
 	if first.IsZero() || last.IsZero() || !last.After(first) {
 		return ""
 	}
