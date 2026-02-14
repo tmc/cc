@@ -183,6 +183,11 @@ func (s *Service) Stats(ctx context.Context) (map[string]any, error) {
 	}, nil
 }
 
+// AggregateStats returns detailed aggregate statistics, optionally filtered by time range.
+func (s *Service) AggregateStats(ctx context.Context, after, before time.Time) (map[string]any, error) {
+	return s.store.AggregateStats(ctx, after, before)
+}
+
 // Links returns session communication links.
 func (s *Service) Links(ctx context.Context, sessionID string) ([]cass.SessionLink, error) {
 	return s.store.Links(ctx, sessionID)

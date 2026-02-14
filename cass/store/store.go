@@ -24,10 +24,15 @@ func New(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-	// Enable WAL mode for concurrent reads.
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("set wal mode: %w", err)
+	// Enable WAL mode for concurrent reads and busy timeout for contention.
+	for _, pragma := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA busy_timeout=5000",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("exec %s: %w", pragma, err)
+		}
 	}
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
@@ -406,6 +411,144 @@ func (s *Store) SessionCount(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM sessions`).Scan(&count)
 	return count, err
+}
+
+// AggregateStats returns detailed aggregate statistics across all sessions,
+// optionally filtered by time range.
+func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (map[string]any, error) {
+	where := "WHERE 1=1"
+	var args []any
+	if !after.IsZero() {
+		where += " AND started_at >= ?"
+		args = append(args, after.Unix())
+	}
+	if !before.IsZero() {
+		where += " AND started_at <= ?"
+		args = append(args, before.Unix())
+	}
+
+	row := s.db.QueryRowContext(ctx, `
+		SELECT
+			count(*) as session_count,
+			coalesce(sum(tool_calls), 0),
+			coalesce(sum(input_tokens), 0),
+			coalesce(sum(output_tokens), 0),
+			coalesce(sum(files_read), 0),
+			coalesce(sum(files_written), 0),
+			coalesce(sum(files_edited), 0),
+			coalesce(sum(lines_written), 0),
+			coalesce(sum(turns), 0),
+			coalesce(sum(duration_secs), 0),
+			coalesce(sum(subagent_spawns), 0),
+			coalesce(sum(it2_splits), 0),
+			coalesce(sum(it2_sends), 0),
+			coalesce(sum(it2_screens), 0),
+			coalesce(sum(it2_buffers), 0),
+			coalesce(sum(team_inbox_reads), 0),
+			coalesce(sum(team_inbox_sends), 0),
+			coalesce(sum(team_task_ops), 0),
+			coalesce(sum(team_spawns), 0),
+			count(DISTINCT agent),
+			count(DISTINCT workspace)
+		FROM sessions `+where, args...)
+
+	var (
+		sessions, tools, inTok, outTok              int
+		fRead, fWritten, fEdited, lWritten          int
+		turns, dur, subSpawns                       int
+		it2Splits, it2Sends, it2Screens, it2Buffers int
+		teamInbox, teamSends, teamTasks, teamSpawns int
+		agents, workspaces                          int
+	)
+	if err := row.Scan(
+		&sessions, &tools, &inTok, &outTok,
+		&fRead, &fWritten, &fEdited, &lWritten,
+		&turns, &dur, &subSpawns,
+		&it2Splits, &it2Sends, &it2Screens, &it2Buffers,
+		&teamInbox, &teamSends, &teamTasks, &teamSpawns,
+		&agents, &workspaces,
+	); err != nil {
+		return nil, fmt.Errorf("aggregate stats: %w", err)
+	}
+
+	// Top agents by session count.
+	agentRows, err := s.db.QueryContext(ctx, `
+		SELECT agent, count(*) as cnt FROM sessions `+where+`
+		GROUP BY agent ORDER BY cnt DESC LIMIT 10`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer agentRows.Close()
+	agentCounts := map[string]int{}
+	for agentRows.Next() {
+		var a string
+		var c int
+		agentRows.Scan(&a, &c)
+		agentCounts[a] = c
+	}
+
+	// Top workspaces by session count.
+	wsRows, err := s.db.QueryContext(ctx, `
+		SELECT workspace, count(*) as cnt FROM sessions `+where+`
+		GROUP BY workspace ORDER BY cnt DESC LIMIT 10`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer wsRows.Close()
+	wsCounts := map[string]int{}
+	for wsRows.Next() {
+		var w string
+		var c int
+		wsRows.Scan(&w, &c)
+		wsCounts[w] = c
+	}
+
+	// Sessions per day (last 30 days).
+	dailyRows, err := s.db.QueryContext(ctx, `
+		SELECT date(started_at, 'unixepoch') as day, count(*) as cnt
+		FROM sessions
+		WHERE started_at > ?
+		GROUP BY day ORDER BY day`,
+		time.Now().AddDate(0, 0, -30).Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer dailyRows.Close()
+	daily := map[string]int{}
+	for dailyRows.Next() {
+		var d string
+		var c int
+		dailyRows.Scan(&d, &c)
+		daily[d] = c
+	}
+
+	return map[string]any{
+		"sessions":          sessions,
+		"agents":            agents,
+		"workspaces":        workspaces,
+		"tool_calls":        tools,
+		"input_tokens":      inTok,
+		"output_tokens":     outTok,
+		"total_tokens":      inTok + outTok,
+		"files_read":        fRead,
+		"files_written":     fWritten,
+		"files_edited":      fEdited,
+		"lines_written":     lWritten,
+		"turns":             turns,
+		"duration_secs":     dur,
+		"subagent_spawns":   subSpawns,
+		"it2_splits":        it2Splits,
+		"it2_sends":         it2Sends,
+		"it2_screens":       it2Screens,
+		"it2_buffers":       it2Buffers,
+		"team_inbox_reads":  teamInbox,
+		"team_inbox_sends":  teamSends,
+		"team_task_ops":     teamTasks,
+		"team_spawns":       teamSpawns,
+		"agents_breakdown":  agentCounts,
+		"workspace_top":     wsCounts,
+		"sessions_per_day":  daily,
+	}, nil
 }
 
 // SaveMapping stores a mapping between iTerm2 session, Claude session, and CASS session IDs.

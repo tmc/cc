@@ -63,7 +63,42 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	// If aggregate=true or any time filters, return detailed aggregate stats.
+	if q.Get("aggregate") == "true" || q.Get("since") != "" || q.Get("after") != "" {
+		s.handleAggregateStats(w, r)
+		return
+	}
+
 	stats, err := s.svc.Stats(r.Context())
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, stats)
+}
+
+func (s *Server) handleAggregateStats(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var after, before time.Time
+	if v := q.Get("since"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			after = time.Now().Add(-d)
+		}
+	}
+	if v := q.Get("after"); v != "" {
+		if t, err := parseTime(v); err == nil {
+			after = t
+		}
+	}
+	if v := q.Get("before"); v != "" {
+		if t, err := parseTime(v); err == nil {
+			before = t
+		}
+	}
+
+	stats, err := s.svc.AggregateStats(r.Context(), after, before)
 	if err != nil {
 		writeError(w, err, http.StatusInternalServerError)
 		return

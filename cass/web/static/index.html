@@ -8,9 +8,18 @@
 </head>
 <body>
 <div id="app"></div>
+<script type="importmap">
+{
+  "imports": {
+    "preact": "https://esm.sh/preact@10",
+    "preact/hooks": "https://esm.sh/preact@10/hooks",
+    "htm/preact": "https://esm.sh/htm@3/preact?external=preact"
+  }
+}
+</script>
 <script type="module">
-import { html, render, Component } from 'https://esm.sh/htm/preact/standalone';
-import { useState, useEffect, useCallback, useRef } from 'https://esm.sh/preact/hooks';
+import { html, render } from 'htm/preact';
+import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 
 // --- API helpers ---
 
@@ -185,6 +194,21 @@ function SearchPanel() {
   `;
 }
 
+function fmtDuration(secs) {
+  if (!secs) return '';
+  if (secs < 60) return secs + 's';
+  const m = Math.floor(secs / 60);
+  if (m < 60) return m + 'm';
+  const h = Math.floor(m / 60);
+  return h + 'h ' + (m % 60) + 'm';
+}
+
+function fmtNum(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
+  return '' + n;
+}
+
 function HitItem({ hit: h, num, onClick }) {
   const stats = [];
   if (h.tool_calls) stats.push(h.tool_calls + ' tools');
@@ -192,7 +216,8 @@ function HitItem({ hit: h, num, onClick }) {
   if (h.files_edited) stats.push(h.files_edited + ' files');
   if (h.lines_written) stats.push(h.lines_written + ' lines');
   const tok = (h.input_tokens || 0) + (h.output_tokens || 0);
-  if (tok >= 1000) stats.push(Math.floor(tok / 1000) + 'k tok');
+  if (tok >= 1000) stats.push(fmtNum(tok) + ' tok');
+  if (h.duration_secs) stats.push(fmtDuration(h.duration_secs));
 
   const it2 = [];
   if (h.it2_splits) it2.push(h.it2_splits + ' splits');
@@ -205,6 +230,7 @@ function HitItem({ hit: h, num, onClick }) {
         <span class="hit-num">${num}.</span>
         <span class="hit-agent">[${h.agent}]</span>
         <span class="hit-title">${h.title}</span>
+        ${h.sparkline && html`<span class="hit-sparkline">${h.sparkline}</span>`}
       </div>
       ${h.snippet && html`<div class="hit-snippet">${h.snippet}</div>`}
       <div class="hit-meta">
@@ -424,18 +450,25 @@ function MapPanel() {
 }
 
 function StatsPanel() {
-  const [stats, setStats] = useState(null);
+  const [basic, setBasic] = useState(null);
+  const [agg, setAgg] = useState(null);
+  const [since, setSince] = useState('');
   const [indexing, setIndexing] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      setStats(await api('stats'));
+      const [b, a] = await Promise.all([
+        api('stats'),
+        api('stats?aggregate=true' + (since ? '&since=' + since : '')),
+      ]);
+      setBasic(b);
+      setAgg(a);
     } catch (e) {
       console.error('stats:', e);
     }
-  }, []);
+  }, [since]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
   useEffect(() => {
     window.addEventListener('cass:refresh', load);
     return () => window.removeEventListener('cass:refresh', load);
@@ -445,7 +478,6 @@ function StatsPanel() {
     setIndexing(true);
     try {
       const r = await api('index?force=' + force, { method: 'POST' });
-      alert('Indexed ' + r.indexed + ' sessions in ' + r.duration_ms + 'ms');
       load();
     } catch (e) {
       alert('Index error: ' + e.message);
@@ -453,32 +485,81 @@ function StatsPanel() {
     setIndexing(false);
   }
 
-  if (!stats) return html`<div class="loading">loading stats...</div>`;
+  if (!basic || !agg) return html`<div class="loading">loading stats...</div>`;
 
-  const lastIdx = stats.last_indexed
-    ? new Date(parseInt(stats.last_indexed) * 1000).toLocaleString()
+  const lastIdx = basic.last_indexed
+    ? new Date(parseInt(basic.last_indexed) * 1000).toLocaleString()
     : 'never';
+
+  const card = (label, value, sub) => html`
+    <div class="stat-card">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value">${value}</div>
+      ${sub && html`<div style="font-size:11px;color:var(--fg-muted);margin-top:4px">${sub}</div>`}
+    </div>
+  `;
+
+  // Sessions per day sparkline.
+  const daily = agg.sessions_per_day || {};
+  const days = Object.keys(daily).sort();
+  const dayVals = days.map(d => daily[d]);
+  const maxDay = Math.max(...dayVals, 1);
+  const bars = '▁▂▃▄▅▆▇█';
+  const dailySparkline = dayVals.map(v => bars[Math.min(Math.floor(v / maxDay * 7), 7)]).join('');
 
   return html`
     <div>
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">sessions</div>
-          <div class="stat-value">${stats.session_count || 0}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">last indexed</div>
-          <div class="stat-value" style="font-size:14px">${lastIdx}</div>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px">
+      <div class="filters" style="margin-bottom:12px">
+        <input class="filter-input" placeholder="since (e.g. 24h, 168h)" value=${since}
+          onInput=${e => setSince(e.target.value)} style="width:200px" />
         <button class="btn" onClick=${() => reindex(false)} disabled=${indexing}>
-          ${indexing ? 'indexing...' : 're-index (incremental)'}
+          ${indexing ? 'indexing...' : 're-index'}
         </button>
-        <button class="btn" onClick=${() => reindex(true)} disabled=${indexing}>
-          full re-index
-        </button>
+        <button class="btn" onClick=${() => reindex(true)} disabled=${indexing}>full</button>
       </div>
+
+      <div class="stats-grid">
+        ${card('sessions', fmtNum(agg.sessions), agg.agents + ' agents, ' + agg.workspaces + ' workspaces')}
+        ${card('tool calls', fmtNum(agg.tool_calls))}
+        ${card('total tokens', fmtNum(agg.total_tokens), fmtNum(agg.input_tokens) + ' in / ' + fmtNum(agg.output_tokens) + ' out')}
+        ${card('turns', fmtNum(agg.turns))}
+        ${card('files edited', fmtNum(agg.files_edited), fmtNum(agg.files_read) + ' read / ' + fmtNum(agg.files_written) + ' written')}
+        ${card('lines written', fmtNum(agg.lines_written))}
+        ${card('total time', fmtDuration(agg.duration_secs))}
+        ${card('subagent spawns', fmtNum(agg.subagent_spawns))}
+        ${card('it2 interactions', fmtNum(agg.it2_sends + agg.it2_screens),
+          agg.it2_splits + ' splits, ' + agg.it2_sends + ' sends, ' + agg.it2_screens + ' screens')}
+        ${card('team ops', fmtNum(agg.team_inbox_reads + agg.team_inbox_sends + agg.team_task_ops + agg.team_spawns),
+          agg.team_inbox_sends + ' msgs, ' + agg.team_task_ops + ' tasks, ' + agg.team_spawns + ' spawns')}
+        ${card('last indexed', lastIdx)}
+      </div>
+
+      ${days.length > 0 && html`
+        <div style="margin-top:16px">
+          <div class="stat-label" style="margin-bottom:4px">sessions per day (30d)</div>
+          <div style="font-family:var(--mono);font-size:16px;letter-spacing:2px">${dailySparkline}</div>
+          <div style="font-size:11px;color:var(--fg-muted);margin-top:2px">
+            ${days[0]} — ${days[days.length - 1]} (peak: ${Math.max(...dayVals)}/day)
+          </div>
+        </div>
+      `}
+
+      ${agg.workspace_top && html`
+        <div style="margin-top:16px">
+          <div class="stat-label" style="margin-bottom:8px">top workspaces</div>
+          <table class="map-table">
+            <thead><tr><th>workspace</th><th>sessions</th></tr></thead>
+            <tbody>
+              ${Object.entries(agg.workspace_top).sort((a,b) => b[1] - a[1]).map(([ws, cnt]) => html`
+                <tr>
+                  <td style="color:var(--green)">${shortProject(ws)}</td>
+                  <td>${cnt}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      `}
     </div>
   `;
 }
