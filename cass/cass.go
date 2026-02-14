@@ -18,9 +18,10 @@ type Session struct {
 	Stats      SessionStats   `json:"stats"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 
-	// Agent teams context.
-	TeamName  string `json:"team_name,omitempty"`
-	AgentName string `json:"agent_name,omitempty"`
+	// Agent teams context (native Claude Code teams).
+	TeamName   string `json:"team_name,omitempty"`
+	AgentName  string `json:"agent_name,omitempty"`
+	IsTeamLead bool   `json:"is_team_lead,omitempty"`
 }
 
 // Message is a single message within a session.
@@ -141,21 +142,24 @@ type Hit struct {
 	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"`
 
 	// Agent teams context.
-	TeamName  string `json:"team_name,omitempty"`
-	AgentName string `json:"agent_name,omitempty"`
+	TeamName   string `json:"team_name,omitempty"`
+	AgentName  string `json:"agent_name,omitempty"`
+	IsTeamLead bool   `json:"is_team_lead,omitempty"`
 }
 
-// SessionLink represents an interaction between two iTerm2 sessions.
-// Links are categorized into two kinds:
+// SessionLink represents an interaction between two sessions.
+// Links are categorized into kinds:
 //   - Messages: send-text, send-key (active communication from source to target)
 //   - Observations: get-screen, get-buffer (source reading target's state)
+//   - Team: team-spawn, team-message (native Claude Code agent teams)
 type SessionLink struct {
-	SourceSession string `json:"source_session"` // iTerm2 session ID of the acting session.
-	TargetSession string `json:"target_session"` // iTerm2 session ID of the target.
-	Kind          string `json:"kind"`            // "message" or "observation".
-	Action        string `json:"action"`          // "send-text", "send-key", "get-screen", or "get-buffer".
-	Text          string `json:"text,omitempty"`  // Content (for send-text/send-key).
+	SourceSession string `json:"source_session"`          // iTerm2 session ID or agent name.
+	TargetSession string `json:"target_session"`          // iTerm2 session ID or agent name.
+	Kind          string `json:"kind"`                    // "message", "observation", or "team".
+	Action        string `json:"action"`                  // "send-text", "team-spawn", "team-message", etc.
+	Text          string `json:"text,omitempty"`          // Content excerpt.
 	Timestamp     string `json:"timestamp,omitempty"`
+	TeamName      string `json:"team_name,omitempty"`     // Team name for team links.
 }
 
 // SessionStats holds extracted metrics for a session.
@@ -190,10 +194,12 @@ type SessionStats struct {
 	IT2Watches int `json:"it2_watches"` // watch.
 
 	// Team interactions (claude teams infrastructure).
-	TeamInboxReads  int `json:"team_inbox_reads"`  // Inbox message reads.
-	TeamInboxSends  int `json:"team_inbox_sends"`  // Inbox message sends.
-	TeamTaskOps     int `json:"team_task_ops"`      // Task create/update/list.
-	TeamSpawns      int `json:"team_spawns"`        // Agent spawns via ccspawn.
+	TeamInboxReads     int `json:"team_inbox_reads"`      // Inbox message reads.
+	TeamInboxSends     int `json:"team_inbox_sends"`      // Inbox message sends.
+	TeamTaskOps        int `json:"team_task_ops"`          // Task create/update/list.
+	TeamSpawns         int `json:"team_spawns"`            // Agent spawns via ccspawn.
+	TeamMembersSpawned int `json:"team_members_spawned"`   // Members spawned via Task with team_name.
+	TeamMessagesRecvd  int `json:"team_messages_received"` // Incoming <teammate-message> count.
 
 	// Activity sparkline: message counts bucketed into time slots.
 	// Encoded as a string of Unicode block chars (▁▂▃▄▅▆▇█).

@@ -90,6 +90,7 @@ func (s *Store) migrate() error {
 			action TEXT NOT NULL,
 			text TEXT NOT NULL DEFAULT '',
 			timestamp TEXT NOT NULL DEFAULT '',
+			team_name TEXT NOT NULL DEFAULT '',
 			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 		);
 
@@ -145,6 +146,8 @@ func (s *Store) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN sparkline TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE sessions ADD COLUMN team_name TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE sessions ADD COLUMN agent_name TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE sessions ADD COLUMN is_team_lead INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE session_links ADD COLUMN team_name TEXT NOT NULL DEFAULT ''",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -164,8 +167,8 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			tool_calls, input_tokens, output_tokens, files_read, files_written, files_edited, lines_written,
 			turns, duration_secs, subagent_spawns, it2_splits, it2_sends, it2_screens, it2_buffers,
 			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns, sparkline, stats_json,
-			team_name, agent_name)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			team_name, agent_name, is_team_lead)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare sessions: %w", err)
@@ -173,8 +176,8 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 	defer sessStmt.Close()
 
 	linkStmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO session_links (session_id, source_session, target_session, kind, action, text, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO session_links (session_id, source_session, target_session, kind, action, text, timestamp, team_name)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare links: %w", err)
@@ -217,6 +220,7 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			string(statsJSON),
 			sess.TeamName,
 			sess.AgentName,
+			sess.IsTeamLead,
 		)
 		if err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
@@ -247,6 +251,7 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 					link.Action,
 					link.Text,
 					link.Timestamp,
+					link.TeamName,
 				)
 			}
 		}
@@ -322,7 +327,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	}
 
 	// Build query with BM25 ranking when doing FTS.
-	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name`
+	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead`
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -357,9 +362,10 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		var h cass.Hit
 		var startedUnix, endedUnix int64
 		var statsJSON string
+		var isTeamLead int
 		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
 			&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
-			&h.Sparkline, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName); err != nil {
+			&h.Sparkline, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		if startedUnix > 0 {
@@ -368,6 +374,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		if endedUnix > 0 {
 			h.EndedAt = time.Unix(endedUnix, 0).Format(time.RFC3339)
 		}
+		h.IsTeamLead = isTeamLead != 0
 		if statsJSON != "" {
 			var stats cass.SessionStats
 			if json.Unmarshal([]byte(statsJSON), &stats) == nil {
@@ -650,7 +657,7 @@ type SessionMapping struct {
 
 // Links returns all session links, optionally filtered by session ID.
 func (s *Store) Links(ctx context.Context, sessionID string) ([]cass.SessionLink, error) {
-	query := `SELECT source_session, target_session, kind, action, text, timestamp FROM session_links`
+	query := `SELECT source_session, target_session, kind, action, text, timestamp, team_name FROM session_links`
 	var args []any
 	if sessionID != "" {
 		query += " WHERE session_id = ?"
@@ -667,7 +674,7 @@ func (s *Store) Links(ctx context.Context, sessionID string) ([]cass.SessionLink
 	var links []cass.SessionLink
 	for rows.Next() {
 		var l cass.SessionLink
-		if err := rows.Scan(&l.SourceSession, &l.TargetSession, &l.Kind, &l.Action, &l.Text, &l.Timestamp); err != nil {
+		if err := rows.Scan(&l.SourceSession, &l.TargetSession, &l.Kind, &l.Action, &l.Text, &l.Timestamp, &l.TeamName); err != nil {
 			return nil, fmt.Errorf("scan link: %w", err)
 		}
 		links = append(links, l)

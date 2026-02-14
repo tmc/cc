@@ -40,6 +40,9 @@ var teamPatterns = []struct {
 	{regexp.MustCompile(`cctl\s+spawn`), "spawns"},
 }
 
+// teammateMessagePattern matches <teammate-message> XML tags in user message content.
+var teammateMessagePattern = regexp.MustCompile(`<teammate-message\s+teammate_id="([^"]*)"`)
+
 // ExtractStats computes session metrics from entries.
 func ExtractStats(entries []cc.Entry) cass.SessionStats {
 	var s cass.SessionStats
@@ -60,6 +63,11 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 		switch e.Message.Role {
 		case "user":
 			s.Turns++
+			// Count incoming teammate messages.
+			text := e.Message.TextContent()
+			if matches := teammateMessagePattern.FindAllStringSubmatch(text, -1); len(matches) > 0 {
+				s.TeamMessagesRecvd += len(matches)
+			}
 		case "assistant":
 			// Token usage.
 			if e.Message.Usage != nil {
@@ -96,6 +104,10 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 					s.LinesWritten += countLines(extractNewString(b.Input))
 				case "Task":
 					s.SubagentSpawns++
+					// Check if this Task spawns a team member.
+					if tn := extractTaskTeamName(b.Input); tn != "" {
+						s.TeamMembersSpawned++
+					}
 				case "Bash":
 					cmd := extractBashCommand(b.Input)
 					countIT2Commands(cmd, &s)
@@ -127,6 +139,150 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 
 	s.Sparkline = buildSparkline(entries)
 	return s
+}
+
+// ClassifyTeamRole determines whether a session is a team lead, team member,
+// or has no native team affiliation. Returns teamName, agentName, isLead.
+//
+// Detection heuristics (from JSONL data alone):
+//   - Lead: has TeamCreate tool use, or has teamName but no agentName
+//   - Member: has agentName field set (present on all member entries)
+//   - Neither: no teamName/agentName fields
+func ClassifyTeamRole(entries []cc.Entry) (teamName, agentName string, isLead bool) {
+	hasTeamCreate := false
+
+	for _, e := range entries {
+		if e.TeamName != "" && teamName == "" {
+			teamName = e.TeamName
+		}
+		if e.AgentName != "" && agentName == "" {
+			agentName = e.AgentName
+		}
+
+		// Check for TeamCreate tool use (definitive lead signal).
+		if e.Message != nil && e.Message.Role == "assistant" {
+			for _, b := range e.Message.ContentBlocks() {
+				if b.Type == "tool_use" && b.Name == "TeamCreate" {
+					hasTeamCreate = true
+				}
+			}
+		}
+
+		// Early exit once we have all signals.
+		if teamName != "" && agentName != "" && hasTeamCreate {
+			break
+		}
+	}
+
+	if teamName == "" {
+		return "", "", false
+	}
+
+	// Lead sessions: have TeamCreate, or have teamName but no agentName.
+	// Member sessions: always have agentName set.
+	isLead = hasTeamCreate || (teamName != "" && agentName == "")
+	return teamName, agentName, isLead
+}
+
+// ExtractTeamLinks extracts inter-agent communication links from team sessions.
+// These complement the it2-based links in ExtractLinks.
+func ExtractTeamLinks(entries []cc.Entry) []cass.SessionLink {
+	var links []cass.SessionLink
+	seen := make(map[string]bool)
+
+	teamName, agentName, _ := ClassifyTeamRole(entries)
+	if teamName == "" {
+		return nil
+	}
+
+	// Determine the sender identity.
+	sender := agentName
+	if sender == "" {
+		sender = "team-lead"
+	}
+
+	for _, e := range entries {
+		if e.Message == nil {
+			continue
+		}
+
+		ts := ""
+		if !e.Timestamp.IsZero() {
+			ts = e.Timestamp.Format("2006-01-02T15:04:05Z07:00")
+		}
+
+		switch e.Message.Role {
+		case "assistant":
+			for _, b := range e.Message.ContentBlocks() {
+				if b.Type != "tool_use" {
+					continue
+				}
+				switch b.Name {
+				case "Task":
+					// Team member spawn.
+					name := extractTaskMemberName(b.Input)
+					tn := extractTaskTeamName(b.Input)
+					if name != "" && tn != "" {
+						key := "team-spawn:" + name
+						if !seen[key] {
+							seen[key] = true
+							links = append(links, cass.SessionLink{
+								SourceSession: sender,
+								TargetSession: name,
+								Kind:          "team",
+								Action:        "team-spawn",
+								TeamName:      teamName,
+								Timestamp:     ts,
+							})
+						}
+					}
+				case "SendMessage", "AgentMessage":
+					// Message to another agent.
+					recipient := extractRecipient(b.Input)
+					if recipient != "" {
+						key := "team-message:" + sender + ":" + recipient
+						if !seen[key] {
+							seen[key] = true
+							summary := extractSummary(b.Input)
+							if len(summary) > 200 {
+								summary = summary[:200] + "..."
+							}
+							links = append(links, cass.SessionLink{
+								SourceSession: sender,
+								TargetSession: recipient,
+								Kind:          "team",
+								Action:        "team-message",
+								Text:          summary,
+								TeamName:      teamName,
+								Timestamp:     ts,
+							})
+						}
+					}
+				}
+			}
+		case "user":
+			// Incoming teammate messages.
+			text := e.Message.TextContent()
+			matches := teammateMessagePattern.FindAllStringSubmatch(text, -1)
+			for _, m := range matches {
+				from := m[1]
+				key := "team-message:" + from + ":" + sender
+				if !seen[key] {
+					seen[key] = true
+					links = append(links, cass.SessionLink{
+						SourceSession: from,
+						TargetSession: sender,
+						Kind:          "team",
+						Action:        "team-message",
+						TeamName:      teamName,
+						Timestamp:     ts,
+					})
+				}
+			}
+		}
+	}
+
+	return links
 }
 
 // buildSparkline buckets entry timestamps into slots and returns a Unicode sparkline.
@@ -247,6 +403,46 @@ func extractNewString(raw json.RawMessage) string {
 	}
 	if json.Unmarshal(raw, &obj) == nil {
 		return obj.NewString
+	}
+	return ""
+}
+
+func extractTaskTeamName(raw json.RawMessage) string {
+	var obj struct {
+		TeamName string `json:"team_name"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return obj.TeamName
+	}
+	return ""
+}
+
+func extractTaskMemberName(raw json.RawMessage) string {
+	var obj struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return obj.Name
+	}
+	return ""
+}
+
+func extractRecipient(raw json.RawMessage) string {
+	var obj struct {
+		Recipient string `json:"recipient"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return obj.Recipient
+	}
+	return ""
+}
+
+func extractSummary(raw json.RawMessage) string {
+	var obj struct {
+		Summary string `json:"summary"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return obj.Summary
 	}
 	return ""
 }

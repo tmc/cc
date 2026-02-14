@@ -134,6 +134,10 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 	links := ExtractLinks(entries)
 	stats := ExtractStats(entries)
 
+	// Extract team links (native Claude Code agent teams).
+	teamLinks := ExtractTeamLinks(entries)
+	links = append(links, teamLinks...)
+
 	// Build metadata.
 	meta := map[string]any{}
 	if sum.GitBranch != "" {
@@ -155,19 +159,8 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 		meta["iterm_session"] = itermSID
 	}
 
-	// Extract agent teams context from entries.
-	var teamName, agentName string
-	for _, e := range entries {
-		if e.TeamName != "" && teamName == "" {
-			teamName = e.TeamName
-		}
-		if e.AgentName != "" && agentName == "" {
-			agentName = e.AgentName
-		}
-		if teamName != "" && agentName != "" {
-			break
-		}
-	}
+	// Classify team role from JSONL data.
+	teamName, agentName, isTeamLead := ClassifyTeamRole(entries)
 
 	return cass.Session{
 		ID:         id,
@@ -182,6 +175,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 		Metadata:   meta,
 		TeamName:   teamName,
 		AgentName:  agentName,
+		IsTeamLead: isTeamLead,
 	}, nil
 }
 
