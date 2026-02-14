@@ -11,7 +11,7 @@
 <script type="module">
 import { html, render } from 'https://esm.sh/htm@3/preact?deps=preact@10';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'https://esm.sh/preact@10/hooks';
-import AnsiUp from 'https://esm.sh/ansi_up@6.0.2';
+import { AnsiUp } from 'https://esm.sh/ansi_up@6.0.2';
 
 // Shared ansi_up instance for ANSI → HTML conversion.
 const ansiUp = new AnsiUp();
@@ -136,7 +136,6 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [updateCount, setUpdateCount] = useState(0);
   const [headerStats, setHeaderStats] = useState(null);
   const searchRef = useRef(null);
   const toastId = useRef(0);
@@ -146,7 +145,6 @@ function App() {
     const p = params || {};
     setUrlParams(p);
     pushURL(t, p);
-    setUpdateCount(0);
   }
 
   function updateParams(params) {
@@ -178,7 +176,6 @@ function App() {
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
     es.addEventListener('session_change', () => {
-      setUpdateCount(c => c + 1);
       window.dispatchEvent(new CustomEvent('cass:refresh'));
     });
     es.addEventListener('index_complete', (e) => {
@@ -223,10 +220,10 @@ function App() {
   return html`
     <div class="app">
       <div class="header">
-        <h1>cass <span>session search</span>${updateCount > 0 ? html`<span class="update-counter"> · ${updateCount} update${updateCount !== 1 ? 's' : ''}</span>` : null}</h1>
+        <h1>cass <span>session search</span></h1>
         ${headerStats ? html`
           <div class="header-stats">
-            <span title="Total sessions">${fmtNum(headerStats.session_count)} sessions</span>
+            <span title="Total sessions">${fmtNum(headerStats.sessions)} sessions</span>
             <span title="Total turns">${fmtNum(headerStats.turns)} turns</span>
             <span title="Total tokens (in+out)">${fmtNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} tokens</span>
           </div>
