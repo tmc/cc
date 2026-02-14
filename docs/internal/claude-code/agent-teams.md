@@ -148,21 +148,114 @@ The `stop_hook_summary` entry contains:
 - `hookErrors` - any errors
 - `preventedContinuation` - whether hooks blocked continuation
 
+## Task Files
+
+Team tasks are stored as shared JSON files keyed by team name:
+
+```
+~/.claude/tasks/<team-name>/
+  .lock              # Coordination lock
+  1.json             # Task 1
+  2.json             # Task 2
+  ...
+```
+
+Each task file:
+```json
+{
+  "id": "1",
+  "subject": "Add cc dependency to go.mod",
+  "description": "...",
+  "activeForm": "Adding cc dependency",
+  "owner": "team-lead",
+  "status": "completed",
+  "blocks": ["2", "3"],
+  "blockedBy": []
+}
+```
+
+Team tasks use the team name as directory key (not a UUID), enabling
+shared access across all team members. Regular (non-team) session
+tasks use session UUIDs as directory keys.
+
+Task assignments are also sent via inbox as JSON messages:
+```json
+{"type":"task_assignment","taskId":"1","subject":"...","assignedBy":"team-lead"}
+```
+
+## Lifecycle
+
+Team directories (`~/.claude/teams/<name>/`) persist after member
+sessions end (`isActive: false`). Cleanup occurs when the lead session
+terminates gracefully. Abandoned/killed lead sessions leave the team
+directory in place.
+
 ## Backend Types
 
 Members can use different backends:
 - `tmux` - tmux pane (default for teams)
 - (future: `iterm2`, `process`)
 
-## Stats Extraction
+## Retroactive Detection (CASS)
 
-The `cass/collector/stats.go` detects team interactions through:
+The `cass/collector/` package detects team activity from JSONL session
+files alone (no external config/task files needed).
 
-1. **Native tools**: `TeamCreate`, `SendMessage`, `AgentMessage`, `AgentTask`
-2. **Bash commands**: `ccinbox`, `ccteam`, `cctl spawn`, `cctask`, `ccspawn`
+### Role Classification (`ClassifyTeamRole`)
 
-Mapped to `SessionStats` fields:
-- `TeamSpawns` - `TeamCreate` calls + `ccspawn` commands
-- `TeamInboxSends` - `SendMessage`/`AgentMessage` calls + `ccinbox send`
-- `TeamInboxReads` - `ccinbox read/list` commands
-- `TeamTaskOps` - `AgentTask` calls + `cctask` commands
+| Signal | Lead | Member |
+|--------|------|--------|
+| `teamName` field | Present after TeamCreate | Present on all entries |
+| `agentName` field | Always absent | Always present |
+| `TeamCreate` tool use | Definitive lead signal | Never |
+| First entry | Normal user prompt | `<teammate-message>` from team-lead |
+
+### Stats Extraction (`ExtractStats`)
+
+Native tool detection:
+
+| Tool | Stat Field |
+|------|-----------|
+| `TeamCreate` | `TeamSpawns` |
+| `SendMessage` / `AgentMessage` | `TeamInboxSends` |
+| `AgentTask` | `TeamTaskOps` |
+| `Task` with `team_name` input | `TeamMembersSpawned` |
+| `<teammate-message>` XML in user content | `TeamMessagesRecvd` |
+
+Bash command detection:
+
+| Pattern | Stat Field |
+|---------|-----------|
+| `ccspawn`, `cctl spawn` | `TeamSpawns` |
+| `ccinbox send/append` | `TeamInboxSends` |
+| `ccinbox read/list`, `cctl inbox` | `TeamInboxReads` |
+| `cctask`, `cctl task` | `TeamTaskOps` |
+
+### Team Link Extraction (`ExtractTeamLinks`)
+
+Creates `SessionLink` entries with `Kind: "team"`:
+
+| Action | Source | Target | When |
+|--------|--------|--------|------|
+| `team-spawn` | lead | member name | `Task` tool with `team_name` |
+| `team-message` | sender | recipient | `SendMessage`/`AgentMessage` |
+| `team-message` | teammate_id | self | `<teammate-message>` XML |
+
+Links are deduplicated per direction per pair.
+
+### Ad-Hoc IT2 Teams
+
+Sessions using `it2 session split` (strong signal) and `it2 session
+send-text` (communication signal) are detected as ad-hoc team
+participants. These produce standard it2-based `SessionLink` entries
+with `Kind: "message"` / `"observation"`.
+
+### Structural Differences: Lead vs Member
+
+| Field | Lead Session | Member Session |
+|-------|-------------|----------------|
+| `teamName` | After TeamCreate only | All entries from start |
+| `agentName` | Always absent | Always present |
+| `IsTeamLead` | `true` | `false` |
+| First entry | Normal user prompt | `<teammate-message>` from team-lead |
+| Session ends with | Normal response | `stop_hook_summary` |
