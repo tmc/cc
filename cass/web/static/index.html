@@ -449,12 +449,30 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick }) {
   if (h.it2_sends) it2.push(h.it2_sends + ' msgs');
   if (h.it2_screens) it2.push(h.it2_screens + ' reads');
 
+  // Team badge: lead gets crown, member gets dot.
+  const teamBadge = h.team_name ? html`
+    <span class="hit-team-badge ${h.is_team_lead ? 'lead' : 'member'}"
+      onClick=${(e) => { e.stopPropagation(); onTeamClick && onTeamClick(h.team_name); }}
+      title=${h.is_team_lead ? 'Team lead: ' + h.team_name : 'Team member: ' + (h.agent_name || '') + ' in ' + h.team_name}>
+      <span class="team-role-icon">${h.is_team_lead ? '\u265B' : '\u25CF'}</span>
+      ${h.team_name}${h.agent_name ? ':' + h.agent_name : ''}
+    </span>
+  ` : null;
+
+  // Ad-hoc team indicator: sessions with it2 splits are likely orchestrating agents.
+  const adHocBadge = !h.team_name && h.it2_splits > 0 ? html`
+    <span class="hit-adhoc-team" title="Ad-hoc team: ${h.it2_splits} terminal splits">
+      \u2442 ${h.it2_splits}
+    </span>
+  ` : null;
+
   return html`
-    <li class="hit ${isSelected ? 'selected' : ''}" onClick=${onClick} tabindex="0">
+    <li class="hit ${isSelected ? 'selected' : ''} ${h.team_name ? 'has-team' : ''}" onClick=${onClick} tabindex="0">
       <div class="hit-header">
         <span class="hit-num">${num}.</span>
         <span class="hit-agent">[${h.agent}]</span>
-        ${h.team_name && html`<span class="hit-team" onClick=${(e) => { e.stopPropagation(); onTeamClick && onTeamClick(h.team_name); }}>${h.team_name}${h.agent_name ? ':' + h.agent_name : ''}</span>`}
+        ${teamBadge}
+        ${adHocBadge}
         <span class="hit-title">${h.title || 'Untitled'}</span>
         ${h.sparkline && html`<span class="hit-sparkline">${h.sparkline}</span>`}
       </div>
@@ -680,11 +698,22 @@ function SessionDetailPanel({ hit, onClose }) {
             ${hit.compactions > 0 && html`<span class="hit-compactions">${hit.compactions} compaction${hit.compactions > 1 ? 's' : ''}</span>`}
           </div>
         </div>
-        ${hit.team_name && html`
+        ${(hit.team_name || hit.it2_splits > 0) && html`
           <div class="detail-team-context">
-            <div class="detail-team-context-title">team context</div>
-            <span style="color:var(--magenta);font-weight:600">${hit.team_name}</span>
-            ${hit.agent_name && html`<span style="color:var(--dim)"> / ${hit.agent_name}</span>`}
+            <div class="detail-team-context-title">${hit.team_name ? 'team context' : 'ad-hoc team'}</div>
+            ${hit.team_name ? html`
+              <div style="margin-bottom:4px">
+                <span class="team-role-icon" style="color:var(--magenta)">${hit.is_team_lead ? '\u265B' : '\u25CF'}</span>
+                <span style="color:var(--magenta);font-weight:600">${hit.team_name}</span>
+                ${hit.agent_name && html`<span style="color:var(--dim)"> / ${hit.agent_name}</span>`}
+                <span style="color:var(--faint);margin-left:4px">${hit.is_team_lead ? 'lead' : 'member'}</span>
+              </div>
+            ` : html`
+              <div style="margin-bottom:4px;color:var(--cyan)">
+                \u2442 ${hit.it2_splits} terminal split${hit.it2_splits !== 1 ? 's' : ''}
+                ${hit.it2_sends ? html` · ${hit.it2_sends} message${hit.it2_sends !== 1 ? 's' : ''} sent` : null}
+              </div>
+            `}
           </div>
         `}
         ${streaming && html`
@@ -1081,6 +1110,9 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
               <marker id="arrowSplit" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
                 <path d="M0,0 L8,3 L0,6" fill="var(--green)" />
               </marker>
+              <marker id="arrowTeam" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <path d="M0,0 L8,3 L0,6" fill="var(--magenta)" />
+              </marker>
             </defs>
             ${wsRegions.length > 1 && wsRegions.map((r, i) => html`
               <g key=${'ws' + i} class="graph-ws-group">
@@ -1120,10 +1152,15 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
               const dst = l.target || '?';
               const p1 = nodePos[src] || { x: cx, y: cy };
               const p2 = nodePos[dst] || { x: cx, y: cy };
-              // Determine edge class and arrow by action type.
+              // Determine edge class and arrow by action/kind type.
               const act = l.action || '';
+              const kind = l.kind || '';
               let cls, marker, dotColor;
-              if (act === 'get-screen' || act === 'get-buffer') {
+              if (kind === 'team' || act === 'team-spawn' || act === 'team-message') {
+                cls = 'graph-edge-team';
+                marker = 'url(#arrowTeam)';
+                dotColor = 'var(--magenta)';
+              } else if (act === 'get-screen' || act === 'get-buffer') {
                 cls = 'graph-edge-obs';
                 marker = 'url(#arrowObs)';
                 dotColor = 'var(--faint)';
@@ -1198,7 +1235,7 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
           <span><span style="color:var(--faint)">- - -</span> screen/buffer</span>
           <span><span style="color:var(--green)">··</span> split</span>
           <span><span style="color:var(--green)">●</span> active</span>
-          ${Object.keys(teamGroups).length > 0 && html`<span><span style="color:var(--magenta)">- -</span> team</span>`}
+          <span><span style="color:var(--magenta)">——</span> team</span>
         </span>
       </div>
     </div>

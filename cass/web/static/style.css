@@ -491,6 +491,7 @@ input::placeholder { color: var(--faint); }
 .graph-edge-msg { stroke: var(--accent); stroke-width: 1.5; fill: none; }
 .graph-edge-obs { stroke: var(--faint); stroke-width: 1; fill: none; stroke-dasharray: 4,3; }
 .graph-edge-split { stroke: var(--green); stroke-width: 1; fill: none; stroke-dasharray: 2,3; }
+.graph-edge-team { stroke: var(--magenta); stroke-width: 1.5; fill: none; }
 .graph-zoom {
   position: absolute;
   bottom: 8px;
@@ -906,6 +907,32 @@ input::placeholder { color: var(--faint); }
 /* hit-team clickable */
 .hit-team { color: var(--magenta); font-size: 11px; cursor: pointer; }
 .hit-team:hover { text-decoration: underline; }
+
+/* team badge (lead crown / member dot) */
+.hit-team-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--magenta);
+  cursor: pointer;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--magenta) 30%, transparent);
+}
+.hit-team-badge:hover { border-color: var(--magenta); text-decoration: underline; }
+.hit-team-badge.lead { border-color: color-mix(in srgb, var(--magenta) 50%, transparent); }
+.team-role-icon { font-size: 10px; line-height: 1; }
+
+/* ad-hoc team indicator */
+.hit-adhoc-team {
+  font-size: 11px;
+  color: var(--cyan);
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent);
+}
+
+/* team left accent on session cards */
+.hit.has-team { border-left: 2px solid color-mix(in srgb, var(--magenta) 40%, transparent); padding-left: 8px; margin-left: -8px; }
 
 /* team context in session detail */
 .detail-team-context {
