@@ -246,7 +246,7 @@ function App() {
         `)}
       </div>
       ${tab === 'search' && html`<${SearchPanel} searchRef=${searchRef} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} onNavigate=${setTab} />`}
-      ${tab === 'graph' && html`<${GraphPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
+      ${tab === 'graph' && html`<${GraphPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} onNavigate=${setTab} />`}
       ${tab === 'map' && html`<${MapPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
       ${tab === 'teams' && html`<${TeamsPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
       ${tab === 'stats' && html`<${StatsPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
@@ -677,15 +677,34 @@ function SessionDetailPanel({ hit, onClose }) {
     setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
   }
 
-  // Filter entries by search query.
-  const visibleEntries = useMemo(() => {
-    if (!searchQuery) return entries.map((e, i) => ({ entry: e, idx: i }));
-    return entries
-      .map((e, i) => ({ entry: e, idx: i }))
-      .filter(({ entry }) => entryMatchesQuery(entry, searchQuery));
+  // Search: always show all entries, track which ones match.
+  const { visibleEntries, matchIndices } = useMemo(() => {
+    const all = entries.map((e, i) => ({ entry: e, idx: i }));
+    if (!searchQuery) return { visibleEntries: all, matchIndices: [] };
+    const matches = [];
+    all.forEach(({ entry }, i) => {
+      if (entryMatchesQuery(entry, searchQuery)) matches.push(i);
+    });
+    return { visibleEntries: all, matchIndices: matches };
   }, [entries, searchQuery]);
 
-  const matchCount = searchQuery ? visibleEntries.length : 0;
+  const matchCount = matchIndices.length;
+  const matchSet = useMemo(() => new Set(matchIndices), [matchIndices]);
+  const [matchCursor, setMatchCursor] = useState(-1);
+
+  // Reset cursor when query changes.
+  useEffect(() => { setMatchCursor(matchCount > 0 ? 0 : -1); }, [searchQuery]);
+
+  // Scroll to current match.
+  useEffect(() => {
+    if (matchCursor < 0 || matchCursor >= matchIndices.length) return;
+    const targetIdx = matchIndices[matchCursor];
+    const el = bodyRef.current?.querySelector('[data-eidx="' + targetIdx + '"]');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [matchCursor, matchIndices]);
+
+  function nextMatch() { if (matchCount > 0) setMatchCursor(c => (c + 1) % matchCount); }
+  function prevMatch() { if (matchCount > 0) setMatchCursor(c => (c - 1 + matchCount) % matchCount); }
 
   // Render a text block with ansi_up and optional search highlighting.
   function renderAnsiContent(text, maxLen, cls) {
@@ -833,11 +852,17 @@ function SessionDetailPanel({ hit, onClose }) {
           </div>
           <div class="detail-search">
             <input ref=${searchRef} class="detail-search-input" type="text"
-              placeholder="search in session..."
+              placeholder="search in session... (Enter/Shift+Enter to navigate)"
               value=${searchQuery}
               onInput=${e => setSearchQuery(e.target.value)}
-              onKeyDown=${e => { if (e.key === 'Escape') { setSearchQuery(''); e.target.blur(); } }} />
-            ${searchQuery && html`<span class="detail-search-count">${matchCount}/${entries.length}</span>`}
+              onKeyDown=${e => {
+                if (e.key === 'Escape') { setSearchQuery(''); e.target.blur(); }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); nextMatch(); }
+                if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); prevMatch(); }
+              }} />
+            ${searchQuery && html`
+              <span class="detail-search-count">${matchCount > 0 ? (matchCursor + 1) + '/' + matchCount : '0'}</span>
+            `}
           </div>
         </div>
         ${(hit.team_name || hit.it2_splits > 0) && html`
@@ -875,7 +900,7 @@ function SessionDetailPanel({ hit, onClose }) {
 
 // --- Graph Panel ---
 
-function GraphPanel({ urlParams, updateParams, navVersion }) {
+function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   const [allLinks, setAllLinks] = useState([]);
   const [nodeData, setNodeData] = useState({});  // id -> {workspace, title, started_at, ended_at, tool_calls, turns, tokens, is_active}
   const [timeRange, setTimeRange] = useState({ min: 0, max: 0 });
@@ -1020,17 +1045,21 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
     });
   }
 
+  const didDrag = useRef(false);
+
   function onPointerDown(e) {
     // Only pan on primary button and not on interactive elements.
     if (e.button !== 0) return;
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'BUTTON') return;
     dragStart.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+    didDrag.current = false;
     setDragging(true);
     e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onPointerMove(e) {
     if (!dragStart.current || !dragging) return;
+    didDrag.current = true;
     setPanOffset({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
   }
   function onPointerUp(e) {
@@ -1342,9 +1371,13 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
     return info ? 36 : 24;
   }
 
+  // Hovered node for edge highlighting.
+  const [hoveredNode, setHoveredNode] = useState(null);
+
   function onNodeEnter(id, e) {
     const n = nodeData[id];
     if (!n) return;
+    setHoveredNode(id);
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     setTooltip({
@@ -1353,32 +1386,71 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
       y: e.clientY - rect.top - 8,
     });
   }
-  function onNodeLeave() { setTooltip(null); }
+  function onNodeLeave() { setTooltip(null); setHoveredNode(null); }
+
+  // Node click → navigate to search with that session ID.
+  function onNodeClick(id) {
+    if (didDrag.current) return;
+    if (onNavigate) onNavigate('search', { q: id });
+  }
+
+  // Edge tooltip state.
+  const [edgeTooltip, setEdgeTooltip] = useState(null);  // {link, x, y}
+
+  function onEdgeEnter(link, e) {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setEdgeTooltip({
+      link,
+      x: e.clientX - rect.left + 12,
+      y: e.clientY - rect.top - 8,
+    });
+  }
+  function onEdgeLeave() { setEdgeTooltip(null); }
 
   function renderTooltip() {
-    if (!tooltip) return null;
-    const n = nodeData[tooltip.id];
-    if (!n) return null;
-    const tok = (n.tokens || 0);
-    const startTs = n.started_at
-      ? (typeof n.started_at === 'number' ? new Date(n.started_at * 1000).toISOString() : n.started_at)
-      : null;
-    return html`
-      <div class="graph-tooltip visible"
-        style="left:${tooltip.x}px;top:${tooltip.y}px">
-        <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
-        ${n.workspace && html`<div class="graph-tooltip-stat">${shortProject(n.workspace)}</div>`}
-        <div class="graph-tooltip-stat">
-          ${[
-            n.tool_calls && n.tool_calls + ' tools',
-            n.turns && n.turns + ' turns',
-            tok >= 1000 && fmtNum(tok) + ' tok',
-          ].filter(Boolean).join(' · ') || 'no stats'}
+    // Node tooltip.
+    if (tooltip) {
+      const n = nodeData[tooltip.id];
+      if (n) {
+        const tok = (n.tokens || 0);
+        const startTs = n.started_at
+          ? (typeof n.started_at === 'number' ? new Date(n.started_at * 1000).toISOString() : n.started_at)
+          : null;
+        return html`
+          <div class="graph-tooltip visible"
+            style="left:${tooltip.x}px;top:${tooltip.y}px">
+            <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
+            ${n.workspace && html`<div class="graph-tooltip-stat">${shortProject(n.workspace)}</div>`}
+            <div class="graph-tooltip-stat">
+              ${[
+                n.tool_calls && n.tool_calls + ' tools',
+                n.turns && n.turns + ' turns',
+                tok >= 1000 && fmtNum(tok) + ' tok',
+              ].filter(Boolean).join(' · ') || 'no stats'}
+            </div>
+            ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
+            ${isActive(tooltip.id) && html`<div style="color:var(--green);margin-top:2px">active</div>`}
+          </div>
+        `;
+      }
+    }
+    // Edge tooltip.
+    if (edgeTooltip) {
+      const l = edgeTooltip.link;
+      const kind = l.kind || 'link';
+      const action = l.action || '';
+      const ts = l.timestamp ? relTime(l.timestamp) : '';
+      return html`
+        <div class="graph-tooltip visible"
+          style="left:${edgeTooltip.x}px;top:${edgeTooltip.y}px">
+          <div class="graph-tooltip-title">${l.source} → ${l.target}</div>
+          <div class="graph-tooltip-stat">${kind}${action ? ': ' + action : ''}</div>
+          ${ts && html`<div class="graph-tooltip-stat">${ts}</div>`}
         </div>
-        ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
-        ${isActive(tooltip.id) && html`<div style="color:var(--green);margin-top:2px">active</div>`}
-      </div>
-    `;
+      `;
+    }
+    return null;
   }
 
   // Format scrubber time display.
@@ -1499,6 +1571,9 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
                 dotColor = 'var(--accent)';
               }
               if (newLinkIndices.has(i)) cls += ' graph-edge-new';
+              // Edge highlighting: boost connected edges, dim others when a node is hovered.
+              const isConnected = hoveredNode && (src === hoveredNode || dst === hoveredNode);
+              if (hoveredNode) cls += isConnected ? ' graph-edge-highlight' : ' graph-edge-dimmed';
               const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
               const dx = p2.x - p1.x, dy = p2.y - p1.y;
               const len = Math.max(Math.sqrt(dx*dx + dy*dy), 1);
@@ -1509,11 +1584,14 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
               const offset = baseOffset + spread;
               const cpx = mx - dy * offset / len, cpy = my + dx * offset / len;
               const pathId = 'lp' + i;
-              const opacity = isObs ? 0.35 : undefined;
+              const opacity = isObs && !isConnected ? 0.35 : undefined;
               return html`
-                <g key=${i}>
+                <g key=${i}
+                  onMouseEnter=${(e) => onEdgeEnter(l, e)} onMouseLeave=${onEdgeLeave}>
+                  <path d="M${p1.x},${p1.y} Q${cpx},${cpy} ${p2.x},${p2.y}"
+                    stroke="transparent" stroke-width="12" fill="none" style="cursor:pointer" />
                   <path id=${pathId} d="M${p1.x},${p1.y} Q${cpx},${cpy} ${p2.x},${p2.y}"
-                    class=${cls} marker-end=${marker} opacity=${opacity} />
+                    class=${cls} marker-end=${marker} opacity=${opacity} pointer-events="none" />
                   ${newLinkIndices.has(i) && html`
                     <circle r="3" fill=${dotColor}>
                       <animateMotion dur="0.8s" fill="freeze" begin="0s">
@@ -1533,8 +1611,9 @@ function GraphPanel({ urlParams, updateParams, navVersion }) {
               const info = nodeInfo(n);
               const active = isActive(n);
               return html`
-                <g class="graph-node ${active ? 'active' : ''}" transform="translate(${p.x - w/2},${p.y - h/2})" key=${n}
-                  onMouseEnter=${(e) => onNodeEnter(n, e)} onMouseLeave=${onNodeLeave}>
+                <g class="graph-node ${active ? 'active' : ''} ${hoveredNode === n ? 'hovered' : ''}" transform="translate(${p.x - w/2},${p.y - h/2})" key=${n}
+                  onMouseEnter=${(e) => onNodeEnter(n, e)} onMouseLeave=${onNodeLeave}
+                  onClick=${() => onNodeClick(n)} style="cursor:pointer">
                   <rect width=${w} height=${h} />
                   ${active && html`<rect class="node-dot" x="2" y=${h/2 - 3} width="3" height="6" rx="1" />`}
                   <text x=${w/2} y=${info ? 12 : 15} text-anchor="middle" font-size="9">${label}</text>
