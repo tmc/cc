@@ -79,6 +79,14 @@ body.graph-active .tabs { margin-bottom: 8px; }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
 .live-dot.connected { background: var(--green); }
 
+.db-busy-badge {
+  font-size: 10px;
+  color: var(--yellow);
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, transparent);
+  padding: 1px 8px;
+  animation: blink 1s infinite;
+}
+
 /* tabs */
 .tabs {
   display: flex;
@@ -184,7 +192,7 @@ input::placeholder { color: var(--faint); }
 }
 
 .hit {
-  padding: 10px 0;
+  padding: 10px 0 18px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   position: relative;
@@ -247,10 +255,27 @@ input::placeholder { color: var(--faint); }
   bottom: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 14px;
   display: flex;
+  overflow: hidden;
 }
-.tool-bar-seg { height: 100%; }
+.tool-bar-seg {
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+.tool-bar-label {
+  font-size: 8px;
+  line-height: 14px;
+  color: var(--bg);
+  padding: 0 3px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  display: block;
+  font-weight: 600;
+  mix-blend-mode: difference;
+}
 
 .result-count { text-align: center; font-size: 11px; color: var(--faint); padding: 12px; }
 
@@ -277,7 +302,7 @@ input::placeholder { color: var(--faint); }
   top: 0;
   right: 0;
   bottom: 0;
-  width: 480px;
+  width: min(640px, 70vw);
   background: var(--bg);
   border-left: 1px solid var(--border);
   z-index: 40;

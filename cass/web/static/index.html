@@ -19,10 +19,31 @@ ansiUp.use_classes = true;
 
 // --- API helpers ---
 
+// Global DB status for UI feedback.
+let dbBusyListeners = new Set();
+let dbBusy = false;
+function setDbBusy(busy) {
+  dbBusy = busy;
+  dbBusyListeners.forEach(fn => fn(busy));
+}
+
 async function api(path, opts) {
-  const r = await fetch('api/' + path, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const maxRetries = 3;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const r = await fetch('api/' + path, opts);
+    if (r.status === 503) {
+      setDbBusy(true);
+      if (attempt < maxRetries) {
+        await new Promise(ok => setTimeout(ok, 500 * (attempt + 1)));
+        continue;
+      }
+      const body = await r.text();
+      throw new Error(body || 'database busy');
+    }
+    setDbBusy(false);
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
 }
 
 function qs(params) {
@@ -118,10 +139,13 @@ function ToolMicroBar({ breakdown }) {
   if (!breakdown || Object.keys(breakdown).length === 0) return null;
   const total = Object.values(breakdown).reduce((a, b) => a + b, 0);
   if (total === 0) return null;
+  const sorted = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
   return html`
     <div class="tool-bar">
-      ${Object.entries(breakdown).map(([name, count]) => html`
-        <div class="tool-bar-seg" style="width:${(count/total*100).toFixed(1)}%;background:${TOOL_COLORS[name]||'var(--faint)'}" title="${name}: ${count}"></div>
+      ${sorted.map(([name, count]) => html`
+        <div class="tool-bar-seg" style="width:${(count/total*100).toFixed(1)}%;background:${TOOL_COLORS[name]||'var(--faint)'}" title="${name}: ${count}">
+          ${count/total >= 0.12 ? html`<span class="tool-bar-label">${name.slice(0,4)} ${count}</span>` : null}
+        </div>
       `)}
     </div>
   `;
@@ -137,8 +161,15 @@ function App() {
   const [toasts, setToasts] = useState([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [headerStats, setHeaderStats] = useState(null);
+  const [busy, setBusy] = useState(false);
   const searchRef = useRef(null);
   const toastId = useRef(0);
+
+  // Track global DB busy state.
+  useEffect(() => {
+    dbBusyListeners.add(setBusy);
+    return () => dbBusyListeners.delete(setBusy);
+  }, []);
 
   function setTab(t, params) {
     setTabRaw(t);
@@ -234,6 +265,7 @@ function App() {
             <span title="Total tokens (in+out)">${fmtNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} tokens</span>
           </div>
         ` : null}
+        ${busy && html`<span class="db-busy-badge">db busy</span>`}
         <div class="live-badge">
           <div class="live-dot ${connected ? 'connected' : ''}"></div>
           ${connected ? 'live' : 'disconnected'}
@@ -525,7 +557,23 @@ function ansiHtml(text) {
 
 // Escape HTML entities for safe insertion.
 function escHtml(s) {
+  if (!s) return '';
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// AnsiContent: renders text with ANSI codes as HTML using a ref.
+// This avoids dangerouslySetInnerHTML issues with htm/preact.
+function AnsiContent({ text, maxLen, cls, searchQuery }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current || !text) return;
+    const truncated = text.slice(0, maxLen || 2000);
+    let rendered = ansiHtml(truncated);
+    if (searchQuery) rendered = highlightHtml(rendered, searchQuery);
+    ref.current.innerHTML = rendered;
+  }, [text, maxLen, searchQuery]);
+  if (!text) return null;
+  return html`<div ref=${ref} class="conv-content ${cls || ''}"></div>`;
 }
 
 // Render search snippet: convert >>>match<<< markers to highlighted spans.
@@ -727,10 +775,7 @@ function SessionDetailPanel({ hit, onClose }) {
   // Render a text block with ansi_up and optional search highlighting.
   function renderAnsiContent(text, maxLen, cls) {
     if (!text) return null;
-    const truncated = text.slice(0, maxLen);
-    let rendered = ansiHtml(truncated);
-    if (searchQuery) rendered = highlightHtml(rendered, searchQuery);
-    return html`<div class="conv-content ${cls || ''}" dangerouslySetInnerHTML=${{ __html: rendered }}></div>`;
+    return html`<${AnsiContent} text=${text} maxLen=${maxLen || 2000} cls=${cls} searchQuery=${searchQuery} />`;
   }
 
   function renderConversation() {

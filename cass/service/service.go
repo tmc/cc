@@ -170,6 +170,11 @@ func (s *Service) Search(ctx context.Context, req cass.SearchRequest) (*cass.Sea
 	return s.store.Search(ctx, req)
 }
 
+// GetSourcePath returns the source file path for a session by its ID.
+func (s *Service) GetSourcePath(ctx context.Context, id string) (string, error) {
+	return s.store.GetSourcePath(ctx, id)
+}
+
 // Stats returns basic index statistics.
 func (s *Service) Stats(ctx context.Context) (map[string]any, error) {
 	count, err := s.store.SessionCount(ctx)

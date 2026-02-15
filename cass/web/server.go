@@ -26,18 +26,20 @@ type Config struct {
 	Addr       string // Listen address, default ":8080".
 	DevMode    bool   // Serve static files from disk for development.
 	DevStaticDir string // Override dev static directory path.
+	Verbose    bool   // Log requests with timing info.
 	Logger     *slog.Logger
 }
 
 // Server serves the CASS web UI and API.
 type Server struct {
-	svc    *service.Service
-	broker *SSEBroker
-	addr   string
-	dev    bool
-	devDir string
-	log    *slog.Logger
-	srv    *http.Server
+	svc     *service.Service
+	broker  *SSEBroker
+	addr    string
+	dev     bool
+	devDir  string
+	verbose bool
+	log     *slog.Logger
+	srv     *http.Server
 }
 
 // New creates a new web server.
@@ -49,12 +51,13 @@ func New(cfg Config) *Server {
 		cfg.Logger = slog.Default()
 	}
 	return &Server{
-		svc:    cfg.Service,
-		broker: NewSSEBroker(),
-		addr:   cfg.Addr,
-		dev:    cfg.DevMode,
-		devDir: cfg.DevStaticDir,
-		log:    cfg.Logger,
+		svc:     cfg.Service,
+		broker:  NewSSEBroker(),
+		addr:    cfg.Addr,
+		dev:     cfg.DevMode,
+		devDir:  cfg.DevStaticDir,
+		verbose: cfg.Verbose,
+		log:     cfg.Logger,
 	}
 }
 
@@ -85,7 +88,54 @@ func (s *Server) Handler() http.Handler {
 	// Static files.
 	mux.HandleFunc("/", s.serveStatic)
 
+	if s.verbose {
+		return s.requestLogger(mux)
+	}
 	return mux
+}
+
+// requestLogger wraps a handler with request timing logs.
+func (s *Server) requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rw, r)
+		s.log.Info("http",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"query", r.URL.RawQuery,
+			"status", rw.status,
+			"bytes", rw.bytes,
+			"duration", time.Since(start).Round(time.Microsecond),
+		)
+	})
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	n, err := rw.ResponseWriter.Write(b)
+	rw.bytes += n
+	return n, err
+}
+
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
 }
 
 // Start begins serving HTTP and watching for file changes.

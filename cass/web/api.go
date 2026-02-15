@@ -198,19 +198,10 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the session's source path.
-	result, err := s.svc.Search(r.Context(), cass.SearchRequest{
-		Query: id,
-		Limit: 1,
-	})
-	if err != nil || len(result.Hits) == 0 {
+	// Look up the session's source path directly by ID.
+	sourcePath, err := s.svc.GetSourcePath(r.Context(), id)
+	if err != nil || sourcePath == "" {
 		writeError(w, fmt.Errorf("session not found: %s", id), http.StatusNotFound)
-		return
-	}
-
-	sourcePath := result.Hits[0].SourcePath
-	if sourcePath == "" {
-		writeError(w, fmt.Errorf("no source path for session"), http.StatusNotFound)
 		return
 	}
 
@@ -304,9 +295,14 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func writeError(w http.ResponseWriter, err error, status int) {
+	// Surface SQLITE_BUSY as 503 so the UI can retry.
+	msg := err.Error()
+	if strings.Contains(msg, "database is locked") || strings.Contains(msg, "SQLITE_BUSY") {
+		status = http.StatusServiceUnavailable
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 func parseTime(s string) (time.Time, error) {

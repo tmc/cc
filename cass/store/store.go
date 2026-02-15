@@ -464,6 +464,13 @@ func (s *Store) GetMeta(ctx context.Context, key string) (string, error) {
 	return value, err
 }
 
+// GetSourcePath returns the source file path for a session by its ID.
+func (s *Store) GetSourcePath(ctx context.Context, id string) (string, error) {
+	var path string
+	err := s.db.QueryRowContext(ctx, `SELECT source_path FROM sessions WHERE id = ?`, id).Scan(&path)
+	return path, err
+}
+
 // SessionCount returns the number of indexed sessions.
 func (s *Store) SessionCount(ctx context.Context) (int, error) {
 	var count int

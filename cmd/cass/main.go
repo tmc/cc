@@ -385,12 +385,14 @@ func runWeb(ctx context.Context, svc *service.Service, args []string, logger *sl
 	fs := flag.NewFlagSet("web", flag.ExitOnError)
 	addr := fs.String("addr", ":8080", "listen address")
 	dev := fs.Bool("dev", false, "serve static files from disk (for development)")
+	verbose := fs.Bool("v", false, "log requests with timing info")
 	fs.Parse(args)
 
 	srv := web.New(web.Config{
 		Service: svc,
 		Addr:    *addr,
 		DevMode: *dev,
+		Verbose: *verbose,
 		Logger:  logger,
 	})
 
