@@ -199,13 +199,22 @@ func (fw *FileWatcher) processPending(ctx context.Context, files map[string]stru
 	}
 
 	// Incrementally re-index the changed files so the UI sees fresh data.
+	// Retry on DB contention with backoff.
 	indexed := 0
 	if fw.reindex != nil {
-		n, err := fw.reindex(ctx, paths)
-		if err != nil {
-			fw.log.Warn("incremental reindex", "err", err)
-		} else {
-			indexed = n
+		for attempt := range 3 {
+			n, err := fw.reindex(ctx, paths)
+			if err != nil {
+				if strings.Contains(err.Error(), "database is locked") || strings.Contains(err.Error(), "SQLITE_BUSY") {
+					fw.log.Debug("incremental reindex waiting", "attempt", attempt+1, "err", err)
+					time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+					continue
+				}
+				fw.log.Warn("incremental reindex", "err", err)
+			} else {
+				indexed = n
+			}
+			break
 		}
 	}
 
