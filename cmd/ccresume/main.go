@@ -1,0 +1,266 @@
+package main
+
+import (
+	"bufio"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/tmc/cc"
+)
+
+var (
+	launchFlag = flag.Bool("l", false, "Launch claude instead of printing command")
+	sinceFlag  = flag.String("since", "7d", "Search sessions modified within duration")
+	oneFlag    = flag.Bool("1", false, "Show only the most recent match")
+	clipFlag   = flag.Bool("clip", true, "Use clipboard as search query (pbpaste)")
+)
+
+func main() {
+	flag.Parse()
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "ccresume: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	query := strings.Join(flag.Args(), " ")
+	if query == "" && *clipFlag {
+		out, err := exec.Command("pbpaste").Output()
+		if err == nil {
+			query = strings.TrimSpace(string(out))
+		}
+	}
+	if query == "" {
+		return fmt.Errorf("no search query provided (use argument or clipboard)")
+	}
+
+	since, err := parseDuration(*sinceFlag)
+	if err != nil {
+		return fmt.Errorf("invalid duration: %w", err)
+	}
+
+	// Try index first
+	matches, err := findMatches(query, since)
+	if err != nil {
+		return err
+	}
+
+	// Fall back to content search if no matches in index
+	if len(matches) == 0 {
+		matches, err = grepMatches(query)
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(matches) == 0 {
+		return fmt.Errorf("no sessions found matching %q", query)
+	}
+
+	// Sort by modified time, newest first
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].ModifiedTime().After(matches[j].ModifiedTime())
+	})
+
+	// If current directory matches a result, prioritize it
+	cwd, _ := os.Getwd()
+	for i, m := range matches {
+		if strings.HasPrefix(cwd, m.ProjectPath) || strings.HasPrefix(m.ProjectPath, cwd) {
+			// Move matching entry to front
+			matches = append([]cc.IndexEntry{m}, append(matches[:i], matches[i+1:]...)...)
+			break
+		}
+	}
+
+	if *oneFlag {
+		matches = matches[:1]
+	}
+
+	for _, m := range matches {
+		if *launchFlag {
+			return launchClaude(m.ProjectPath, m.SessionID)
+		}
+		fmt.Printf("cd %s; claude -r %s\n", m.ProjectPath, m.SessionID)
+	}
+	return nil
+}
+
+func findMatches(query string, since time.Duration) ([]cc.IndexEntry, error) {
+	entries, err := cc.AllIndexEntries(since, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var matches []cc.IndexEntry
+	q := strings.ToLower(query)
+	for _, e := range entries {
+		if !validSessionID(e.SessionID) {
+			continue
+		}
+		if containsAny(q, e.SessionID, e.ProjectPath, e.FirstPrompt, e.Summary, e.GitBranch) {
+			matches = append(matches, e)
+		}
+	}
+	return matches, nil
+}
+
+// grepMatches searches file contents using rg
+func grepMatches(query string) ([]cc.IndexEntry, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(home, ".claude", "projects")
+
+	cmd := exec.Command("rg", "-l", query, dir)
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("rg: %w", err)
+	}
+
+	var matches []cc.IndexEntry
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		path := scanner.Text()
+		if !strings.HasSuffix(path, ".jsonl") {
+			continue
+		}
+
+		sessionID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+		if !validSessionID(sessionID) {
+			continue
+		}
+		rel, _ := filepath.Rel(dir, path)
+		parts := strings.SplitN(rel, string(os.PathSeparator), 2)
+		if len(parts) < 1 {
+			continue
+		}
+		projectPath := DecodePath(parts[0])
+
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+
+		matches = append(matches, cc.IndexEntry{
+			SessionID:   sessionID,
+			FullPath:    path,
+			ProjectPath: projectPath,
+			Modified:    info.ModTime().Format(time.RFC3339Nano),
+		})
+	}
+	return matches, nil
+}
+
+// DecodePath decodes Claude's encoded project directory name using stat checks
+func DecodePath(encoded string) string {
+	if encoded == "" || !strings.HasPrefix(encoded, "-") {
+		return encoded
+	}
+
+	parts := strings.Split(encoded[1:], "-")
+	return buildPath(parts, "/")
+}
+
+func buildPath(parts []string, prefix string) string {
+	if len(parts) == 0 {
+		return strings.TrimSuffix(prefix, "/")
+	}
+
+	// Try shortest match first (prefer more path segments)
+	// This avoids false positives like "appledocs-examples" when "appledocs/examples" is correct
+	for i := 1; i <= len(parts); i++ {
+		segment := strings.Join(parts[:i], "-")
+		segment = fixDomain(segment)
+		candidate := prefix + segment
+
+		if dirExists(candidate) {
+			// Found a valid directory, continue with remaining parts
+			result := buildPath(parts[i:], candidate+"/")
+			// Verify the final path exists
+			if dirExists(result) {
+				return result
+			}
+			// If final path doesn't exist, try longer segment
+			continue
+		}
+	}
+
+	// No valid path found, return best effort
+	segment := fixDomain(parts[0])
+	return buildPath(parts[1:], prefix+segment+"/")
+}
+
+func fixDomain(s string) string {
+	domains := []string{"github", "gitlab", "bitbucket", "golang", "gopkg"}
+	tlds := []string{"com", "org", "io", "in", "net"}
+	for _, d := range domains {
+		for _, t := range tlds {
+			if s == d+"-"+t {
+				return d + "." + t
+			}
+		}
+	}
+	return s
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// validSessionID reports whether a session ID is a valid resume target.
+// Compacted sessions (agent-acompact-*) are internal and cannot be resumed.
+func validSessionID(id string) bool {
+	return !strings.HasPrefix(id, "agent-acompact-")
+}
+
+func containsAny(query string, fields ...string) bool {
+	for _, f := range fields {
+		if strings.Contains(strings.ToLower(f), query) {
+			return true
+		}
+	}
+	return false
+}
+
+func launchClaude(projectPath, sessionID string) error {
+	if err := os.Chdir(projectPath); err != nil {
+		return fmt.Errorf("chdir %s: %w", projectPath, err)
+	}
+	cmd := exec.Command("claude", "-r", sessionID)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func parseDuration(s string) (time.Duration, error) {
+	if len(s) < 2 {
+		return 0, fmt.Errorf("invalid duration: %s", s)
+	}
+	suffix := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	var num int
+	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
+		return time.ParseDuration(s)
+	}
+	switch suffix {
+	case 'd':
+		return time.Duration(num) * 24 * time.Hour, nil
+	case 'w':
+		return time.Duration(num) * 7 * 24 * time.Hour, nil
+	default:
+		return time.ParseDuration(s)
+	}
+}
