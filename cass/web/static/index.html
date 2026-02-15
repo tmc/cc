@@ -502,7 +502,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick }) {
         <span class="hit-title">${h.title || 'Untitled'}</span>
         ${h.sparkline && html`<span class="hit-sparkline">${h.sparkline}</span>`}
       </div>
-      ${h.snippet && html`<div class="hit-snippet">${h.snippet}</div>`}
+      ${h.snippet && html`<div class="hit-snippet">${renderSnippet(h.snippet)}</div>`}
       <div class="hit-meta">
         ${h.workspace && html`<span class="hit-workspace">${shortProject(h.workspace)}</span>`}
         ${h.started_at && html`<span class="hit-time">${relTime(h.started_at)}${h.ended_at && relTime(h.ended_at) !== relTime(h.started_at) ? ' → ' + relTime(h.ended_at) : ''}</span>`}
@@ -526,6 +526,24 @@ function ansiHtml(text) {
 // Escape HTML entities for safe insertion.
 function escHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Render search snippet: convert >>>match<<< markers to highlighted spans.
+// Returns array of preact vnodes (no dangerouslySetInnerHTML).
+function renderSnippet(text) {
+  if (!text) return [];
+  const parts = [];
+  let rest = text;
+  while (rest) {
+    const start = rest.indexOf('>>>');
+    if (start === -1) { parts.push(rest); break; }
+    if (start > 0) parts.push(rest.slice(0, start));
+    const end = rest.indexOf('<<<', start + 3);
+    if (end === -1) { parts.push(rest.slice(start)); break; }
+    parts.push(html`<mark class="search-hl">${rest.slice(start + 3, end)}</mark>`);
+    rest = rest.slice(end + 3);
+  }
+  return parts;
 }
 
 // Highlight search query matches in plain text (returns HTML string).
@@ -717,6 +735,11 @@ function SessionDetailPanel({ hit, onClose }) {
 
   function renderConversation() {
     return visibleEntries.map(({ entry, idx }) => {
+      // When searching, dim non-matching entries.
+      const isMatch = searchQuery && matchSet.has(idx);
+      const dimClass = searchQuery && !isMatch ? ' search-dimmed' : '';
+      const hlClass = isMatch && matchIndices[matchCursor] === idx ? ' search-current' : '';
+
       // Compact boundary: horizontal divider with metadata badge.
       if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
         const meta = entry.compactMetadata;
@@ -724,7 +747,7 @@ function SessionDetailPanel({ hit, onClose }) {
           ? (meta.trigger || 'auto') + (meta.preTokens ? ' | ' + fmtNum(meta.preTokens) + ' tok' : '')
           : 'compacted';
         return html`
-          <div class="conv-compact-boundary" key=${idx}>
+          <div class="conv-compact-boundary${dimClass}" key=${idx} data-eidx=${idx}>
             <span class="conv-compact-badge">compacted (${label})</span>
           </div>
         `;
@@ -739,7 +762,7 @@ function SessionDetailPanel({ hit, onClose }) {
           const key = 'cs-' + idx;
           const isExp = expanded[key];
           return html`
-            <div class="conv-compact-summary" key=${idx} onClick=${() => toggleExpand(key)}>
+            <div class="conv-compact-summary${dimClass}${hlClass}" key=${idx} data-eidx=${idx} onClick=${() => toggleExpand(key)}>
               <div class="conv-role">
                 <span>compact summary</span>
                 <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
@@ -752,7 +775,7 @@ function SessionDetailPanel({ hit, onClose }) {
 
       // Custom title rename.
       if (entry.type === 'custom-title' && entry.customTitle) {
-        return html`<div class="conv-custom-title" key=${idx}>renamed: ${entry.customTitle}</div>`;
+        return html`<div class="conv-custom-title${dimClass}" key=${idx} data-eidx=${idx}>renamed: ${entry.customTitle}</div>`;
       }
 
       // System entries (non-compact).
@@ -760,7 +783,7 @@ function SessionDetailPanel({ hit, onClose }) {
         const text = entry.content || entry.summary || '';
         if (!text) return null;
         return html`
-          <div class="conv-entry role-system" key=${idx}>
+          <div class="conv-entry role-system${dimClass}${hlClass}" key=${idx} data-eidx=${idx}>
             <div class="conv-role">system</div>
             ${renderAnsiContent(text, 500)}
           </div>
@@ -773,52 +796,54 @@ function SessionDetailPanel({ hit, onClose }) {
       const content = msg.content;
 
       if (Array.isArray(content)) {
-        return content.map((block, bi) => {
-          const key = idx + '-' + bi;
-          if (block.type === 'tool_use') {
-            const isExp = expanded[key];
-            const inputText = typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2);
-            return html`
-              <div class="conv-entry role-tool_use" key=${key} onClick=${() => toggleExpand(key)}>
-                <div class="conv-role">
-                  <span class="conv-tool-name">${block.name || 'tool'}</span>
-                  <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
+        return html`<div data-eidx=${idx} class="${dimClass}${hlClass}">
+          ${content.map((block, bi) => {
+            const key = idx + '-' + bi;
+            if (block.type === 'tool_use') {
+              const isExp = expanded[key];
+              const inputText = typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2);
+              return html`
+                <div class="conv-entry role-tool_use" key=${key} onClick=${() => toggleExpand(key)}>
+                  <div class="conv-role">
+                    <span class="conv-tool-name">${block.name || 'tool'}</span>
+                    <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
+                  </div>
+                  ${isExp && renderAnsiContent(inputText, 5000, 'tool-input')}
                 </div>
-                ${isExp && renderAnsiContent(inputText, 5000, 'tool-input')}
-              </div>
-            `;
-          }
-          if (block.type === 'tool_result') {
-            const isErr = block.is_error;
-            const text = typeof block.content === 'string' ? block.content
-              : Array.isArray(block.content) ? block.content.map(c => c.text || '').join('\n')
-              : JSON.stringify(block.content);
-            const isExp = expanded[key];
-            return html`
-              <div class="conv-entry role-tool_result" key=${key} onClick=${() => toggleExpand(key)}>
-                <div class="conv-role">
-                  <span class="${isErr ? 'conv-error' : 'conv-success'}">${isErr ? 'error' : 'result'}</span>
-                  <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
+              `;
+            }
+            if (block.type === 'tool_result') {
+              const isErr = block.is_error;
+              const text = typeof block.content === 'string' ? block.content
+                : Array.isArray(block.content) ? block.content.map(c => c.text || '').join('\n')
+                : JSON.stringify(block.content);
+              const isExp = expanded[key];
+              return html`
+                <div class="conv-entry role-tool_result" key=${key} onClick=${() => toggleExpand(key)}>
+                  <div class="conv-role">
+                    <span class="${isErr ? 'conv-error' : 'conv-success'}">${isErr ? 'error' : 'result'}</span>
+                    <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
+                  </div>
+                  ${renderAnsiContent(text, isExp ? 5000 : 200, isExp ? '' : 'collapsed')}
                 </div>
-                ${renderAnsiContent(text, isExp ? 5000 : 200, isExp ? '' : 'collapsed')}
-              </div>
-            `;
-          }
-          if (block.type === 'text' || block.text) {
-            return html`
-              <div class="conv-entry role-${role}" key=${key}>
-                <div class="conv-role">${role}</div>
-                ${renderAnsiContent(block.text || '', 2000)}
-              </div>
-            `;
-          }
-          return null;
-        });
+              `;
+            }
+            if (block.type === 'text' || block.text) {
+              return html`
+                <div class="conv-entry role-${role}" key=${key}>
+                  <div class="conv-role">${role}</div>
+                  ${renderAnsiContent(block.text || '', 2000)}
+                </div>
+              `;
+            }
+            return null;
+          })}
+        </div>`;
       }
 
       if (typeof content === 'string' && content.length > 0) {
         return html`
-          <div class="conv-entry role-${role}" key=${idx}>
+          <div class="conv-entry role-${role}${dimClass}${hlClass}" key=${idx} data-eidx=${idx}>
             <div class="conv-role">${role}</div>
             ${renderAnsiContent(content, 2000)}
           </div>
@@ -849,6 +874,17 @@ function SessionDetailPanel({ hit, onClose }) {
             ${hit.duration_secs && html`<span>${fmtDuration(hit.duration_secs)}</span>`}
             ${(hit.input_tokens || hit.output_tokens) && html`<span>${fmtNum((hit.input_tokens||0)+(hit.output_tokens||0))} tok</span>`}
             ${hit.compactions > 0 && html`<span class="hit-compactions">${hit.compactions} compaction${hit.compactions > 1 ? 's' : ''}</span>`}
+          </div>
+          ${hit.tool_breakdown && Object.keys(hit.tool_breakdown).length > 0 && html`
+            <div class="detail-tool-breakdown">
+              ${Object.entries(hit.tool_breakdown).sort((a,b) => b[1] - a[1]).map(([name, count]) => html`
+                <span class="tool-chip" key=${name}>${name} ${count}</span>
+              `)}
+            </div>
+          `}
+          <div class="detail-session-id">
+            <span style="color:var(--faint);font-size:10px">${hit.session_id}</span>
+            ${hit.sparkline && html`<span class="hit-sparkline" style="margin-left:8px">${hit.sparkline}</span>`}
           </div>
           <div class="detail-search">
             <input ref=${searchRef} class="detail-search-input" type="text"
@@ -1421,7 +1457,9 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           <div class="graph-tooltip visible"
             style="left:${tooltip.x}px;top:${tooltip.y}px">
             <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
-            ${n.workspace && html`<div class="graph-tooltip-stat">${shortProject(n.workspace)}</div>`}
+            ${n.workspace && html`<div class="graph-tooltip-stat graph-tooltip-ws"
+              onClick=${(e) => { e.stopPropagation(); if (onNavigate) onNavigate('search', { q: shortProject(n.workspace) }); }}
+              style="cursor:pointer;text-decoration:underline">${shortProject(n.workspace)}</div>`}
             <div class="graph-tooltip-stat">
               ${[
                 n.tool_calls && n.tool_calls + ' tools',
@@ -1431,6 +1469,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
             </div>
             ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
             ${isActive(tooltip.id) && html`<div style="color:var(--green);margin-top:2px">active</div>`}
+            <div class="graph-tooltip-hint">click node to search</div>
           </div>
         `;
       }

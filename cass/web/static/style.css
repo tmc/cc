@@ -449,6 +449,33 @@ mark.search-hl {
   }
 }
 
+/* in-session search: dim non-matches, highlight current */
+.search-dimmed { opacity: 0.25; }
+.search-current { border-left-color: var(--yellow) !important; background: color-mix(in srgb, var(--yellow) 8%, transparent); }
+
+/* detail: tool breakdown chips */
+.detail-tool-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.tool-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* detail: session ID row */
+.detail-session-id {
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+  gap: 4px;
+}
+
 /* ansi_up class-based colors */
 .ansi-black-fg { color: #333; }
 .ansi-red-fg { color: var(--danger); }
@@ -676,9 +703,11 @@ mark.search-hl {
   opacity: 0;
   transition: opacity 0.1s;
 }
-.graph-tooltip.visible { opacity: 1; }
+.graph-tooltip.visible { opacity: 1; pointer-events: auto; }
 .graph-tooltip-title { font-weight: 600; margin-bottom: 2px; }
 .graph-tooltip-stat { color: var(--dim); }
+.graph-tooltip-ws:hover { color: var(--accent); }
+.graph-tooltip-hint { font-size: 9px; color: var(--faint); margin-top: 4px; }
 
 /* graph: animated link dots */
 @keyframes travel {
