@@ -1590,8 +1590,11 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
   const [selectedName, setSelectedNameRaw] = useState(urlParams.name || '');
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [teamSearch, setTeamSearch] = useState('');
+  const [teamSearchResults, setTeamSearchResults] = useState(null);
+  const [teamSearchLoading, setTeamSearchLoading] = useState(false);
 
-  function setSelectedName(v) { setSelectedNameRaw(v); updateParams(v ? { name: v } : {}); }
+  function setSelectedName(v) { setSelectedNameRaw(v); updateParams(v ? { name: v } : {}); setTeamSearch(''); setTeamSearchResults(null); }
 
   useEffect(() => {
     if (navVersion === 0) return;
@@ -1637,6 +1640,20 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
     return () => window.removeEventListener('cass:team_message', handler);
   }, [selectedName]);
 
+  // Debounced search within team sessions.
+  useEffect(() => {
+    if (!teamSearch || !selectedName) { setTeamSearchResults(null); return; }
+    setTeamSearchLoading(true);
+    const id = setTimeout(async () => {
+      try {
+        const r = await api('search?' + qs({ q: teamSearch, team: selectedName, limit: '50' }));
+        setTeamSearchResults(r);
+      } catch (e) { console.error('team search:', e); }
+      setTeamSearchLoading(false);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [teamSearch, selectedName]);
+
   if (loading) return html`<div class="loading">loading teams...</div>`;
   if (teams.length === 0) return html`<div class="empty">no agent teams found</div>`;
 
@@ -1655,6 +1672,14 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
     const members = config.members || (team && team.members) || [];
     const lead = config.leadAgentId || (team && team.lead) || '';
 
+    // Sessions to display: search results if searching, otherwise detail.sessions.
+    const displaySessions = teamSearch && teamSearchResults
+      ? (teamSearchResults.hits || [])
+      : (detail.sessions && detail.sessions.hits ? detail.sessions.hits : detail.sessions || []);
+    const sessionCount = teamSearch && teamSearchResults
+      ? (teamSearchResults.total_count || 0)
+      : (detail.sessions && detail.sessions.total_count != null ? detail.sessions.total_count : (detail.sessions || []).length);
+
     return html`
       <div>
         <div class="team-detail-header">
@@ -1665,17 +1690,25 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
         <div class="team-detail-body">
           <div>
             <${TopologySVG} members=${members} lead=${lead} />
-            ${detail.sessions && detail.sessions.length > 0 && html`
-              <div class="team-sessions">
-                <div class="stat-label">${detail.sessions.length} session${detail.sessions.length !== 1 ? 's' : ''}</div>
-                ${detail.sessions.map(s => html`
-                  <div class="team-session-item" key=${s.session_id}>
-                    <div style="font-weight:600">${s.title ? s.title.slice(0, 60) : 'Untitled'}</div>
-                    <div style="font-size:11px;color:var(--dim)">${s.agent_name || ''} ${s.started_at ? relTime(s.started_at) : ''}</div>
-                  </div>
-                `)}
+            <div class="team-sessions">
+              <div class="team-search-bar">
+                <input class="team-search-input" type="text"
+                  placeholder="search in team..."
+                  value=${teamSearch}
+                  onInput=${e => setTeamSearch(e.target.value)}
+                  onKeyDown=${e => { if (e.key === 'Escape') { setTeamSearch(''); e.target.blur(); } }} />
+                ${teamSearch && html`<span class="detail-search-count">${teamSearchLoading ? '...' : sessionCount + ' hits'}</span>`}
               </div>
-            `}
+              <div class="stat-label">${sessionCount} session${sessionCount !== 1 ? 's' : ''}</div>
+              ${displaySessions.map(s => html`
+                <div class="team-session-item" key=${s.session_id}>
+                  <div style="font-weight:600">${s.title ? s.title.slice(0, 60) : 'Untitled'}</div>
+                  <div style="font-size:11px;color:var(--dim)">${s.agent_name || ''} ${s.started_at ? relTime(s.started_at) : ''}</div>
+                  ${teamSearch && s.snippet && html`<div class="team-session-snippet">${s.snippet}</div>`}
+                </div>
+              `)}
+              ${displaySessions.length === 0 && !teamSearchLoading && html`<div class="empty" style="padding:8px">no matches</div>`}
+            </div>
           </div>
           <${InboxViewer} teamName=${selectedName} inboxes=${detail.inboxes || {}} members=${members} />
         </div>

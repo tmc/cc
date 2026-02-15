@@ -1039,6 +1039,23 @@ mark.search-hl {
 /* team sessions list in detail */
 .team-sessions { margin-top: 12px; }
 .team-sessions .stat-label { margin-bottom: 8px; }
+.team-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.team-search-input {
+  flex: 1;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+.team-search-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.team-search-input::placeholder { color: var(--faint); }
 .team-session-item {
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
@@ -1046,6 +1063,14 @@ mark.search-hl {
   cursor: pointer;
 }
 .team-session-item:hover { background: var(--hover); }
+.team-session-snippet {
+  font-size: 11px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
 
 @media (max-width: 640px) {
   .team-detail-body { grid-template-columns: 1fr; }
