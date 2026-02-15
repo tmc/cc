@@ -948,6 +948,8 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   const dragStart = useRef(null);
   const [graphQuery, setGraphQueryRaw] = useState(urlParams.q || '');
   const [wsFilter, setWsFilterRaw] = useState(urlParams.ws || '');
+  const [edgeFilter, setEdgeFilter] = useState({ message: true, observation: true, split: true, team: true });
+  const [activeOnly, setActiveOnly] = useState(false);
 
   function setGraphQuery(v) { setGraphQueryRaw(v); updateParams({ since, q: v, ws: wsFilter }); }
   function setSince(v) { setSinceRaw(v); updateParams({ since: v, q: graphQuery, ws: wsFilter }); }
@@ -1122,13 +1124,14 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     return all.filter(id => {
       const n = nodeData[id];
       if (wsFilter && (!n.workspace || n.workspace !== wsFilter)) return false;
+      if (activeOnly && !n.is_active) return false;
       if (q) {
         const haystack = [id, n.title || '', n.workspace || ''].join(' ').toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
     });
-  }, [nodeData, graphQuery, wsFilter]);
+  }, [nodeData, graphQuery, wsFilter, activeOnly]);
 
   // Only show links where both endpoints are visible.
   const filteredNodeSet = useMemo(() => new Set(filteredNodeIds), [filteredNodeIds]);
@@ -1136,16 +1139,27 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   // Compute scrubber cutoff time.
   const cutoffTime = timeRange.min + (timeRange.max - timeRange.min) * scrubberPos;
 
-  // Filter links by scrubber position and node visibility.
+  // Classify a link's edge type for filtering.
+  function edgeType(l) {
+    const act = l.action || '';
+    const kind = l.kind || '';
+    if (kind === 'team' || act === 'team-spawn' || act === 'team-message') return 'team';
+    if (act === 'get-screen' || act === 'get-buffer') return 'observation';
+    if (act === 'split') return 'split';
+    return 'message';
+  }
+
+  // Filter links by scrubber position, node visibility, and edge type.
   const visibleLinks = useMemo(() => {
     return allLinks.filter(l => {
       if (!filteredNodeSet.has(l.source) || !filteredNodeSet.has(l.target)) return false;
       if (scrubberPos < 1 && l.timestamp) {
         if (new Date(l.timestamp).getTime() > cutoffTime) return false;
       }
+      if (!edgeFilter[edgeType(l)]) return false;
       return true;
     });
-  }, [allLinks, cutoffTime, scrubberPos, filteredNodeSet]);
+  }, [allLinks, cutoffTime, scrubberPos, filteredNodeSet, edgeFilter]);
 
   // Track newly appearing links for animation.
   const newLinkIndices = useMemo(() => {
@@ -1516,7 +1530,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
         <button class="btn btn-sm" onClick=${load}>refresh</button>
       </div>
       ${workspaces.length > 1 && html`
-        <div class="filters" style="margin-bottom:8px">
+        <div class="filters" style="margin-bottom:4px">
           <span style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">workspace</span>
           <div class="filter-chips">
             <button class="filter-chip ${wsFilter === '' ? 'active' : ''}"
@@ -1529,6 +1543,26 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           </div>
         </div>
       `}
+      <div class="filters" style="margin-bottom:4px">
+        <span style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">edges</span>
+        <div class="filter-chips">
+          <button class="filter-chip ${edgeFilter.message ? 'active' : ''}"
+            onClick=${() => setEdgeFilter(f => ({ ...f, message: !f.message }))}>
+            <span style="color:var(--accent)">—</span> message</button>
+          <button class="filter-chip ${edgeFilter.observation ? 'active' : ''}"
+            onClick=${() => setEdgeFilter(f => ({ ...f, observation: !f.observation }))}>
+            <span style="color:var(--faint)">--</span> observe</button>
+          <button class="filter-chip ${edgeFilter.split ? 'active' : ''}"
+            onClick=${() => setEdgeFilter(f => ({ ...f, split: !f.split }))}>
+            <span style="color:var(--green)">··</span> split</button>
+          <button class="filter-chip ${edgeFilter.team ? 'active' : ''}"
+            onClick=${() => setEdgeFilter(f => ({ ...f, team: !f.team }))}>
+            <span style="color:var(--magenta)">—</span> team</button>
+        </div>
+        <button class="filter-chip ${activeOnly ? 'active' : ''}"
+          onClick=${() => setActiveOnly(a => !a)} style="margin-left:8px">
+          <span style="color:var(--green)">●</span> active only</button>
+      </div>
       <div class="graph-container" onWheel=${onWheel} ref=${containerRef}
         onPointerDown=${onPointerDown} onPointerMove=${onPointerMove} onPointerUp=${onPointerUp}
         style=${"position:relative" + (dragging ? ";cursor:grabbing" : ";cursor:grab")}>
@@ -1677,15 +1711,9 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           onInput=${e => { setScrubberPos(parseInt(e.target.value) / 1000); setPlaying(false); }} />
         <span class="graph-scrubber-time">${scrubberLabel}</span>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--dim);padding:4px 0">
+      <div class="graph-status">
         <span>${filteredNodeIds.length}${filteredNodeIds.length !== allNodeIds.length ? '/' + allNodeIds.length : ''} nodes, ${visibleLinks.length}/${allLinks.length} links</span>
-        <span style="display:flex;gap:12px">
-          <span><span style="color:var(--accent)">——</span> message</span>
-          <span><span style="color:var(--faint)">- - -</span> screen/buffer</span>
-          <span><span style="color:var(--green)">··</span> split</span>
-          <span><span style="color:var(--green)">●</span> active</span>
-          <span><span style="color:var(--magenta)">——</span> team</span>
-        </span>
+        ${scrubberPos < 1 && html`<span style="color:var(--yellow)">timeline: ${scrubberLabel}</span>`}
       </div>
     </div>
   `;

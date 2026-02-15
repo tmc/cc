@@ -594,6 +594,7 @@ mark.search-hl {
 
 /* graph */
 .graph-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.graph-panel > .filters { flex-shrink: 0; }
 .graph-container { border: 1px solid var(--border); overflow: hidden; position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; touch-action: none; user-select: none; }
 .graph-inner { transform-origin: 0 0; flex: 1; min-height: 0; display: flex; }
 .graph-container:not(:active) .graph-inner { transition: transform 0.15s ease; }
@@ -635,6 +636,7 @@ mark.search-hl {
   padding: 8px 0;
   font-size: 11px;
   color: var(--dim);
+  flex-shrink: 0;
 }
 .graph-scrubber input[type="range"] {
   flex: 1;
@@ -678,6 +680,15 @@ mark.search-hl {
 }
 .graph-play-btn:hover { border-color: var(--accent); color: var(--fg); }
 .graph-play-btn.active { color: var(--green); border-color: var(--green); }
+.graph-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--dim);
+  padding: 4px 0;
+  flex-shrink: 0;
+}
 
 /* graph: node info + active indicator */
 .graph-node .node-info {
