@@ -388,6 +388,11 @@ func runWeb(ctx context.Context, svc *service.Service, args []string, logger *sl
 	verbose := fs.Bool("v", false, "log requests with timing info")
 	fs.Parse(args)
 
+	// When verbose, lower the log level so request logs are visible.
+	if *verbose {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	}
+
 	srv := web.New(web.Config{
 		Service: svc,
 		Addr:    *addr,
