@@ -3,7 +3,6 @@ package store
 
 import (
 	"context"
-	"time"
 
 	"github.com/tmc/cc/cass"
 )
@@ -57,7 +56,7 @@ type BackendConfig struct {
 	Path string
 
 	// MaxFTSBytes caps the amount of text sent to the FTS index per session.
-	// Zero means use the backend's default (currently 32 KB for SQLite).
+	// Zero means no cap (index full content).
 	MaxFTSBytes int
 }
 
@@ -92,20 +91,5 @@ type Statter interface {
 	BackendStats(ctx context.Context) (Stats, error)
 }
 
-// sizeRatio returns the FTS index overhead as a multiplier over raw text.
-// e.g. 27 MB text → 8 GB index ≈ ratio 300.
-func sizeRatio(rawTextBytes, indexBytes int64) float64 {
-	if rawTextBytes == 0 {
-		return 0
-	}
-	return float64(indexBytes) / float64(rawTextBytes)
-}
-
-// dailyUsage is a sentinel to make sizeRatio visible to the test file.
-var _ = sizeRatio
-
 // DailyTokenRow and other supplementary types are defined in store.go
 // so they stay close to the SQLite implementation that populates them.
-
-// ensure time import is used
-var _ = time.Now

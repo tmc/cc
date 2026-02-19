@@ -53,6 +53,7 @@ func openSQLiteWith(cfg BackendConfig, tokenizer string) (*sqliteBackend, error)
 	}
 
 	b := &sqliteBackend{db: db, tokenizer: tokenizer, maxFTSBytes: cfg.MaxFTSBytes}
+	// maxFTSBytes == 0 means no cap; buildContentCapped handles that correctly.
 	if err := b.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -289,20 +290,23 @@ func (b *sqliteBackend) BackendStats(ctx context.Context) (Stats, error) {
 	return s, nil
 }
 
-// buildContentCapped is like buildContent but parameterised on maxBytes.
+// buildContentCapped concatenates message content for FTS indexing.
+// When maxBytes is 0 the full content is indexed (no cap).
 func buildContentCapped(sess cass.Session, maxBytes int) string {
 	var b strings.Builder
 	for _, msg := range sess.Messages {
 		if msg.Content == "" {
 			continue
 		}
-		remaining := maxBytes - b.Len()
-		if remaining <= 0 {
-			break
-		}
-		if len(msg.Content) > remaining {
-			b.WriteString(msg.Content[:remaining])
-			break
+		if maxBytes > 0 {
+			remaining := maxBytes - b.Len()
+			if remaining <= 0 {
+				break
+			}
+			if len(msg.Content) > remaining {
+				b.WriteString(msg.Content[:remaining])
+				break
+			}
 		}
 		b.WriteString(msg.Content)
 		b.WriteByte('\n')
