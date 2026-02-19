@@ -670,11 +670,21 @@ function SessionDetailPanel({ hit, onClose }) {
   const [entryCount, setEntryCount] = useState(0);
   const [expanded, setExpanded] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Tab state: 'conversation' or 'requests'
+  const [activeTab, setActiveTab] = useState('conversation');
+  const [apiRequests, setApiRequests] = useState([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+
   const bodyRef = useRef(null);
   const searchRef = useRef(null);
 
   useEffect(() => {
-    if (!hit) { setEntries([]); setEntryCount(0); setSearchQuery(''); return; }
+    if (!hit) { 
+      setEntries([]); setEntryCount(0); setSearchQuery(''); 
+      setActiveTab('conversation'); setApiRequests([]);
+      return; 
+    }
     setLoading(true);
     setStreaming(true);
     setEntries([]);
@@ -727,12 +737,25 @@ function SessionDetailPanel({ hit, onClose }) {
     return () => controller.abort();
   }, [hit?.session_id]);
 
+  // Fetch API requests when the tab is switched, or proactively.
+  useEffect(() => {
+    if (!hit || activeTab !== 'requests') return;
+    if (apiRequests.length > 0) return; // already loaded
+
+    setRequestsLoading(true);
+    api('session/' + hit.session_id + '/requests')
+      .then(reqs => setApiRequests(reqs || []))
+      .catch(e => console.error('failed resolving requests', e))
+      .finally(() => setRequestsLoading(false));
+  }, [hit?.session_id, activeTab]);
+
   // Auto-scroll during streaming.
   useEffect(() => {
+    if (activeTab !== 'conversation') return;
     if (streaming && bodyRef.current) {
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
     }
-  }, [entries.length, streaming]);
+  }, [entries.length, streaming, activeTab]);
 
   // Ctrl+F in panel focuses the search box.
   useEffect(() => {
@@ -910,6 +933,75 @@ function SessionDetailPanel({ hit, onClose }) {
     });
   }
 
+  function renderRequestsTab() {
+    if (requestsLoading) return html`<div class="loading">loading api requests...</div>`;
+    if (apiRequests.length === 0) return html`
+      <div class="empty" style="margin-top:20px;">
+        no API requests found. <br/><br/>
+        Did you run <code>cass index --session-dir</code> on the proxyman artifacts?
+      </div>
+    `;
+
+    return html`
+      <div class="requests-list">
+        ${apiRequests.map((req, i) => {
+          const bd = req.breakdown;
+          const hasBd = bd && Object.keys(bd).length > 0 && req.total_request_bytes > 0;
+          return html`
+            <div class="api-request-card" key=${req.id}>
+              <div class="req-header">
+                <span class="req-method-badge">POST</span>
+                <span class="req-model">${req.model}</span>
+                <span class="req-time">${new Date(req.timestamp * 1000).toLocaleTimeString()}</span>
+                <span class="req-duration">${req.duration_ms}ms</span>
+                <span class="req-status ${req.status_code >= 400 ? 'error' : 'success'}">${req.status_code}</span>
+              </div>
+              
+              <div class="req-metrics">
+                <div class="req-metric">
+                  <span class="label">Tokens (in/out/cr/cw)</span>
+                  <span class="val">${req.input_tokens} / ${req.output_tokens} / ${req.cache_read_tokens || 0} / ${req.cache_creation_tokens || 0}</span>
+                </div>
+                ${bd && html`
+                  <div class="req-metric">
+                    <span class="label">Blocks (sys/tools/msgs)</span>
+                    <span class="val">${bd.system_block_count} / ${bd.tool_count} / ${bd.message_count}</span>
+                  </div>
+                `}
+                <div class="req-metric">
+                  <span class="label">Stop Reason</span>
+                  <span class="val">${req.stop_reason || 'unknown'}</span>
+                </div>
+              </div>
+
+              ${hasBd && html`
+                <div class="req-context-viz">
+                  <div class="req-viz-track">
+                    ${bd.tool_definition_bytes > 0 && html`
+                      <div class="req-viz-seg tool" style="width:${(bd.tool_definition_bytes / req.total_request_bytes * 100)}%" title="Tools: ${bd.tool_definition_bytes}b"></div>
+                    `}
+                    ${bd.system_prompt_bytes > 0 && html`
+                      <div class="req-viz-seg sys" style="width:${(bd.system_prompt_bytes / req.total_request_bytes * 100)}%" title="System: ${bd.system_prompt_bytes}b"></div>
+                    `}
+                    ${bd.conversation_bytes > 0 && html`
+                      <div class="req-viz-seg conv" style="width:${(bd.conversation_bytes / req.total_request_bytes * 100)}%" title="Conversation: ${bd.conversation_bytes}b"></div>
+                    `}
+                  </div>
+                  <div class="req-viz-legend">
+                    ${bd.tool_definition_bytes > 0 && html`<span><span class="swatch tool"></span> Tools (${(bd.tool_definition_bytes/1024).toFixed(1)}k)</span>`}
+                    ${bd.system_prompt_bytes > 0 && html`<span><span class="swatch sys"></span> System (${(bd.system_prompt_bytes/1024).toFixed(1)}k)</span>`}
+                    ${bd.conversation_bytes > 0 && html`<span><span class="swatch conv"></span> Messages (${(bd.conversation_bytes/1024).toFixed(1)}k)</span>`}
+                    <span>Total: ${(req.total_request_bytes/1024).toFixed(1)}k bytes</span>
+                  </div>
+                </div>
+              `}
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
   return html`
     <div class="detail-panel ${hit ? 'open' : ''}" role="complementary" aria-label="Session detail">
       ${hit && html`
@@ -957,6 +1049,17 @@ function SessionDetailPanel({ hit, onClose }) {
               <span class="detail-search-count">${matchCount > 0 ? (matchCursor + 1) + '/' + matchCount : '0'}</span>
             `}
           </div>
+          
+          <div class="detail-tabs">
+            <button class="detail-tab ${activeTab === 'conversation' ? 'active' : ''}" 
+                    onClick=${() => setActiveTab('conversation')}>
+              Conversation
+            </button>
+            <button class="detail-tab ${activeTab === 'requests' ? 'active' : ''}" 
+                    onClick=${() => setActiveTab('requests')}>
+              API Requests
+            </button>
+          </div>
         </div>
         ${(hit.team_name || hit.it2_splits > 0) && html`
           <div class="detail-team-context">
@@ -976,15 +1079,17 @@ function SessionDetailPanel({ hit, onClose }) {
             `}
           </div>
         `}
-        ${streaming && html`
+        ${streaming && activeTab === 'conversation' && html`
           <div class="detail-streaming">
             <div class="streaming-dot"></div>
             streaming... ${entryCount} entries
           </div>
         `}
         <div class="detail-body" ref=${bodyRef}>
-          ${loading && entries.length === 0 && html`<div class="loading">loading session...</div>`}
-          <div class="conversation">${renderConversation()}</div>
+          ${activeTab === 'conversation' ? html`
+            ${loading && entries.length === 0 && html`<div class="loading">loading session...</div>`}
+            <div class="conversation">${renderConversation()}</div>
+          ` : renderRequestsTab()}
         </div>
       `}
     </div>

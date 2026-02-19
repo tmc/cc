@@ -1290,3 +1290,113 @@ mark.search-hl {
   .palette-backdrop, .palette, .detail-panel { display: none !important; }
   .hit { break-inside: avoid; }
 }
+
+/* session detail tabs */
+.detail-tabs {
+  display: flex;
+  margin-top: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-tab {
+  font: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: none;
+  border: none;
+  padding: 8px 16px;
+  color: var(--dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.detail-tab:hover { color: var(--fg); }
+.detail-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* API requests list */
+.requests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.api-request-card {
+  border: 1px solid var(--border);
+  border-radius: 4px; /* subtle glassmorphism touch if background supports */
+  padding: 12px;
+  background: var(--bg);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
+.req-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+.req-method-badge {
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 1px 4px;
+  font-size: 9px;
+  border-radius: 2px;
+}
+.req-model { font-weight: 600; color: var(--fg); flex: 1; }
+.req-time { color: var(--faint); }
+.req-duration { color: var(--dim); }
+.req-status { font-weight: 600; }
+.req-status.success { color: var(--green); }
+.req-status.error { color: var(--danger); }
+
+.req-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  background: var(--hover);
+  padding: 8px;
+  border-radius: 2px;
+}
+.req-metric { display: flex; flex-direction: column; gap: 2px; }
+.req-metric .label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--faint); }
+.req-metric .val { font-size: 11px; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* In-card context breakdown viz */
+.req-context-viz {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.req-viz-track {
+  height: 12px;
+  display: flex;
+  background: var(--hover);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.req-viz-seg { height: 100%; transition: width 0.3s ease; }
+.req-viz-seg.tool { background: #6ab04c; }
+.req-viz-seg.sys { background: #7ab8d4; }
+.req-viz-seg.conv { background: #e87d3e; }
+
+.req-viz-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--dim);
+}
+.swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 1px;
+}
+.swatch.tool { background: #6ab04c; }
+.swatch.sys { background: #7ab8d4; }
+.swatch.conv { background: #e87d3e; }
