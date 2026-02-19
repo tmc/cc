@@ -1605,7 +1605,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
         <div class="filter-chips">
           <button class="filter-chip ${edgeFilter.message ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, message: !f.message }))}>
-            <span style="color:var(--accent)">—</span> message</button>
+            <span style="color:var(--accent)">—</span> it2 msg</button>
           <button class="filter-chip ${edgeFilter.observation ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, observation: !f.observation }))}>
             <span style="color:var(--faint)">--</span> observe</button>
@@ -1614,7 +1614,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
             <span style="color:var(--green)">··</span> split</button>
           <button class="filter-chip ${edgeFilter.team ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, team: !f.team }))}>
-            <span style="color:var(--magenta)">—</span> team</button>
+            <span style="color:var(--magenta)">—</span> team msg <span style="color:var(--magenta);opacity:0.7">··</span> spawn</button>
         </div>
         <button class="filter-chip ${activeOnly ? 'active' : ''}"
           onClick=${() => setActiveOnly(a => !a)} style="margin-left:8px">
@@ -1682,7 +1682,11 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
               const act = l.action || '';
               const kind = l.kind || '';
               let cls, marker, dotColor, isObs = false;
-              if (kind === 'team' || act === 'team-spawn' || act === 'team-message') {
+              if (act === 'team-spawn') {
+                cls = 'graph-edge-team-spawn';
+                marker = 'url(#arrowTeam)';
+                dotColor = 'var(--magenta)';
+              } else if (kind === 'team' || act === 'team-message') {
                 cls = 'graph-edge-team';
                 marker = 'url(#arrowTeam)';
                 dotColor = 'var(--magenta)';
@@ -1741,7 +1745,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
               const info = nodeInfo(n);
               const active = isActive(n);
               return html`
-                <g class="graph-node ${active ? 'active' : ''} ${hoveredNode === n ? 'hovered' : ''}" transform="translate(${p.x - w/2},${p.y - h/2})" key=${n}
+                <g class="graph-node ${n.includes('@') ? 'team-agent' : ''} ${active ? 'active' : ''} ${hoveredNode === n ? 'hovered' : ''}" transform="translate(${p.x - w/2},${p.y - h/2})" key=${n}
                   onMouseEnter=${(e) => onNodeEnter(n, e)} onMouseLeave=${onNodeLeave}
                   onClick=${() => onNodeClick(n)} style="cursor:pointer">
                   <rect width=${w} height=${h} />

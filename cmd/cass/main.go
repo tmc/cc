@@ -151,11 +151,15 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 		}
 	}
 
+	// Non-fatal: team configs may not exist.
+	teamConfigCount, _ := svc.IndexTeamConfigs(ctx, "")
+
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"indexed":          count,
-			"har_requests":     harCount,
+			"indexed":           count,
+			"har_requests":      harCount,
 			"artifact_requests": artifactCount,
+			"team_configs":      teamConfigCount,
 		})
 	}
 	fmt.Printf("indexed %d sessions\n", count)
@@ -164,6 +168,9 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	}
 	if artifactCount > 0 {
 		fmt.Printf("indexed %d artifact requests\n", artifactCount)
+	}
+	if teamConfigCount > 0 {
+		fmt.Printf("indexed %d team configs\n", teamConfigCount)
 	}
 	return nil
 }

@@ -337,6 +337,26 @@ func (s *Service) DailyTokenUsage(ctx context.Context, after time.Time) ([]store
 	return s.store.DailyTokenUsage(ctx, after)
 }
 
+// IndexTeamConfigs scans ~/.claude/teams/*/config.json and indexes each config.
+// Returns the number of team configs indexed.
+func (s *Service) IndexTeamConfigs(ctx context.Context, root string) (int, error) {
+	configs, err := collector.ScanTeamConfigs(root)
+	if err != nil {
+		return 0, fmt.Errorf("scan team configs: %w", err)
+	}
+	for _, tc := range configs {
+		if err := s.store.SaveTeamConfig(ctx, tc); err != nil {
+			s.log.Warn("save team config", "name", tc.Name, "err", err)
+		}
+	}
+	return len(configs), nil
+}
+
+// TeamConfigs returns all indexed team configurations.
+func (s *Service) TeamConfigs(ctx context.Context) ([]store.TeamConfig, error) {
+	return s.store.TeamConfigs(ctx)
+}
+
 // Close releases resources.
 func (s *Service) Close() error {
 	return s.store.Close()

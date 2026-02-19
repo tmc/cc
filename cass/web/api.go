@@ -180,12 +180,17 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal: artifact dirs may not exist.
 		artifactCount, _ = s.svc.IndexArtifactDirs(r.Context(), "")
 	}
+
+	// Non-fatal: team configs may not exist.
+	teamConfigCount, _ := s.svc.IndexTeamConfigs(r.Context(), "")
+
 	elapsed := time.Since(start)
 
 	result := map[string]any{
-		"indexed":          count,
+		"indexed":           count,
 		"artifact_requests": artifactCount,
-		"duration_ms":      elapsed.Milliseconds(),
+		"team_configs":      teamConfigCount,
+		"duration_ms":       elapsed.Milliseconds(),
 	}
 
 	// Publish SSE event.

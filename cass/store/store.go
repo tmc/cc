@@ -112,6 +112,18 @@ func (s *Store) migrate() error {
 			value TEXT NOT NULL
 		);
 
+		CREATE TABLE IF NOT EXISTS team_configs (
+			name TEXT PRIMARY KEY,
+			lead_session_id TEXT NOT NULL DEFAULT '',
+			lead_agent_id TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL DEFAULT 0,
+			members_json TEXT NOT NULL DEFAULT '[]',
+			indexed_at INTEGER NOT NULL DEFAULT 0
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_team_lead_session ON team_configs(lead_session_id);
+
 		CREATE TABLE IF NOT EXISTS api_requests (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL DEFAULT '',
@@ -875,6 +887,30 @@ func (s *Store) GraphData(ctx context.Context, since time.Time) (*cass.GraphData
 		}
 	}
 
+	// Build a map from agent-name node IDs to session workspace/title via team_configs.
+	// Team link nodes have IDs like "researcher@work-team" or "team-lead".
+	// team_configs.lead_session_id is the authoritative Claude session UUID for team leads.
+	type teamNodeInfo struct {
+		Workspace string
+		Title     string
+		TeamName  string
+	}
+	teamNodeMeta := map[string]teamNodeInfo{}
+	for _, id := range prefixes {
+		// Team agent nodes contain '@' (e.g. "researcher@work-team") or are plain agent names.
+		// Look them up by joining team_configs with sessions on lead_session_id.
+		var workspace, title, teamName string
+		row := s.db.QueryRowContext(ctx, `
+			SELECT s.workspace, s.title, tc.name
+			FROM team_configs tc
+			JOIN sessions s ON s.id = tc.lead_session_id
+			WHERE tc.lead_agent_id = ? OR (tc.lead_agent_id LIKE ? AND tc.lead_agent_id != '')
+			LIMIT 1`, id, id+"@%")
+		if err := row.Scan(&workspace, &title, &teamName); err == nil {
+			teamNodeMeta[id] = teamNodeInfo{workspace, title, teamName}
+		}
+	}
+
 	// Build nodes.
 	var nodes []cass.GraphNode
 	for _, id := range prefixes {
@@ -890,6 +926,16 @@ func (s *Store) GraphData(ctx context.Context, since time.Time) (*cass.GraphData
 			node.IsActive = m.IsActive
 			node.TeamName = m.TeamName
 			node.AgentName = m.AgentName
+		}
+		// Enrich team agent nodes with workspace/title from team_configs if not already set.
+		if node.Workspace == "" {
+			if tm, ok := teamNodeMeta[id]; ok {
+				node.Workspace = tm.Workspace
+				node.Title = tm.Title
+				if node.TeamName == "" {
+					node.TeamName = tm.TeamName
+				}
+			}
 		}
 		nodes = append(nodes, node)
 	}
@@ -1127,6 +1173,48 @@ func (s *Store) DailyTokenUsage(ctx context.Context, after time.Time) ([]DailyTo
 			return nil, fmt.Errorf("scan daily tokens: %w", err)
 		}
 		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// TeamConfig holds the parsed config.json for a Claude Code agent team.
+type TeamConfig struct {
+	Name          string `json:"name"`
+	LeadSessionID string `json:"lead_session_id"` // authoritative FK to Claude session UUID.
+	LeadAgentID   string `json:"lead_agent_id"`
+	Description   string `json:"description"`
+	CreatedAt     int64  `json:"created_at"`
+	MembersJSON   string `json:"members_json"` // raw JSON array of member objects.
+}
+
+// SaveTeamConfig upserts a team config record.
+func (s *Store) SaveTeamConfig(ctx context.Context, tc TeamConfig) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO team_configs
+			(name, lead_session_id, lead_agent_id, description, created_at, members_json, indexed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		tc.Name, tc.LeadSessionID, tc.LeadAgentID, tc.Description, tc.CreatedAt,
+		tc.MembersJSON, time.Now().Unix(),
+	)
+	return err
+}
+
+// TeamConfigs returns all indexed team configurations.
+func (s *Store) TeamConfigs(ctx context.Context) ([]TeamConfig, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT name, lead_session_id, lead_agent_id, description, created_at, members_json
+		FROM team_configs ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("team configs: %w", err)
+	}
+	defer rows.Close()
+	var result []TeamConfig
+	for rows.Next() {
+		var tc TeamConfig
+		if err := rows.Scan(&tc.Name, &tc.LeadSessionID, &tc.LeadAgentID, &tc.Description, &tc.CreatedAt, &tc.MembersJSON); err != nil {
+			return nil, fmt.Errorf("scan team config: %w", err)
+		}
+		result = append(result, tc)
 	}
 	return result, rows.Err()
 }
