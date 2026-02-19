@@ -205,6 +205,8 @@ func (s *Store) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN agent_name TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE sessions ADD COLUMN is_team_lead INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE session_links ADD COLUMN team_name TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE api_requests ADD COLUMN it2_session_id TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE api_requests ADD COLUMN client_pid INTEGER NOT NULL DEFAULT 0",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -1073,6 +1075,60 @@ func (s *Store) APIRequestCount(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM api_requests`).Scan(&count)
 	return count, err
+}
+
+// DailyTokenRow holds per-day aggregate token counts from api_requests.
+type DailyTokenRow struct {
+	Day                 string `json:"day"`
+	InputTokens         int    `json:"input_tokens"`
+	OutputTokens        int    `json:"output_tokens"`
+	CacheReadTokens     int    `json:"cache_read_tokens"`
+	CacheCreationTokens int    `json:"cache_creation_tokens"`
+	SystemPromptBytes   int    `json:"system_prompt_bytes"`
+	ToolDefinitionBytes int    `json:"tool_definition_bytes"`
+	ConversationBytes   int    `json:"conversation_bytes"`
+	Requests            int    `json:"requests"`
+}
+
+// DailyTokenUsage returns per-day token totals from api_requests for the given window.
+// after zero means no lower bound.
+func (s *Store) DailyTokenUsage(ctx context.Context, after time.Time) ([]DailyTokenRow, error) {
+	where := "WHERE timestamp > 0"
+	var args []any
+	if !after.IsZero() {
+		where += " AND timestamp >= ?"
+		args = append(args, after.Unix())
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			date(timestamp, 'unixepoch') as day,
+			coalesce(sum(input_tokens), 0),
+			coalesce(sum(output_tokens), 0),
+			coalesce(sum(cache_read_tokens), 0),
+			coalesce(sum(cache_creation_tokens), 0),
+			coalesce(sum(system_prompt_bytes), 0),
+			coalesce(sum(tool_definition_bytes), 0),
+			coalesce(sum(conversation_bytes), 0),
+			count(*) as requests
+		FROM api_requests `+where+`
+		GROUP BY day ORDER BY day`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("daily token usage: %w", err)
+	}
+	defer rows.Close()
+
+	var result []DailyTokenRow
+	for rows.Next() {
+		var r DailyTokenRow
+		if err := rows.Scan(
+			&r.Day, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreationTokens,
+			&r.SystemPromptBytes, &r.ToolDefinitionBytes, &r.ConversationBytes, &r.Requests,
+		); err != nil {
+			return nil, fmt.Errorf("scan daily tokens: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
 }
 
 // buildContent concatenates all message content for full-text indexing.

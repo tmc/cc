@@ -78,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session/{id}", s.handleSessionStream)
 	mux.HandleFunc("GET /api/session/{id}/requests", s.handleSessionRequests)
 	mux.HandleFunc("GET /api/limits", s.handleLimits)
+	mux.HandleFunc("GET /api/usage", s.handleUsage)
 	mux.HandleFunc("GET /api/graph", s.handleGraph)
 	mux.HandleFunc("GET /api/teams", s.handleTeams)
 	mux.HandleFunc("GET /api/teams/{name}", s.handleTeamDetail)

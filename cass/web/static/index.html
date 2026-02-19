@@ -100,7 +100,7 @@ function fmtNum(n) {
 
 // --- URL state ---
 
-const TABS = ['search', 'graph', 'map', 'teams', 'stats'];
+const TABS = ['search', 'graph', 'map', 'teams', 'stats', 'usage'];
 
 function tabFromPath() {
   const p = location.pathname.replace(/^\/+|\/+$/g, '');
@@ -282,6 +282,7 @@ function App() {
       ${tab === 'map' && html`<${MapPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
       ${tab === 'teams' && html`<${TeamsPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
       ${tab === 'stats' && html`<${StatsPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
+      ${tab === 'usage' && html`<${UsagePanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
 
       <div class="toast-container" aria-live="polite">
         ${toasts.map(t => html`<div class="toast ${t.show ? 'show' : ''}" key=${t.id}>${t.msg}</div>`)}
@@ -498,9 +499,12 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick }) {
   if (h.turns > 1) stats.push(h.turns + ' turns');
   if (h.files_edited) stats.push(h.files_edited + ' files');
   if (h.lines_written) stats.push(h.lines_written + ' lines');
-  const tok = (h.input_tokens || 0) + (h.output_tokens || 0);
-  if (tok >= 1000) stats.push(fmtNum(tok) + ' tok');
   if (h.duration_secs) stats.push(fmtDuration(h.duration_secs));
+
+  const inTok = h.input_tokens || 0;
+  const outTok = h.output_tokens || 0;
+  const cacheTok = h.cache_reads || 0;
+  const totalTok = inTok + outTok;
 
   const it2 = [];
   if (h.it2_splits) it2.push(h.it2_splits + ' splits');
@@ -538,6 +542,14 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick }) {
       <div class="hit-meta">
         ${h.workspace && html`<span class="hit-workspace">${shortProject(h.workspace)}</span>`}
         ${h.started_at && html`<span class="hit-time">${relTime(h.started_at)}${h.ended_at && relTime(h.ended_at) !== relTime(h.started_at) ? ' → ' + relTime(h.ended_at) : ''}</span>`}
+        ${totalTok > 0 && html`<span class="hit-tokens" title=${'in: ' + fmtNum(inTok) + ' | out: ' + fmtNum(outTok) + (cacheTok ? ' | cache: ' + fmtNum(cacheTok) : '')}>
+          <span class="hit-tokens-total">${fmtNum(totalTok)}</span><span class="hit-tokens-label"> tok</span>
+          <span class="hit-tokens-breakdown">
+            <span class="hit-tokens-in" title=${'input: ' + fmtNum(inTok)}>${fmtNum(inTok)}↓</span>
+            <span class="hit-tokens-out" title=${'output: ' + fmtNum(outTok)}>${fmtNum(outTok)}↑</span>
+            ${cacheTok > 0 && html`<span class="hit-tokens-cache" title=${'cache reads: ' + fmtNum(cacheTok)}>${fmtNum(cacheTok)}$</span>`}
+          </span>
+        </span>`}
         ${stats.length > 0 && html`<span class="hit-stats">${stats.join(' | ')}</span>`}
         ${h.compactions > 0 && html`<span class="hit-compactions">${h.compactions} compaction${h.compactions > 1 ? 's' : ''}</span>`}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
@@ -2154,6 +2166,310 @@ function MapPanel({ urlParams, updateParams, navVersion }) {
           </tbody>
         </table>
         <div class="result-count">${sorted.length} mappings</div>
+      `}
+    </div>
+  `;
+}
+
+// --- Usage Panel ---
+
+function fmtTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return '' + n;
+}
+
+function fmtResetCountdown(resetAt) {
+  if (!resetAt) return '';
+  const now = Math.floor(Date.now() / 1000);
+  const diff = resetAt - now;
+  if (diff <= 0) return 'resetting…';
+  const h = Math.floor(diff / 3600);
+  const m = Math.floor((diff % 3600) / 60);
+  if (h > 0) return 'resets in ' + h + 'h ' + m + 'm';
+  return 'resets in ' + m + 'm';
+}
+
+function RateLimitGauges({ latestLimits }) {
+  if (!latestLimits || latestLimits.length === 0) {
+    return html`
+      <div class="rl-no-data">
+        no rate-limit data — run <code>cass index --har-dir &lt;proxyman-har-export-dir&gt;</code>
+        or ensure proxyman artifact files exist at <code>~/.it2/sessions/*/proxy-traffic.*.jsonl</code>
+      </div>
+    `;
+  }
+
+  // Find binding constraint bucket (representative_claim is per-snapshot; here check max utilization).
+  const maxUtil = Math.max(...latestLimits.map(l => l.utilization));
+
+  return html`
+    <div class="rl-gauges">
+      ${latestLimits.map(gauge => {
+        const pct = Math.round(gauge.utilization * 100);
+        const fillClass = pct >= 80 ? 'high' : pct >= 50 ? 'medium' : 'low';
+        const isBinding = gauge.utilization === maxUtil && maxUtil > 0;
+        const label = gauge.bucket === '5h' ? '5-hour window' :
+                      gauge.bucket === '7d' ? '7-day global' :
+                      '7-day ' + gauge.bucket.replace('7d_', '');
+        return html`
+          <div class="rl-gauge ${isBinding ? 'binding' : ''}">
+            <div class="rl-gauge-label">${label}</div>
+            <div class="rl-gauge-track">
+              <div class="rl-gauge-fill ${fillClass}" style="width:${pct}%"></div>
+            </div>
+            <div class="rl-gauge-pct">${pct}%</div>
+            <div class="rl-gauge-reset">${fmtResetCountdown(gauge.reset_at)}</div>
+            ${isBinding && maxUtil > 0 && html`<div class="rl-gauge-binding">binding constraint</div>`}
+          </div>
+        `;
+      })}
+    </div>
+  `;
+}
+
+function TokenTimeline({ daily }) {
+  if (!daily || daily.length === 0) {
+    return html`
+      <div class="rl-no-data">
+        no token usage data — index HAR files or proxyman artifacts to populate
+      </div>
+    `;
+  }
+
+  const W = 700, H = 80, padL = 0, padR = 0, padT = 4, padB = 0;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+
+  const colors = {
+    input: '#7ab8d4',
+    cache_creation: '#d4a017',
+    cache_read: '#6ab04c',
+    output: '#e87d3e',
+  };
+
+  // Compute stacked max.
+  const maxStack = Math.max(...daily.map(d =>
+    d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_creation_tokens
+  ), 1);
+
+  const n = daily.length;
+  const barW = Math.max(1, chartW / n - 1);
+
+  const [tooltip, setTooltip] = useState(null);
+
+  function barX(i) { return padL + i * (chartW / n); }
+  function barH(v) { return Math.max(1, (v / maxStack) * chartH); }
+
+  // Build stacked bars.
+  const bars = daily.map((d, i) => {
+    const total = d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_creation_tokens;
+    if (total === 0) return null;
+    const x = barX(i);
+    let y = H - padB;
+    const segs = [];
+    for (const [key, color] of [
+      ['input_tokens', colors.input],
+      ['cache_creation_tokens', colors.cache_creation],
+      ['cache_read_tokens', colors.cache_read],
+      ['output_tokens', colors.output],
+    ]) {
+      const h = barH(d[key]);
+      y -= h;
+      segs.push(html`<rect key=${key} x=${x} y=${y} width=${barW} height=${h} fill=${color} />`);
+    }
+    return html`
+      <g key=${d.day}
+        onMouseEnter=${(e) => {
+          const rect = e.currentTarget.closest('svg').getBoundingClientRect();
+          setTooltip({ day: d.day, data: d, x: e.clientX - rect.left, y: e.clientY - rect.top });
+        }}
+        onMouseLeave=${() => setTooltip(null)}
+        style="cursor:default"
+      >${segs}</g>
+    `;
+  });
+
+  // X-axis labels: first, middle, last.
+  const labelIdxs = [0, Math.floor(n / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
+
+  return html`
+    <div class="token-chart">
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:80px">
+        ${bars}
+      </svg>
+      <div class="token-chart-xaxis">
+        ${labelIdxs.map(i => html`<span key=${i}>${daily[i]?.day || ''}</span>`)}
+      </div>
+      <div class="token-chart-legend">
+        ${[
+          ['input', colors.input, 'input tokens'],
+          ['cache_creation', colors.cache_creation, 'cache creation (1.25×)'],
+          ['cache_read', colors.cache_read, 'cache read (~0.1×)'],
+          ['output', colors.output, 'output tokens ⚠'],
+        ].map(([k, c, label]) => html`
+          <span key=${k}>
+            <span class="legend-swatch" style="background:${c}"></span>${label}
+          </span>
+        `)}
+      </div>
+      <div class="undercount-note">
+        ⚠ output tokens from session JSONL files are undercounted (streaming-start snapshot);
+        accurate values require HAR proxy data.
+      </div>
+      ${tooltip && html`
+        <div class="token-chart-tooltip" style="left:${tooltip.x + 12}px;top:${tooltip.y - 20}px">
+          <div class="token-chart-tooltip-title">${tooltip.day}</div>
+          <div class="token-chart-tooltip-row"><span>input</span><span>${fmtTokens(tooltip.data.input_tokens)}</span></div>
+          <div class="token-chart-tooltip-row"><span>cache creation</span><span>${fmtTokens(tooltip.data.cache_creation_tokens)}</span></div>
+          <div class="token-chart-tooltip-row"><span>cache read</span><span>${fmtTokens(tooltip.data.cache_read_tokens)}</span></div>
+          <div class="token-chart-tooltip-row"><span>output ⚠</span><span>${fmtTokens(tooltip.data.output_tokens)}</span></div>
+          <div class="token-chart-tooltip-row"><span>requests</span><span>${tooltip.data.requests}</span></div>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function ContextCompositionBar({ daily }) {
+  // Aggregate context bytes across all days.
+  if (!daily || daily.length === 0) return html`
+    <div class="rl-no-data">
+      no context breakdown data — requires HAR proxy capture with request bodies
+    </div>
+  `;
+
+  // daily rows have system_prompt_bytes, tool_definition_bytes, conversation_bytes from api_requests.
+  // Check if any are non-zero.
+  const totalSys = daily.reduce((s, d) => s + (d.system_prompt_bytes || 0), 0);
+  const totalTool = daily.reduce((s, d) => s + (d.tool_definition_bytes || 0), 0);
+  const totalConv = daily.reduce((s, d) => s + (d.conversation_bytes || 0), 0);
+  const totalBytes = totalSys + totalTool + totalConv;
+
+  if (totalBytes === 0) return html`
+    <div class="rl-no-data">
+      no context breakdown — requires HAR files with request body capture
+    </div>
+  `;
+
+  const segs = [
+    { key: 'tools', label: 'tool definitions', bytes: totalTool, color: '#e87d3e' },
+    { key: 'system', label: 'system prompt', bytes: totalSys, color: '#7ab8d4' },
+    { key: 'convo', label: 'conversation', bytes: totalConv, color: '#6ab04c' },
+  ].filter(s => s.bytes > 0);
+
+  return html`
+    <div class="ctx-bar-wrap">
+      <div class="ctx-stacked">
+        ${segs.map(s => {
+          const pct = (s.bytes / totalBytes * 100).toFixed(1);
+          return html`
+            <div key=${s.key} class="ctx-seg" style="width:${pct}%;background:${s.color}" title="${s.label}: ${pct}%">
+              ${parseFloat(pct) > 8 && html`<span class="ctx-seg-label">${pct}%</span>`}
+            </div>
+          `;
+        })}
+      </div>
+      <div class="ctx-legend">
+        ${segs.map(s => {
+          const pct = (s.bytes / totalBytes * 100).toFixed(1);
+          return html`
+            <span key=${s.key} class="ctx-legend-item">
+              <span class="legend-swatch" style="background:${s.color}"></span>
+              ${s.label} ${pct}%
+            </span>
+          `;
+        })}
+      </div>
+    </div>
+  `;
+}
+
+function UsagePanel({ urlParams, updateParams, navVersion }) {
+  const [data, setData] = useState(null);
+  const [since, setSinceRaw] = useState(urlParams.since || '720h');
+
+  function setSince(v) { setSinceRaw(v); updateParams({ since: v }); }
+
+  useEffect(() => {
+    if (navVersion === 0) return;
+    setSinceRaw(urlParams.since || '720h');
+  }, [navVersion]);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api('usage' + (since ? '?since=' + since : ''));
+      setData(d);
+    } catch (e) { console.error('usage:', e); }
+  }, [since]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    window.addEventListener('cass:refresh', load);
+    return () => window.removeEventListener('cass:refresh', load);
+  }, [load]);
+
+  const timePresets = [
+    { label: '7d', value: '168h' },
+    { label: '30d', value: '720h' },
+    { label: '90d', value: '2160h' },
+    { label: 'All', value: '0s' },
+  ];
+
+  const card = (label, value, sub) => html`
+    <div class="stat-card">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value">${value}</div>
+      ${sub && html`<div class="stat-sub">${sub}</div>`}
+    </div>
+  `;
+
+  // Aggregate daily totals for summary cards.
+  const daily = data?.daily || [];
+  const totalInput = daily.reduce((s, d) => s + d.input_tokens, 0);
+  const totalOutput = daily.reduce((s, d) => s + d.output_tokens, 0);
+  const totalCacheCreate = daily.reduce((s, d) => s + d.cache_creation_tokens, 0);
+  const totalCacheRead = daily.reduce((s, d) => s + d.cache_read_tokens, 0);
+  const totalRequests = daily.reduce((s, d) => s + d.requests, 0);
+
+  return html`
+    <div>
+      <div class="filters" style="margin-bottom:12px">
+        <div class="filter-chips">
+          ${timePresets.map(t => html`
+            <button class="filter-chip ${since === t.value ? 'active' : ''}"
+              onClick=${() => setSince(t.value)}>${t.label}</button>
+          `)}
+        </div>
+      </div>
+
+      ${!data && html`<div class="loading">loading usage...</div>`}
+
+      ${data && html`
+        <div class="usage-section">
+          <div class="stats-grid" style="margin-bottom:0">
+            ${card('api requests', fmtNum(data.api_request_count))}
+            ${card('input tokens', fmtTokens(totalInput), 'selected window')}
+            ${card('output tokens ⚠', fmtTokens(totalOutput), 'undercounted from JSONL')}
+            ${card('cache creation', fmtTokens(totalCacheCreate), '1.25× cost')}
+            ${card('cache read', fmtTokens(totalCacheRead), '~0.1× cost')}
+          </div>
+        </div>
+
+        <div class="usage-section">
+          <div class="usage-section-title">rate limit utilization</div>
+          <${RateLimitGauges} latestLimits=${data.latest_limits} />
+        </div>
+
+        <div class="usage-section">
+          <div class="usage-section-title">token usage over time</div>
+          <${TokenTimeline} daily=${daily} />
+        </div>
+
+        <div class="usage-section">
+          <div class="usage-section-title">context composition (aggregate)</div>
+          <${ContextCompositionBar} daily=${daily} />
+        </div>
       `}
     </div>
   `;

@@ -332,6 +332,11 @@ func (s *Service) APIRequestCount(ctx context.Context) (int, error) {
 	return s.store.APIRequestCount(ctx)
 }
 
+// DailyTokenUsage returns per-day token totals from indexed API requests.
+func (s *Service) DailyTokenUsage(ctx context.Context, after time.Time) ([]store.DailyTokenRow, error) {
+	return s.store.DailyTokenUsage(ctx, after)
+}
+
 // Close releases resources.
 func (s *Service) Close() error {
 	return s.store.Close()

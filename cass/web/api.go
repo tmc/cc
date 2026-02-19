@@ -550,5 +550,69 @@ func (s *Server) handleLimits(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleUsage returns daily token usage from api_requests for the usage tab.
+// GET /api/usage?since=168h
+func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
+	since := 720 * time.Hour // default 30d
+	if v := r.URL.Query().Get("since"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			since = d
+		}
+	}
+	var after time.Time
+	if since > 0 {
+		after = time.Now().Add(-since)
+	}
+
+	daily, err := s.svc.DailyTokenUsage(r.Context(), after)
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	// Also fetch latest rate-limit snapshots (most recent per bucket).
+	type bucketLatest struct {
+		Bucket      string  `json:"bucket"`
+		Utilization float64 `json:"utilization"`
+		ResetAt     int64   `json:"reset_at"`
+		Timestamp   int64   `json:"timestamp"`
+	}
+	var latestSnaps []bucketLatest
+	for _, bucket := range []string{"5h", "7d", "7d_sonnet"} {
+		snaps, err := s.svc.RateLimitTrend(r.Context(), bucket, time.Now().Add(-24*time.Hour))
+		if err != nil || len(snaps) == 0 {
+			continue
+		}
+		latest := snaps[len(snaps)-1]
+		var util float64
+		var resetAt int64
+		switch bucket {
+		case "5h":
+			util = latest.Utilization5h
+			resetAt = latest.Reset5h
+		case "7d":
+			util = latest.Utilization7d
+			resetAt = latest.Reset7d
+		default:
+			util = latest.ModelUtilization
+			resetAt = latest.ModelReset
+		}
+		latestSnaps = append(latestSnaps, bucketLatest{
+			Bucket:      bucket,
+			Utilization: util,
+			ResetAt:     resetAt,
+			Timestamp:   latest.Timestamp,
+		})
+	}
+
+	reqCount, _ := s.svc.APIRequestCount(r.Context())
+
+	writeJSON(w, map[string]any{
+		"daily":             daily,
+		"latest_limits":     latestSnaps,
+		"api_request_count": reqCount,
+	})
+}
+
 // Ensure context is used (for future middleware).
 var _ = context.Background
