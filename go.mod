@@ -29,6 +29,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/tmc/misc/proxyman v0.0.0-00010101000000-000000000000 // indirect
 	github.com/tmc/tokencount v0.0.0-20251120051056-e3c81af3140e // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
@@ -38,3 +39,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/tmc/misc/proxyman => /Volumes/tmc/go/src/github.com/tmc/misc/proxyman

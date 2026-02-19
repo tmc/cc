@@ -282,6 +282,39 @@ func (s *Service) IndexArtifactDirs(ctx context.Context, root string) (int, erro
 	return len(requests), nil
 }
 
+// IndexSessionV2 scans a directory of .proxymansessionv2 and .proxymanlogv2
+// files, parses each one, and indexes the resulting API requests and
+// rate-limit snapshots. Returns the number of API requests indexed.
+func (s *Service) IndexSessionV2(ctx context.Context, dir string) (int, error) {
+	requests, err := har.ScanSessionV2Dir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("scan sessionv2 dir: %w", err)
+	}
+	if len(requests) == 0 {
+		return 0, nil
+	}
+
+	s.log.Info("sessionv2 scan", "dir", dir, "requests", len(requests))
+
+	if err := s.store.BatchIndexRequests(ctx, requests); err != nil {
+		return 0, fmt.Errorf("index sessionv2 requests: %w", err)
+	}
+
+	var snapshots []cass.RateLimitSnapshot
+	for _, r := range requests {
+		if r.RateLimits.Utilization5h > 0 || r.RateLimits.Utilization7d > 0 || r.RateLimits.ModelBucket != "" {
+			snapshots = append(snapshots, r.RateLimits)
+		}
+	}
+	if len(snapshots) > 0 {
+		if err := s.store.SaveRateLimitSnapshots(ctx, snapshots); err != nil {
+			s.log.Warn("save rate limit snapshots from sessionv2", "err", err)
+		}
+	}
+
+	return len(requests), nil
+}
+
 // IndexHAR scans a directory of Proxyman HAR export files, parses each one,
 // and indexes the resulting API requests and rate-limit snapshots.
 // Returns the number of API requests indexed.
