@@ -166,6 +166,7 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	force := r.URL.Query().Get("force") == "true"
+	skipArtifacts := r.URL.Query().Get("skip_artifacts") == "true"
 
 	start := time.Now()
 	count, err := s.svc.Index(r.Context(), force)
@@ -173,11 +174,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, http.StatusInternalServerError)
 		return
 	}
+
+	artifactCount := 0
+	if !skipArtifacts {
+		// Non-fatal: artifact dirs may not exist.
+		artifactCount, _ = s.svc.IndexArtifactDirs(r.Context(), "")
+	}
 	elapsed := time.Since(start)
 
 	result := map[string]any{
-		"indexed":     count,
-		"duration_ms": elapsed.Milliseconds(),
+		"indexed":          count,
+		"artifact_requests": artifactCount,
+		"duration_ms":      elapsed.Milliseconds(),
 	}
 
 	// Publish SSE event.

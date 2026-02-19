@@ -147,13 +147,17 @@ func (s *Store) migrate() error {
 
 			source_file TEXT NOT NULL DEFAULT '',
 			source_hash TEXT NOT NULL DEFAULT '',
-			indexed_at INTEGER NOT NULL DEFAULT 0
+			indexed_at INTEGER NOT NULL DEFAULT 0,
+
+			it2_session_id TEXT NOT NULL DEFAULT '',
+			client_pid INTEGER NOT NULL DEFAULT 0
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_apireq_session ON api_requests(session_id);
 		CREATE INDEX IF NOT EXISTS idx_apireq_timestamp ON api_requests(timestamp);
 		CREATE INDEX IF NOT EXISTS idx_apireq_model ON api_requests(model_family);
 		CREATE INDEX IF NOT EXISTS idx_apireq_source ON api_requests(source_hash);
+		CREATE INDEX IF NOT EXISTS idx_apireq_it2 ON api_requests(it2_session_id);
 
 		CREATE TABLE IF NOT EXISTS rate_limit_snapshots (
 			timestamp INTEGER NOT NULL,
@@ -915,8 +919,9 @@ func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIReque
 			rl_5h_utilization, rl_5h_reset, rl_7d_utilization, rl_7d_reset,
 			rl_model_bucket, rl_model_utilization, rl_model_reset, rl_representative_claim,
 			status_code, stop_reason, duration_ms,
-			source_file, source_hash, indexed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			source_file, source_hash, indexed_at,
+			it2_session_id, client_pid
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare api_requests: %w", err)
@@ -936,6 +941,7 @@ func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIReque
 			r.RateLimits.RepresentativeClaim,
 			r.StatusCode, r.StopReason, r.DurationMs,
 			r.SourceFile, r.SourceHash, now,
+			r.IT2SessionID, r.ClientPID,
 		)
 		if err != nil {
 			return fmt.Errorf("insert request %s: %w", r.ID, err)
@@ -990,11 +996,12 @@ func (s *Store) QueryRequests(ctx context.Context, sessionID string) ([]cass.API
 			rl_5h_utilization, rl_5h_reset, rl_7d_utilization, rl_7d_reset,
 			rl_model_bucket, rl_model_utilization, rl_model_reset, rl_representative_claim,
 			status_code, stop_reason, duration_ms,
-			source_file, source_hash
+			source_file, source_hash,
+			it2_session_id, client_pid
 		FROM api_requests
-		WHERE session_id = ?
+		WHERE session_id = ? OR (session_id = '' AND it2_session_id = ?)
 		ORDER BY timestamp
-	`, sessionID)
+	`, sessionID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("query requests: %w", err)
 	}
@@ -1014,6 +1021,7 @@ func (s *Store) QueryRequests(ctx context.Context, sessionID string) ([]cass.API
 			&r.RateLimits.RepresentativeClaim,
 			&r.StatusCode, &r.StopReason, &r.DurationMs,
 			&r.SourceFile, &r.SourceHash,
+			&r.IT2SessionID, &r.ClientPID,
 		); err != nil {
 			return nil, fmt.Errorf("scan request: %w", err)
 		}

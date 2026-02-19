@@ -307,6 +307,10 @@ type APIRequest struct {
 	SourceFile string `json:"source_file"`
 	SourceHash string `json:"source_hash"` // SHA256 of HAR entry content.
 
+	// iTerm2 session linkage (populated from artifact dir path).
+	IT2SessionID string `json:"it2_session_id,omitempty"` // UUID from ~/.it2/sessions/<uuid>/
+	ClientPID    int    `json:"client_pid,omitempty"`      // PID from proxy-traffic.<pid>.jsonl
+
 	// Detailed context breakdown (populated by ParseContextBreakdown; not stored in DB).
 	// Available in-memory after parsing; use for display and per-session aggregation.
 	Breakdown *ContextBreakdown `json:"breakdown,omitempty"`

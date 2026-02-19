@@ -125,6 +125,8 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	fs := flag.NewFlagSet("index", flag.ExitOnError)
 	force := fs.Bool("force", false, "rebuild index from scratch")
 	harDir := fs.String("har-dir", "", "directory of Proxyman HAR export files to ingest")
+	artifactDirs := fs.Bool("artifact-dirs", true, "scan ~/.it2/sessions/*/proxy-traffic.*.jsonl (default on)")
+	noArtifactDirs := fs.Bool("no-artifact-dirs", false, "disable artifact dir scanning")
 	fs.Parse(args)
 
 	count, err := svc.Index(ctx, *force)
@@ -140,15 +142,28 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 		}
 	}
 
+	artifactCount := 0
+	if *artifactDirs && !*noArtifactDirs {
+		artifactCount, err = svc.IndexArtifactDirs(ctx, "")
+		if err != nil {
+			// Non-fatal: artifact dirs may not exist yet.
+			fmt.Fprintf(os.Stderr, "cass: artifact dir scan: %v\n", err)
+		}
+	}
+
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"indexed":       count,
-			"har_requests":  harCount,
+			"indexed":          count,
+			"har_requests":     harCount,
+			"artifact_requests": artifactCount,
 		})
 	}
 	fmt.Printf("indexed %d sessions\n", count)
 	if harCount > 0 {
 		fmt.Printf("indexed %d HAR requests\n", harCount)
+	}
+	if artifactCount > 0 {
+		fmt.Printf("indexed %d artifact requests\n", artifactCount)
 	}
 	return nil
 }
