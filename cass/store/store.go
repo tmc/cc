@@ -157,7 +157,6 @@ func (s *Store) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_apireq_timestamp ON api_requests(timestamp);
 		CREATE INDEX IF NOT EXISTS idx_apireq_model ON api_requests(model_family);
 		CREATE INDEX IF NOT EXISTS idx_apireq_source ON api_requests(source_hash);
-		CREATE INDEX IF NOT EXISTS idx_apireq_it2 ON api_requests(it2_session_id);
 
 		CREATE TABLE IF NOT EXISTS rate_limit_snapshots (
 			timestamp INTEGER NOT NULL,
@@ -207,6 +206,7 @@ func (s *Store) migrate() error {
 		"ALTER TABLE session_links ADD COLUMN team_name TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE api_requests ADD COLUMN it2_session_id TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE api_requests ADD COLUMN client_pid INTEGER NOT NULL DEFAULT 0",
+		"CREATE INDEX IF NOT EXISTS idx_apireq_it2 ON api_requests(it2_session_id)",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
