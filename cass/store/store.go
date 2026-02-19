@@ -191,7 +191,8 @@ func (s *Store) migrate() error {
 			content,
 			agent,
 			content=sessions,
-			content_rowid=rowid
+			content_rowid=rowid,
+			tokenize="porter unicode61"
 		);
 
 		CREATE TRIGGER IF NOT EXISTS sessions_ai AFTER INSERT ON sessions BEGIN
@@ -339,7 +340,12 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// Checkpoint WAL after each batch to prevent unbounded WAL growth.
+	s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)")
+	return nil
 }
 
 // Search executes a full-text query and returns matching results.
@@ -527,8 +533,11 @@ func (s *Store) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 	return tx.Commit()
 }
 
-// Close releases the database connection.
+// Close checkpoints the WAL and releases the database connection.
+// Without checkpointing, the WAL file grows unboundedly and can reach
+// several GB even when the main DB is small.
 func (s *Store) Close() error {
+	s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return s.db.Close()
 }
 
@@ -1252,26 +1261,12 @@ func (s *Store) TeamConfigs(ctx context.Context) ([]TeamConfig, error) {
 	return result, rows.Err()
 }
 
-// maxFTSContentBytes is the maximum number of bytes stored in the FTS content
-// column. FTS5 posting lists expand aggressively; capping at 32KB keeps the
-// index small while retaining good search recall across the first ~20 turns.
-const maxFTSContentBytes = 32 * 1024
-
-// buildContent concatenates message content for full-text indexing, capped at
-// maxFTSContentBytes to prevent the FTS5 index from growing unboundedly.
+// buildContent concatenates all message content for full-text indexing.
 func buildContent(sess cass.Session) string {
 	var b strings.Builder
 	for _, msg := range sess.Messages {
 		if msg.Content == "" {
 			continue
-		}
-		remaining := maxFTSContentBytes - b.Len()
-		if remaining <= 0 {
-			break
-		}
-		if len(msg.Content) > remaining {
-			b.WriteString(msg.Content[:remaining])
-			break
 		}
 		b.WriteString(msg.Content)
 		b.WriteByte('\n')
