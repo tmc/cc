@@ -12,6 +12,7 @@ import (
 
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/cass/collector"
+	"github.com/tmc/cc/cass/collector/har"
 	"github.com/tmc/cc/cass/store"
 )
 
@@ -243,6 +244,56 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 		return 0, fmt.Errorf("index paths: %w", err)
 	}
 	return len(batch), nil
+}
+
+// IndexHAR scans a directory of Proxyman HAR export files, parses each one,
+// and indexes the resulting API requests and rate-limit snapshots.
+// Returns the number of API requests indexed.
+func (s *Service) IndexHAR(ctx context.Context, dir string) (int, error) {
+	requests, err := har.ScanDir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("scan har dir: %w", err)
+	}
+	if len(requests) == 0 {
+		return 0, nil
+	}
+
+	s.log.Info("har scan", "dir", dir, "requests", len(requests))
+
+	// Index API requests.
+	if err := s.store.BatchIndexRequests(ctx, requests); err != nil {
+		return 0, fmt.Errorf("index har requests: %w", err)
+	}
+
+	// Extract and store rate-limit snapshots.
+	var snapshots []cass.RateLimitSnapshot
+	for _, r := range requests {
+		if r.RateLimits.Utilization5h > 0 || r.RateLimits.Utilization7d > 0 || r.RateLimits.ModelBucket != "" {
+			snapshots = append(snapshots, r.RateLimits)
+		}
+	}
+	if len(snapshots) > 0 {
+		if err := s.store.SaveRateLimitSnapshots(ctx, snapshots); err != nil {
+			s.log.Warn("save rate limit snapshots", "err", err)
+		}
+	}
+
+	return len(requests), nil
+}
+
+// QueryRequests returns API requests linked to a session.
+func (s *Service) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIRequest, error) {
+	return s.store.QueryRequests(ctx, sessionID)
+}
+
+// RateLimitTrend returns rate-limit utilization over time for a given bucket.
+func (s *Service) RateLimitTrend(ctx context.Context, bucket string, since time.Time) ([]cass.RateLimitSnapshot, error) {
+	return s.store.RateLimitTrend(ctx, bucket, since)
+}
+
+// APIRequestCount returns the number of indexed API requests.
+func (s *Service) APIRequestCount(ctx context.Context) (int, error) {
+	return s.store.APIRequestCount(ctx)
 }
 
 // Close releases resources.

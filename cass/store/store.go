@@ -112,6 +112,59 @@ func (s *Store) migrate() error {
 			value TEXT NOT NULL
 		);
 
+		CREATE TABLE IF NOT EXISTS api_requests (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL DEFAULT '',
+			request_id TEXT NOT NULL DEFAULT '',
+			timestamp INTEGER NOT NULL DEFAULT 0,
+
+			model TEXT NOT NULL DEFAULT '',
+			model_family TEXT NOT NULL DEFAULT '',
+			purpose TEXT NOT NULL DEFAULT '',
+
+			input_tokens INTEGER NOT NULL DEFAULT 0,
+			output_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+
+			system_prompt_bytes INTEGER NOT NULL DEFAULT 0,
+			tool_definition_bytes INTEGER NOT NULL DEFAULT 0,
+			conversation_bytes INTEGER NOT NULL DEFAULT 0,
+			total_request_bytes INTEGER NOT NULL DEFAULT 0,
+
+			rl_5h_utilization REAL NOT NULL DEFAULT 0,
+			rl_5h_reset INTEGER NOT NULL DEFAULT 0,
+			rl_7d_utilization REAL NOT NULL DEFAULT 0,
+			rl_7d_reset INTEGER NOT NULL DEFAULT 0,
+			rl_model_bucket TEXT NOT NULL DEFAULT '',
+			rl_model_utilization REAL NOT NULL DEFAULT 0,
+			rl_model_reset INTEGER NOT NULL DEFAULT 0,
+			rl_representative_claim TEXT NOT NULL DEFAULT '',
+
+			status_code INTEGER NOT NULL DEFAULT 0,
+			stop_reason TEXT NOT NULL DEFAULT '',
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+
+			source_file TEXT NOT NULL DEFAULT '',
+			source_hash TEXT NOT NULL DEFAULT '',
+			indexed_at INTEGER NOT NULL DEFAULT 0
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_apireq_session ON api_requests(session_id);
+		CREATE INDEX IF NOT EXISTS idx_apireq_timestamp ON api_requests(timestamp);
+		CREATE INDEX IF NOT EXISTS idx_apireq_model ON api_requests(model_family);
+		CREATE INDEX IF NOT EXISTS idx_apireq_source ON api_requests(source_hash);
+
+		CREATE TABLE IF NOT EXISTS rate_limit_snapshots (
+			timestamp INTEGER NOT NULL,
+			bucket TEXT NOT NULL,
+			utilization REAL NOT NULL,
+			reset_at INTEGER NOT NULL,
+			PRIMARY KEY (timestamp, bucket)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_rl_bucket ON rate_limit_snapshots(bucket, timestamp);
+
 		CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
 			title,
 			content,
@@ -843,6 +896,175 @@ func (s *Store) GraphData(ctx context.Context, since time.Time) (*cass.GraphData
 			Max: maxTS,
 		},
 	}, nil
+}
+
+// BatchIndexRequests adds or updates API request records atomically.
+func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIRequest) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO api_requests (
+			id, session_id, request_id, timestamp,
+			model, model_family, purpose,
+			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+			system_prompt_bytes, tool_definition_bytes, conversation_bytes, total_request_bytes,
+			rl_5h_utilization, rl_5h_reset, rl_7d_utilization, rl_7d_reset,
+			rl_model_bucket, rl_model_utilization, rl_model_reset, rl_representative_claim,
+			status_code, stop_reason, duration_ms,
+			source_file, source_hash, indexed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare api_requests: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().Unix()
+	for _, r := range requests {
+		_, err := stmt.ExecContext(ctx,
+			r.ID, r.SessionID, r.RequestID, r.Timestamp,
+			r.Model, r.ModelFamily, r.Purpose,
+			r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheCreationTokens,
+			r.SystemPromptBytes, r.ToolDefinitionBytes, r.ConversationBytes, r.TotalRequestBytes,
+			r.RateLimits.Utilization5h, r.RateLimits.Reset5h,
+			r.RateLimits.Utilization7d, r.RateLimits.Reset7d,
+			r.RateLimits.ModelBucket, r.RateLimits.ModelUtilization, r.RateLimits.ModelReset,
+			r.RateLimits.RepresentativeClaim,
+			r.StatusCode, r.StopReason, r.DurationMs,
+			r.SourceFile, r.SourceHash, now,
+		)
+		if err != nil {
+			return fmt.Errorf("insert request %s: %w", r.ID, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// SaveRateLimitSnapshots stores rate-limit utilization data points.
+func (s *Store) SaveRateLimitSnapshots(ctx context.Context, snapshots []cass.RateLimitSnapshot) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO rate_limit_snapshots (timestamp, bucket, utilization, reset_at)
+		VALUES (?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare rl snapshots: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, s := range snapshots {
+		// Store global 5h bucket.
+		if s.Utilization5h > 0 || s.Reset5h > 0 {
+			stmt.ExecContext(ctx, s.Timestamp, "5h", s.Utilization5h, s.Reset5h)
+		}
+		// Store global 7d bucket.
+		if s.Utilization7d > 0 || s.Reset7d > 0 {
+			stmt.ExecContext(ctx, s.Timestamp, "7d", s.Utilization7d, s.Reset7d)
+		}
+		// Store per-model sub-bucket.
+		if s.ModelBucket != "" {
+			stmt.ExecContext(ctx, s.Timestamp, s.ModelBucket, s.ModelUtilization, s.ModelReset)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// QueryRequests returns API requests for a session, ordered by timestamp.
+func (s *Store) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIRequest, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, session_id, request_id, timestamp,
+			model, model_family, purpose,
+			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+			system_prompt_bytes, tool_definition_bytes, conversation_bytes, total_request_bytes,
+			rl_5h_utilization, rl_5h_reset, rl_7d_utilization, rl_7d_reset,
+			rl_model_bucket, rl_model_utilization, rl_model_reset, rl_representative_claim,
+			status_code, stop_reason, duration_ms,
+			source_file, source_hash
+		FROM api_requests
+		WHERE session_id = ?
+		ORDER BY timestamp
+	`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("query requests: %w", err)
+	}
+	defer rows.Close()
+
+	var results []cass.APIRequest
+	for rows.Next() {
+		var r cass.APIRequest
+		if err := rows.Scan(
+			&r.ID, &r.SessionID, &r.RequestID, &r.Timestamp,
+			&r.Model, &r.ModelFamily, &r.Purpose,
+			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreationTokens,
+			&r.SystemPromptBytes, &r.ToolDefinitionBytes, &r.ConversationBytes, &r.TotalRequestBytes,
+			&r.RateLimits.Utilization5h, &r.RateLimits.Reset5h,
+			&r.RateLimits.Utilization7d, &r.RateLimits.Reset7d,
+			&r.RateLimits.ModelBucket, &r.RateLimits.ModelUtilization, &r.RateLimits.ModelReset,
+			&r.RateLimits.RepresentativeClaim,
+			&r.StatusCode, &r.StopReason, &r.DurationMs,
+			&r.SourceFile, &r.SourceHash,
+		); err != nil {
+			return nil, fmt.Errorf("scan request: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// RateLimitTrend returns rate-limit utilization over time for a given bucket.
+func (s *Store) RateLimitTrend(ctx context.Context, bucket string, since time.Time) ([]cass.RateLimitSnapshot, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT timestamp, utilization, reset_at
+		FROM rate_limit_snapshots
+		WHERE bucket = ? AND timestamp >= ?
+		ORDER BY timestamp
+	`, bucket, since.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("rl trend: %w", err)
+	}
+	defer rows.Close()
+
+	var results []cass.RateLimitSnapshot
+	for rows.Next() {
+		var ts, resetAt int64
+		var util float64
+		if err := rows.Scan(&ts, &util, &resetAt); err != nil {
+			return nil, fmt.Errorf("scan rl: %w", err)
+		}
+		snap := cass.RateLimitSnapshot{Timestamp: ts}
+		switch bucket {
+		case "5h":
+			snap.Utilization5h = util
+			snap.Reset5h = resetAt
+		case "7d":
+			snap.Utilization7d = util
+			snap.Reset7d = resetAt
+		default:
+			snap.ModelBucket = bucket
+			snap.ModelUtilization = util
+			snap.ModelReset = resetAt
+		}
+		results = append(results, snap)
+	}
+	return results, rows.Err()
+}
+
+// APIRequestCount returns the number of indexed API requests.
+func (s *Store) APIRequestCount(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM api_requests`).Scan(&count)
+	return count, err
 }
 
 // buildContent concatenates all message content for full-text indexing.
