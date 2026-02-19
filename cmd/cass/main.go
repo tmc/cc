@@ -36,14 +36,15 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "usage: cass <command> [args]")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "commands:")
-		fmt.Fprintln(os.Stderr, "  detect   detect installed AI coding agents")
-		fmt.Fprintln(os.Stderr, "  index    index sessions from detected agents")
-		fmt.Fprintln(os.Stderr, "  search   search indexed sessions")
-		fmt.Fprintln(os.Stderr, "  resume   search and resume a session interactively")
-		fmt.Fprintln(os.Stderr, "  links    show inter-session communication graph")
-		fmt.Fprintln(os.Stderr, "  map      show iTerm2 <-> Claude session ID mappings")
-		fmt.Fprintln(os.Stderr, "  stats    show index statistics")
-		fmt.Fprintln(os.Stderr, "  web      start web UI server")
+		fmt.Fprintln(os.Stderr, "  detect     detect installed AI coding agents")
+		fmt.Fprintln(os.Stderr, "  index      index sessions from detected agents")
+		fmt.Fprintln(os.Stderr, "  search     search indexed sessions")
+		fmt.Fprintln(os.Stderr, "  resume     search and resume a session interactively")
+		fmt.Fprintln(os.Stderr, "  links      show inter-session communication graph")
+		fmt.Fprintln(os.Stderr, "  map        show iTerm2 <-> Claude session ID mappings")
+		fmt.Fprintln(os.Stderr, "  stats      show index statistics")
+		fmt.Fprintln(os.Stderr, "  requests   show HAR-derived API request breakdown")
+		fmt.Fprintln(os.Stderr, "  web        start web UI server")
 		os.Exit(1)
 	}
 
@@ -83,6 +84,8 @@ func run() error {
 		return runMap(ctx, svc, args[1:], *jsonOutput)
 	case "stats":
 		return runStats(ctx, svc, *jsonOutput)
+	case "requests":
+		return runRequests(ctx, svc, args[1:], *jsonOutput)
 	case "web":
 		return runWeb(ctx, svc, args[1:], logger)
 	default:
@@ -121,6 +124,7 @@ func runDetect(ctx context.Context, jsonOut bool, logger *slog.Logger) error {
 func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
 	fs := flag.NewFlagSet("index", flag.ExitOnError)
 	force := fs.Bool("force", false, "rebuild index from scratch")
+	harDir := fs.String("har-dir", "", "directory of Proxyman HAR export files to ingest")
 	fs.Parse(args)
 
 	count, err := svc.Index(ctx, *force)
@@ -128,10 +132,24 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 		return err
 	}
 
+	harCount := 0
+	if *harDir != "" {
+		harCount, err = svc.IndexHAR(ctx, *harDir)
+		if err != nil {
+			return fmt.Errorf("index har: %w", err)
+		}
+	}
+
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(map[string]int{"indexed": count})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"indexed":       count,
+			"har_requests":  harCount,
+		})
 	}
 	fmt.Printf("indexed %d sessions\n", count)
+	if harCount > 0 {
+		fmt.Printf("indexed %d HAR requests\n", harCount)
+	}
 	return nil
 }
 
@@ -340,7 +358,11 @@ func printHit(num int, h cass.Hit) {
 	}
 	totalTok := h.InputTokens + h.OutputTokens
 	if totalTok >= 1000 {
-		stats = append(stats, fmt.Sprintf("%dk tok", totalTok/1000))
+		tok := fmt.Sprintf("%dk tok", totalTok/1000)
+		if h.CacheCreationInputTokens >= 1000 {
+			tok += fmt.Sprintf(" +%dkcc", h.CacheCreationInputTokens/1000)
+		}
+		stats = append(stats, tok)
 	}
 	if h.IT2Sends > 0 || h.IT2Screens > 0 || h.IT2Splits > 0 {
 		var it2 []string
@@ -372,11 +394,56 @@ func runStats(ctx context.Context, svc *service.Service, jsonOut bool) error {
 	if err != nil {
 		return err
 	}
+
+	// Include HAR request count if any are indexed.
+	reqCount, err := svc.APIRequestCount(ctx)
+	if err == nil && reqCount > 0 {
+		stats["har_request_count"] = reqCount
+	}
+
+	// Include aggregate token stats.
+	agg, err := svc.AggregateStats(ctx, time.Time{}, time.Time{})
+	if err == nil {
+		for k, v := range agg {
+			stats[k] = v
+		}
+	}
+
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(stats)
 	}
+
+	// Print core counts first.
+	for _, key := range []string{"session_count", "har_request_count", "last_indexed"} {
+		if v, ok := stats[key]; ok {
+			fmt.Printf("%-28s %v\n", key, v)
+		}
+	}
+
+	// Print token stats with notes.
+	if v, ok := stats["input_tokens"]; ok {
+		fmt.Printf("%-28s %v\n", "input_tokens", v)
+	}
+	if v, ok := stats["output_tokens"]; ok {
+		fmt.Printf("%-28s %v  (undercounted: JSONL stores streaming-start snapshot)\n", "output_tokens", v)
+	}
+	if v, ok := stats["cache_creation_input_tokens"]; ok {
+		fmt.Printf("%-28s %v  (billed at 1.25x)\n", "cache_creation_input_tokens", v)
+	}
+	if v, ok := stats["cache_read_input_tokens"]; ok {
+		fmt.Printf("%-28s %v\n", "cache_read_input_tokens", v)
+	}
+
+	// Print remaining keys.
+	skip := map[string]bool{
+		"session_count": true, "har_request_count": true, "last_indexed": true,
+		"input_tokens": true, "output_tokens": true,
+		"cache_creation_input_tokens": true, "cache_read_input_tokens": true,
+	}
 	for k, v := range stats {
-		fmt.Printf("%-20s %v\n", k, v)
+		if !skip[k] {
+			fmt.Printf("%-28s %v\n", k, v)
+		}
 	}
 	return nil
 }
@@ -665,6 +732,157 @@ func outputResume(result *cass.SearchResult) error {
 		}
 		fmt.Println()
 	}
+	return nil
+}
+
+// runRequests shows HAR-derived API request breakdown, optionally filtered to a session.
+func runRequests(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
+	fs := flag.NewFlagSet("requests", flag.ExitOnError)
+	since := fs.Duration("since", 0, "requests within duration (e.g. 24h, 168h)")
+	model := fs.String("model", "", "filter by model family (sonnet, haiku, opus)")
+	purpose := fs.String("purpose", "", "filter by purpose (response, classifier, compact)")
+	fs.Parse(args)
+
+	var sessionID string
+	if fs.NArg() > 0 {
+		sessionID = fs.Arg(0)
+	}
+
+	requests, err := svc.QueryRequests(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	// Apply client-side filters.
+	var cutoff time.Time
+	if *since > 0 {
+		cutoff = time.Now().Add(-*since)
+	}
+	filtered := requests[:0]
+	for _, r := range requests {
+		if !cutoff.IsZero() && r.Timestamp < cutoff.Unix() {
+			continue
+		}
+		if *model != "" && r.ModelFamily != *model {
+			continue
+		}
+		if *purpose != "" && r.Purpose != *purpose {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	requests = filtered
+
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(requests)
+	}
+
+	if len(requests) == 0 {
+		if sessionID != "" {
+			fmt.Printf("no HAR requests indexed for session %s\n", sessionID)
+		} else {
+			fmt.Println("no HAR requests indexed (use: cass index --har-dir <path>)")
+		}
+		return nil
+	}
+
+	// Aggregate totals.
+	var totIn, totOut, totCacheCreate, totCacheRead int
+	modelCounts := make(map[string]int)
+	purposeCounts := make(map[string]int)
+	var builtinBytes, mcpBytes, skillBytes, systemBytes, convBytes int
+
+	for _, r := range requests {
+		totIn += r.InputTokens
+		totOut += r.OutputTokens
+		totCacheCreate += r.CacheCreationTokens
+		totCacheRead += r.CacheReadTokens
+		modelCounts[r.ModelFamily]++
+		purposeCounts[r.Purpose]++
+		if r.Breakdown != nil {
+			builtinBytes += r.Breakdown.BuiltinToolBytes
+			mcpBytes += r.Breakdown.MCPToolBytes
+			skillBytes += r.Breakdown.SkillToolBytes
+			systemBytes += r.Breakdown.SystemPromptBytes
+			convBytes += r.Breakdown.ConversationBytes
+		}
+	}
+
+	// Header.
+	if sessionID != "" {
+		fmt.Printf("%s  %s\n\n",
+			headerStyle.Render("API Requests"),
+			countStyle.Render(fmt.Sprintf("session %s", short(sessionID))),
+		)
+	} else {
+		fmt.Printf("%s\n\n", headerStyle.Render("API Requests (all sessions)"))
+	}
+
+	// Per-request table.
+	fmt.Printf("  %s  %-8s  %-10s  %8s  %8s  %8s\n",
+		headerStyle.Render(fmt.Sprintf("%-19s", "time")),
+		headerStyle.Render("model"),
+		headerStyle.Render("purpose"),
+		headerStyle.Render("in tok"),
+		headerStyle.Render("out tok"),
+		headerStyle.Render("cc tok"),
+	)
+	for _, r := range requests {
+		ts := ""
+		if r.Timestamp > 0 {
+			ts = time.Unix(r.Timestamp, 0).Format("2006-01-02 15:04:05")
+		}
+		fmt.Printf("  %-19s  %-8s  %-10s  %8d  %8d  %8d\n",
+			timeStyle.Render(ts),
+			agentStyle.Render(r.ModelFamily),
+			labelStyle.Render(r.Purpose),
+			r.InputTokens,
+			r.OutputTokens,
+			r.CacheCreationTokens,
+		)
+	}
+
+	// Summary totals.
+	fmt.Printf("\n%s\n", strings.Repeat("─", 72))
+	fmt.Printf("  %-27s  %8d  %8d  %8d\n",
+		titleStyle.Render(fmt.Sprintf("TOTAL (%d requests)", len(requests))),
+		totIn, totOut, totCacheCreate,
+	)
+	fmt.Printf("  %s\n", countStyle.Render("cache_read: "+fmt.Sprintf("%d", totCacheRead)))
+	fmt.Printf("  %s\n", countStyle.Render("(output_tokens are final SSE values, accurate)"))
+
+	// Model breakdown.
+	fmt.Printf("\n%s\n", headerStyle.Render("By model"))
+	for fam, n := range modelCounts {
+		fmt.Printf("  %-10s %d requests\n", agentStyle.Render(fam), n)
+	}
+
+	// Purpose breakdown.
+	fmt.Printf("\n%s\n", headerStyle.Render("By purpose"))
+	for p, n := range purposeCounts {
+		fmt.Printf("  %-12s %d requests\n", labelStyle.Render(p), n)
+	}
+
+	// Context composition (only if breakdown data was parsed).
+	totalContextBytes := builtinBytes + mcpBytes + skillBytes + systemBytes + convBytes
+	if totalContextBytes > 0 {
+		fmt.Printf("\n%s\n", headerStyle.Render("Context composition (avg across requests with breakdown)"))
+		pct := func(n int) string {
+			if totalContextBytes == 0 {
+				return "0%"
+			}
+			return fmt.Sprintf("%d%%", n*100/totalContextBytes)
+		}
+		fmt.Printf("  %-28s %6s  (%s)\n", "tools: built-in", formatBytes(builtinBytes), pct(builtinBytes))
+		fmt.Printf("  %-28s %6s  (%s)\n", "tools: MCP", formatBytes(mcpBytes), pct(mcpBytes))
+		if skillBytes > 0 {
+			fmt.Printf("  %-28s %6s  (%s)\n", "tools: skill", formatBytes(skillBytes), pct(skillBytes))
+		}
+		fmt.Printf("  %-28s %6s  (%s)\n", "system prompt", formatBytes(systemBytes), pct(systemBytes))
+		fmt.Printf("  %-28s %6s  (%s)\n", "conversation", formatBytes(convBytes), pct(convBytes))
+	}
+
+	fmt.Println()
 	return nil
 }
 

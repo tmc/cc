@@ -100,6 +100,18 @@ func formatDuration(secs int) string {
 	}
 }
 
+// formatBytes formats a byte count as a compact human-readable string.
+func formatBytes(n int) string {
+	switch {
+	case n >= 1024*1024:
+		return fmt.Sprintf("%.1fMB", float64(n)/(1024*1024))
+	case n >= 1024:
+		return fmt.Sprintf("%.1fkB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
+}
+
 // relativeTime formats a duration since a timestamp as a human-readable string.
 func relativeTime(ts string) string {
 	if ts == "" {
