@@ -79,10 +79,13 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 			}
 		case "assistant":
 			// Token usage.
+			// OutputTokens is the streaming-start snapshot (always 1 at stream open);
+			// the final count lives only in SSE message_delta and is not in JSONL.
 			if e.Message.Usage != nil {
 				s.InputTokens += e.Message.Usage.InputTokens
 				s.OutputTokens += e.Message.Usage.OutputTokens
 				s.CacheReads += e.Message.Usage.CacheReadInputTokens
+				s.CacheCreationInputTokens += e.Message.Usage.CacheCreationInputTokens
 			}
 
 			// Tool use analysis.

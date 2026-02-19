@@ -382,6 +382,8 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 					h.ToolBreakdown = stats.ToolBreakdown
 				}
 				h.Compactions = stats.Compactions
+				h.CacheReads = stats.CacheReads
+				h.CacheCreationInputTokens = stats.CacheCreationInputTokens
 			}
 		}
 		hits = append(hits, h)
