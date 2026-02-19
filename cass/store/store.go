@@ -907,7 +907,7 @@ func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIReque
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT OR IGNORE INTO api_requests (
+		INSERT OR REPLACE INTO api_requests (
 			id, session_id, request_id, timestamp,
 			model, model_family, purpose,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,

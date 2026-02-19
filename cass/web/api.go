@@ -478,5 +478,69 @@ func (s *Server) handleTeamInbox(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, msgs)
 }
 
+// handleSessionRequests returns HAR-derived API requests for a session.
+// GET /api/session/{id}/requests
+func (s *Server) handleSessionRequests(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, fmt.Errorf("missing session id"), http.StatusBadRequest)
+		return
+	}
+
+	requests, err := s.svc.QueryRequests(r.Context(), id)
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if requests == nil {
+		requests = []cass.APIRequest{}
+	}
+	writeJSON(w, requests)
+}
+
+// handleLimits returns rate-limit utilization trend data and HAR request counts.
+// GET /api/limits?since=168h&bucket=5h
+func (s *Server) handleLimits(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	since := 168 * time.Hour
+	if v := q.Get("since"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			since = d
+		}
+	}
+	after := time.Now().Add(-since)
+
+	bucketParam := q.Get("bucket") // "" means all three
+
+	type bucketTrend struct {
+		Bucket    string                  `json:"bucket"`
+		Snapshots []cass.RateLimitSnapshot `json:"snapshots"`
+	}
+
+	var trends []bucketTrend
+	for _, bucket := range []string{"5h", "7d", "7d_sonnet"} {
+		if bucketParam != "" && bucketParam != bucket {
+			continue
+		}
+		snaps, err := s.svc.RateLimitTrend(r.Context(), bucket, after)
+		if err != nil {
+			writeError(w, err, http.StatusInternalServerError)
+			return
+		}
+		if snaps == nil {
+			snaps = []cass.RateLimitSnapshot{}
+		}
+		trends = append(trends, bucketTrend{Bucket: bucket, Snapshots: snaps})
+	}
+
+	reqCount, _ := s.svc.APIRequestCount(r.Context())
+
+	writeJSON(w, map[string]any{
+		"trends":            trends,
+		"api_request_count": reqCount,
+	})
+}
+
 // Ensure context is used (for future middleware).
 var _ = context.Background
