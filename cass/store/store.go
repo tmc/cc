@@ -166,7 +166,9 @@ func (s *Store) migrate() error {
 
 			user_hash TEXT NOT NULL DEFAULT '',
 			account_uuid TEXT NOT NULL DEFAULT '',
-			org_id TEXT NOT NULL DEFAULT ''
+			org_id TEXT NOT NULL DEFAULT '',
+			
+			context_breakdown_json TEXT NOT NULL DEFAULT '{}'
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_apireq_session ON api_requests(session_id);
@@ -227,6 +229,7 @@ func (s *Store) migrate() error {
 		"ALTER TABLE api_requests ADD COLUMN account_uuid TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE api_requests ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
 		"CREATE INDEX IF NOT EXISTS idx_apireq_account ON api_requests(account_uuid)",
+		"ALTER TABLE api_requests ADD COLUMN context_breakdown_json TEXT NOT NULL DEFAULT '{}'",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -669,31 +672,31 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 	}
 
 	return map[string]any{
-		"sessions":          sessions,
-		"agents":            agents,
-		"workspaces":        workspaces,
-		"tool_calls":        tools,
-		"input_tokens":      inTok,
-		"output_tokens":     outTok,
-		"total_tokens":      inTok + outTok,
-		"files_read":        fRead,
-		"files_written":     fWritten,
-		"files_edited":      fEdited,
-		"lines_written":     lWritten,
-		"turns":             turns,
-		"duration_secs":     dur,
-		"subagent_spawns":   subSpawns,
-		"it2_splits":        it2Splits,
-		"it2_sends":         it2Sends,
-		"it2_screens":       it2Screens,
-		"it2_buffers":       it2Buffers,
-		"team_inbox_reads":  teamInbox,
-		"team_inbox_sends":  teamSends,
-		"team_task_ops":     teamTasks,
-		"team_spawns":       teamSpawns,
-		"agents_breakdown":  agentCounts,
-		"workspace_top":     wsCounts,
-		"sessions_per_day":  daily,
+		"sessions":         sessions,
+		"agents":           agents,
+		"workspaces":       workspaces,
+		"tool_calls":       tools,
+		"input_tokens":     inTok,
+		"output_tokens":    outTok,
+		"total_tokens":     inTok + outTok,
+		"files_read":       fRead,
+		"files_written":    fWritten,
+		"files_edited":     fEdited,
+		"lines_written":    lWritten,
+		"turns":            turns,
+		"duration_secs":    dur,
+		"subagent_spawns":  subSpawns,
+		"it2_splits":       it2Splits,
+		"it2_sends":        it2Sends,
+		"it2_screens":      it2Screens,
+		"it2_buffers":      it2Buffers,
+		"team_inbox_reads": teamInbox,
+		"team_inbox_sends": teamSends,
+		"team_task_ops":    teamTasks,
+		"team_spawns":      teamSpawns,
+		"agents_breakdown": agentCounts,
+		"workspace_top":    wsCounts,
+		"sessions_per_day": daily,
 	}, nil
 }
 
@@ -977,8 +980,9 @@ func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIReque
 			status_code, stop_reason, duration_ms,
 			source_file, source_hash, indexed_at,
 			it2_session_id, client_pid,
-			user_hash, account_uuid, org_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			user_hash, account_uuid, org_id,
+			context_breakdown_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare api_requests: %w", err)
@@ -987,6 +991,13 @@ func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIReque
 
 	now := time.Now().Unix()
 	for _, r := range requests {
+		breakdownJSON := "{}"
+		if r.Breakdown != nil {
+			if b, err := json.Marshal(r.Breakdown); err == nil {
+				breakdownJSON = string(b)
+			}
+		}
+
 		_, err := stmt.ExecContext(ctx,
 			r.ID, r.SessionID, r.RequestID, r.Timestamp,
 			r.Model, r.ModelFamily, r.Purpose,
@@ -1000,6 +1011,7 @@ func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIReque
 			r.SourceFile, r.SourceHash, now,
 			r.IT2SessionID, r.ClientPID,
 			r.UserHash, r.AccountUUID, r.OrgID,
+			breakdownJSON,
 		)
 		if err != nil {
 			return fmt.Errorf("insert request %s: %w", r.ID, err)
@@ -1055,7 +1067,9 @@ func (s *Store) QueryRequests(ctx context.Context, sessionID string) ([]cass.API
 			rl_model_bucket, rl_model_utilization, rl_model_reset, rl_representative_claim,
 			status_code, stop_reason, duration_ms,
 			source_file, source_hash,
-			it2_session_id, client_pid
+			it2_session_id, client_pid,
+			user_hash, account_uuid, org_id,
+			context_breakdown_json
 		FROM api_requests
 		WHERE session_id = ? OR (session_id = '' AND it2_session_id = ?)
 		ORDER BY timestamp
@@ -1068,6 +1082,7 @@ func (s *Store) QueryRequests(ctx context.Context, sessionID string) ([]cass.API
 	var results []cass.APIRequest
 	for rows.Next() {
 		var r cass.APIRequest
+		var breakdownJSON string
 		if err := rows.Scan(
 			&r.ID, &r.SessionID, &r.RequestID, &r.Timestamp,
 			&r.Model, &r.ModelFamily, &r.Purpose,
@@ -1080,8 +1095,16 @@ func (s *Store) QueryRequests(ctx context.Context, sessionID string) ([]cass.API
 			&r.StatusCode, &r.StopReason, &r.DurationMs,
 			&r.SourceFile, &r.SourceHash,
 			&r.IT2SessionID, &r.ClientPID,
+			&r.UserHash, &r.AccountUUID, &r.OrgID,
+			&breakdownJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan request: %w", err)
+		}
+		if breakdownJSON != "" && breakdownJSON != "{}" {
+			var bd cass.ContextBreakdown
+			if err := json.Unmarshal([]byte(breakdownJSON), &bd); err == nil {
+				r.Breakdown = &bd
+			}
 		}
 		results = append(results, r)
 	}
@@ -1229,14 +1252,29 @@ func (s *Store) TeamConfigs(ctx context.Context) ([]TeamConfig, error) {
 	return result, rows.Err()
 }
 
-// buildContent concatenates all message content for full-text indexing.
+// maxFTSContentBytes is the maximum number of bytes stored in the FTS content
+// column. FTS5 posting lists expand aggressively; capping at 32KB keeps the
+// index small while retaining good search recall across the first ~20 turns.
+const maxFTSContentBytes = 32 * 1024
+
+// buildContent concatenates message content for full-text indexing, capped at
+// maxFTSContentBytes to prevent the FTS5 index from growing unboundedly.
 func buildContent(sess cass.Session) string {
 	var b strings.Builder
 	for _, msg := range sess.Messages {
-		if msg.Content != "" {
-			b.WriteString(msg.Content)
-			b.WriteByte('\n')
+		if msg.Content == "" {
+			continue
 		}
+		remaining := maxFTSContentBytes - b.Len()
+		if remaining <= 0 {
+			break
+		}
+		if len(msg.Content) > remaining {
+			b.WriteString(msg.Content[:remaining])
+			break
+		}
+		b.WriteString(msg.Content)
+		b.WriteByte('\n')
 	}
 	return b.String()
 }
