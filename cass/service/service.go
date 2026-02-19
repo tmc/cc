@@ -282,19 +282,30 @@ func (s *Service) IndexArtifactDirs(ctx context.Context, root string) (int, erro
 	return len(requests), nil
 }
 
-// IndexSessionV2 scans a directory of .proxymansessionv2 and .proxymanlogv2
-// files, parses each one, and indexes the resulting API requests and
-// rate-limit snapshots. Returns the number of API requests indexed.
-func (s *Service) IndexSessionV2(ctx context.Context, dir string) (int, error) {
-	requests, err := har.ScanSessionV2Dir(dir)
+// IndexSessionV2 ingests .proxymansessionv2 or .proxymanlogv2 files, indexing
+// the resulting API requests and rate-limit snapshots. path may be either a
+// single file or a directory. Returns the number of API requests indexed.
+func (s *Service) IndexSessionV2(ctx context.Context, path string) (int, error) {
+	var requests []cass.APIRequest
+	var err error
+
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		return 0, fmt.Errorf("stat %s: %w", path, statErr)
+	}
+	if info.IsDir() {
+		requests, err = har.ScanSessionV2Dir(path)
+	} else {
+		requests, err = har.ParseSessionV2File(path)
+	}
 	if err != nil {
-		return 0, fmt.Errorf("scan sessionv2 dir: %w", err)
+		return 0, fmt.Errorf("scan sessionv2 %s: %w", path, err)
 	}
 	if len(requests) == 0 {
 		return 0, nil
 	}
 
-	s.log.Info("sessionv2 scan", "dir", dir, "requests", len(requests))
+	s.log.Info("sessionv2 scan", "path", path, "requests", len(requests))
 
 	if err := s.store.BatchIndexRequests(ctx, requests); err != nil {
 		return 0, fmt.Errorf("index sessionv2 requests: %w", err)
