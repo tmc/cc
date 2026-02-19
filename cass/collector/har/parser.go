@@ -17,8 +17,12 @@ import (
 	"github.com/tmc/cc/cass"
 )
 
-// sessionIDPattern extracts the session UUID from the metadata.user_id field.
-// Format: "user_..._session_<UUID>"
+// userIDPattern extracts all three components from the metadata.user_id field.
+// Format: "user_<hash>_account_<uuid>_session_<uuid>"
+// Group 1: user hash, Group 2: account UUID, Group 3: session UUID.
+var userIDPattern = regexp.MustCompile(`user_([^_]+(?:_[^_]+)*)_account_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_session_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
+
+// sessionIDPattern extracts only the session UUID (fallback for older formats).
 var sessionIDPattern = regexp.MustCompile(`session_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
 
 // ParseFile reads a Proxyman HAR export file and returns an APIRequest.
@@ -73,8 +77,9 @@ func parseEntry(f *File, sourcePath string) (*cass.APIRequest, error) {
 		parseResponseBody(&f.Response.Content, req)
 	}
 
-	// Extract rate-limit headers.
+	// Extract rate-limit headers and organization ID.
 	req.RateLimits = extractRateLimits(f.Response.Headers, req.Timestamp)
+	req.OrgID = headerValue(f.Response.Headers, "x-organization-id")
 
 	// Extract duration from x-envoy-upstream-service-time header.
 	if dur := headerValue(f.Response.Headers, "x-envoy-upstream-service-time"); dur != "" {
@@ -110,9 +115,10 @@ func parseRequestBody(body string, req *cass.APIRequest) {
 	req.ConversationBytes = bd.ConversationBytes
 	req.Breakdown = &bd
 
-	// Session linkage from metadata.user_id.
+	// Identity fields from metadata.user_id.
+	// Format: "user_<hash>_account_<uuid>_session_<uuid>"
 	if apiReq.Metadata != nil {
-		req.SessionID = extractSessionID(apiReq.Metadata.UserID)
+		parseUserID(apiReq.Metadata.UserID, req)
 	}
 }
 
@@ -210,6 +216,20 @@ func extractRateLimits(headers []Header, timestamp int64) cass.RateLimitSnapshot
 	}
 
 	return snap
+}
+
+// parseUserID extracts user_hash, account_uuid, and session_uuid from the
+// metadata.user_id field. Format: "user_<hash>_account_<uuid>_session_<uuid>".
+// Falls back to session-only extraction for older/partial formats.
+func parseUserID(userID string, req *cass.APIRequest) {
+	if m := userIDPattern.FindStringSubmatch(userID); len(m) == 4 {
+		req.UserHash = m[1]
+		req.AccountUUID = m[2]
+		req.SessionID = m[3]
+		return
+	}
+	// Fallback: extract session UUID only.
+	req.SessionID = extractSessionID(userID)
 }
 
 // extractSessionID parses the Claude session UUID from a metadata.user_id string.

@@ -313,6 +313,14 @@ type APIRequest struct {
 	IT2SessionID string `json:"it2_session_id,omitempty"` // UUID from ~/.it2/sessions/<uuid>/
 	ClientPID    int    `json:"client_pid,omitempty"`      // PID from proxy-traffic.<pid>.jsonl
 
+	// Identity fields extracted from metadata.user_id and response headers.
+	// metadata.user_id format: "user_<hash>_account_<uuid>_session_<uuid>"
+	// Account is the billing entity; it can change mid-session on account switch.
+	// OrgID comes from the x-organization-id response header (per-request ground truth).
+	UserHash    string `json:"user_hash,omitempty"`    // Opaque user hash from metadata.user_id.
+	AccountUUID string `json:"account_uuid,omitempty"` // Account UUID from metadata.user_id.
+	OrgID       string `json:"org_id,omitempty"`       // Organization ID from response headers.
+
 	// Detailed context breakdown (populated by ParseContextBreakdown; not stored in DB).
 	// Available in-memory after parsing; use for display and per-session aggregation.
 	Breakdown *ContextBreakdown `json:"breakdown,omitempty"`

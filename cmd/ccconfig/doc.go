@@ -1,4 +1,4 @@
-// Command cconfig manages Claude Code configuration.
+// Command ccconfig manages Claude Code configuration.
 //
 // # Usage
 //

@@ -162,7 +162,11 @@ func (s *Store) migrate() error {
 			indexed_at INTEGER NOT NULL DEFAULT 0,
 
 			it2_session_id TEXT NOT NULL DEFAULT '',
-			client_pid INTEGER NOT NULL DEFAULT 0
+			client_pid INTEGER NOT NULL DEFAULT 0,
+
+			user_hash TEXT NOT NULL DEFAULT '',
+			account_uuid TEXT NOT NULL DEFAULT '',
+			org_id TEXT NOT NULL DEFAULT ''
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_apireq_session ON api_requests(session_id);
@@ -219,6 +223,10 @@ func (s *Store) migrate() error {
 		"ALTER TABLE api_requests ADD COLUMN it2_session_id TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE api_requests ADD COLUMN client_pid INTEGER NOT NULL DEFAULT 0",
 		"CREATE INDEX IF NOT EXISTS idx_apireq_it2 ON api_requests(it2_session_id)",
+		"ALTER TABLE api_requests ADD COLUMN user_hash TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE api_requests ADD COLUMN account_uuid TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE api_requests ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
+		"CREATE INDEX IF NOT EXISTS idx_apireq_account ON api_requests(account_uuid)",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -968,8 +976,9 @@ func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIReque
 			rl_model_bucket, rl_model_utilization, rl_model_reset, rl_representative_claim,
 			status_code, stop_reason, duration_ms,
 			source_file, source_hash, indexed_at,
-			it2_session_id, client_pid
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			it2_session_id, client_pid,
+			user_hash, account_uuid, org_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare api_requests: %w", err)
@@ -990,6 +999,7 @@ func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIReque
 			r.StatusCode, r.StopReason, r.DurationMs,
 			r.SourceFile, r.SourceHash, now,
 			r.IT2SessionID, r.ClientPID,
+			r.UserHash, r.AccountUUID, r.OrgID,
 		)
 		if err != nil {
 			return fmt.Errorf("insert request %s: %w", r.ID, err)
