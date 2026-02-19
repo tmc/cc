@@ -64,6 +64,9 @@ func (c *ClaudeCode) scanDir(ctx context.Context, root string, config cass.ScanC
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// Skip subagents/ directories during the Walk: subagent entries are
+		// merged into their parent session by parseSession instead of being
+		// emitted as separate sessions (they share the parent's sessionId).
 		if info.IsDir() && info.Name() == "subagents" {
 			return filepath.SkipDir
 		}
@@ -101,6 +104,27 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 	}
 	if len(entries) == 0 {
 		return cass.Session{}, fmt.Errorf("empty session: %s", path)
+	}
+
+	// Merge subagent entries. Subagent files live at:
+	//   <parent-dir>/<parent-uuid>/subagents/agent-<agentId>.jsonl
+	// They share the parent's sessionId, so their tokens accumulate correctly.
+	// Exclude acompact-* files (compaction subagents that duplicate history).
+	subagentDir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
+	if infos, err := os.ReadDir(subagentDir); err == nil {
+		for _, fi := range infos {
+			name := fi.Name()
+			if !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			if strings.HasPrefix(name, "agent-acompact") {
+				continue
+			}
+			sub, err := cc.ReadFile(filepath.Join(subagentDir, name))
+			if err == nil {
+				entries = append(entries, sub...)
+			}
+		}
 	}
 
 	sum := cc.Summarize(path, entries)

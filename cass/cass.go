@@ -193,6 +193,7 @@ type SessionStats struct {
 
 	// Session metrics.
 	Turns          int `json:"turns"`            // User message count.
+	PlanModeTurns  int `json:"plan_mode_turns"`  // User turns with permissionMode=plan.
 	DurationSecs   int `json:"duration_secs"`
 	SubagentSpawns int `json:"subagent_spawns"`
 	Compactions    int `json:"compactions"`      // Context compaction count.

@@ -89,6 +89,9 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 		switch e.Message.Role {
 		case "user":
 			s.Turns++
+			if e.PermissionMode == "plan" {
+				s.PlanModeTurns++
+			}
 			// Count incoming teammate messages (non-empty teammate_id only).
 			text := e.Message.TextContent()
 			for _, m := range teammateMessagePattern.FindAllStringSubmatch(text, -1) {

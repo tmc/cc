@@ -42,6 +42,12 @@ type Entry struct {
 	TeamName  string `json:"teamName,omitempty"`
 	AgentName string `json:"agentName,omitempty"`
 
+	// Subagent fields (entries inside subagents/<uuid>/ directories).
+	AgentID string `json:"agentId,omitempty"` // UUID of the subagent instance.
+
+	// Permission mode for the turn (e.g. "plan", "default").
+	PermissionMode string `json:"permissionMode,omitempty"`
+
 	// Progress fields.
 	Content string          `json:"content,omitempty"`
 	Level   string          `json:"level,omitempty"`
