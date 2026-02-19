@@ -179,10 +179,11 @@ type SessionStats struct {
 	// NOTE: Hidden Haiku classifier calls (~294 input + 21 output tokens per user turn) are
 	// made by Claude Code before each Sonnet response and are completely absent from JSONL.
 	// Actual token usage is ~3% higher than JSONL-derived figures.
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReads               int `json:"cache_reads"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	InputTokens              int  `json:"input_tokens"`
+	OutputTokens             int  `json:"output_tokens"`
+	OutputTokensEstimated    bool `json:"output_tokens_estimated,omitempty"` // True when output tokens estimated via BPE (JSONL lacks final counts).
+	CacheReads               int  `json:"cache_reads"`
+	CacheCreationInputTokens int  `json:"cache_creation_input_tokens"`
 
 	// Code metrics.
 	FilesRead    int `json:"files_read"`

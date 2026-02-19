@@ -4,11 +4,30 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/tokencount/anthropictokenizer"
 )
+
+// tokenCounter is lazily initialized for output token estimation.
+var (
+	tokenCounterOnce sync.Once
+	tokenCounter     *anthropictokenizer.Counter
+)
+
+// getTokenCounter returns the shared token counter, or nil if initialization failed.
+func getTokenCounter() *anthropictokenizer.Counter {
+	tokenCounterOnce.Do(func() {
+		c, err := anthropictokenizer.NewCounter()
+		if err == nil {
+			tokenCounter = c
+		}
+	})
+	return tokenCounter
+}
 
 // it2 command patterns for stats extraction.
 var it2StatsPatterns = []struct {
@@ -79,11 +98,22 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 			}
 		case "assistant":
 			// Token usage.
-			// OutputTokens is the streaming-start snapshot (always 1 at stream open);
-			// the final count lives only in SSE message_delta and is not in JSONL.
+			// OutputTokens in JSONL is a streaming-start snapshot (value=1);
+			// the final count lives only in SSE message_delta, not in JSONL.
+			// We estimate it via BPE tokenization of the text content.
 			if e.Message.Usage != nil {
 				s.InputTokens += e.Message.Usage.InputTokens
-				s.OutputTokens += e.Message.Usage.OutputTokens
+				out := e.Message.Usage.OutputTokens
+				// If output is undercounted (streaming-start = 1), estimate from content.
+				if out <= 1 {
+					if tc := getTokenCounter(); tc != nil {
+						if text := e.Message.TextContent(); text != "" {
+							out = tc.Count(text)
+							s.OutputTokensEstimated = true
+						}
+					}
+				}
+				s.OutputTokens += out
 				s.CacheReads += e.Message.Usage.CacheReadInputTokens
 				s.CacheCreationInputTokens += e.Message.Usage.CacheCreationInputTokens
 			}
