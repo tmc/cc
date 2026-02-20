@@ -70,6 +70,7 @@ func New(cfg Config) (*Service, error) {
 func defaultCollectors() []cass.Collector {
 	return []cass.Collector{
 		&collector.ClaudeCode{},
+		&collector.OpenClaw{},
 	}
 }
 
