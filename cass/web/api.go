@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 )
@@ -224,8 +227,8 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default: return all entries as JSON array.
-	entries, err := readSessionEntries(sourcePath)
+	// Default: return all entries as JSON array (including subagent entries).
+	entries, err := readSessionEntriesWithSubagents(sourcePath)
 	if err != nil {
 		writeError(w, err, http.StatusInternalServerError)
 		return
@@ -244,7 +247,9 @@ func (s *Server) streamSession(w http.ResponseWriter, r *http.Request, path stri
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	entries, err := readSessionEntries(path)
+	follow := r.URL.Query().Get("follow") == "true"
+
+	entries, err := readSessionEntriesWithSubagents(path)
 	if err != nil {
 		fmt.Fprintf(w, "event: error\ndata: %q\n\n", err.Error())
 		flusher.Flush()
@@ -270,8 +275,153 @@ func (s *Server) streamSession(w http.ResponseWriter, r *http.Request, path stri
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	fmt.Fprintf(w, "event: done\ndata: {}\n\n")
+	if !follow {
+		fmt.Fprintf(w, "event: done\ndata: {}\n\n")
+		flusher.Flush()
+		return
+	}
+
+	// Signal the client that initial catch-up is complete; now tailing.
+	fmt.Fprintf(w, "event: caught_up\ndata: {\"count\":%d}\n\n", len(entries))
 	flusher.Flush()
+
+	s.tailSession(ctx, w, flusher, path, len(entries))
+}
+
+// tailSession watches the session's JSONL files for new entries and streams them.
+// It monitors the parent file and the subagents directory.
+func (s *Server) tailSession(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, path string, sentCount int) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		fmt.Fprintf(w, "event: error\ndata: %q\n\n", "failed to create watcher")
+		flusher.Flush()
+		return
+	}
+	defer watcher.Close()
+
+	// Watch the parent JSONL file.
+	if err := watcher.Add(path); err != nil {
+		s.log.Debug("tail: cannot watch parent", "path", path, "err", err)
+	}
+
+	// Watch the session directory (e.g. <uuid>/) to detect subagents/ creation.
+	sessionDir := strings.TrimSuffix(path, ".jsonl")
+	if info, err := os.Stat(sessionDir); err == nil && info.IsDir() {
+		watcher.Add(sessionDir)
+	} else {
+		// Session directory doesn't exist yet — watch the parent projects directory
+		// so we can detect when it gets created.
+		watcher.Add(filepath.Dir(path))
+	}
+
+	// Watch the subagents directory if it already exists.
+	subagentDir := filepath.Join(sessionDir, "subagents")
+	if info, err := os.Stat(subagentDir); err == nil && info.IsDir() {
+		watcher.Add(subagentDir)
+	}
+
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
+	idle := time.NewTimer(30 * time.Minute)
+	defer idle.Stop()
+
+	// Debounce channel: the debounce timer fires a signal here.
+	debounceCh := make(chan struct{}, 1)
+	var debounce *time.Timer
+
+	// Track seen UUIDs to avoid sending duplicates.
+	// The merged entry list is sorted by timestamp, so new entries from
+	// subagents can appear anywhere in the sorted order — we can't just
+	// slice from sentCount.
+	seenUUIDs := make(map[string]bool, sentCount)
+	initialEntries, _ := readSessionEntriesWithSubagents(path)
+	for _, e := range initialEntries {
+		if e.UUID != "" {
+			seenUUIDs[e.UUID] = true
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-idle.C:
+			fmt.Fprintf(w, "event: done\ndata: {\"reason\":\"idle_timeout\"}\n\n")
+			flusher.Flush()
+			return
+
+		case <-keepalive.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+
+		case <-debounceCh:
+			allEntries, err := readSessionEntriesWithSubagents(path)
+			if err != nil {
+				continue
+			}
+			if len(allEntries) <= sentCount {
+				continue
+			}
+
+			sent := 0
+			for _, entry := range allEntries {
+				if entry.UUID != "" && seenUUIDs[entry.UUID] {
+					continue
+				}
+				if entry.UUID != "" {
+					seenUUIDs[entry.UUID] = true
+				}
+				data, err := json.Marshal(entry)
+				if err != nil {
+					continue
+				}
+				fmt.Fprintf(w, "event: entry\ndata: %s\n\n", data)
+				sent++
+			}
+			if sent > 0 {
+				flusher.Flush()
+				sentCount = len(allEntries)
+				idle.Reset(30 * time.Minute)
+			}
+
+		case ev, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if !ev.Has(fsnotify.Write) && !ev.Has(fsnotify.Create) {
+				continue
+			}
+
+			// If a new directory appeared, start watching it.
+			if ev.Has(fsnotify.Create) {
+				if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+					watcher.Add(ev.Name)
+					// Don't continue — there may also be .jsonl files to process.
+				}
+			}
+
+			if !strings.HasSuffix(ev.Name, ".jsonl") {
+				continue
+			}
+
+			// Debounce rapid writes (100ms).
+			if debounce != nil {
+				debounce.Stop()
+			}
+			debounce = time.AfterFunc(100*time.Millisecond, func() {
+				select {
+				case debounceCh <- struct{}{}:
+				default:
+				}
+			})
+
+		case _, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+		}
+	}
 }
 
 func readSessionEntries(path string) ([]cc.Entry, error) {
@@ -297,6 +447,51 @@ func readSessionEntries(path string) ([]cc.Entry, error) {
 		entries = append(entries, entry)
 	}
 	return entries, scanner.Err()
+}
+
+// readSessionEntriesWithSubagents reads the parent session JSONL and merges
+// entries from any subagent files found at <session-dir>/subagents/agent-*.jsonl.
+// Subagent entries are tagged with AgentID and IsSidechain=true.
+// The merged result is sorted by timestamp.
+func readSessionEntriesWithSubagents(path string) ([]cc.Entry, error) {
+	entries, err := readSessionEntries(path)
+	if err != nil {
+		return nil, err
+	}
+
+	subagentDir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
+	infos, err := os.ReadDir(subagentDir)
+	if err != nil {
+		// No subagents directory — return parent entries only.
+		return entries, nil
+	}
+	for _, fi := range infos {
+		name := fi.Name()
+		if !strings.HasSuffix(name, ".jsonl") {
+			continue
+		}
+		if strings.HasPrefix(name, "agent-acompact") {
+			continue
+		}
+		sub, err := readSessionEntries(filepath.Join(subagentDir, name))
+		if err != nil {
+			continue
+		}
+		// Extract agent ID from filename: agent-<id>.jsonl
+		agentID := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
+		for i := range sub {
+			if sub[i].AgentID == "" {
+				sub[i].AgentID = agentID
+			}
+			sub[i].IsSidechain = true
+		}
+		entries = append(entries, sub...)
+	}
+
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
+	return entries, nil
 }
 
 // readSessionEntries could also use cc.ReadFile but we inline to avoid

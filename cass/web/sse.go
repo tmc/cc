@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/tmc/cc"
 )
 
 // Event is a server-sent event.
@@ -133,14 +134,22 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 	defer fw.w.Close()
 
 	// Watch the projects directory.
-	home, err := os.UserHomeDir()
+	ch, err := cc.ClaudeHome()
 	if err != nil {
 		fw.log.Error("home dir", "err", err)
 		return
 	}
-	root := filepath.Join(home, ".claude", "projects")
+	root := filepath.Join(ch, "projects")
 	if err := fw.addDirRecursive(root); err != nil {
 		fw.log.Warn("watch dir", "path", root, "err", err)
+	}
+
+	gh, err := cc.GeminiHome()
+	if err == nil && gh != "" {
+		geminiRoot := filepath.Join(gh, "projects")
+		if err := fw.addDirRecursive(geminiRoot); err != nil {
+			fw.log.Warn("watch dir", "path", geminiRoot, "err", err)
+		}
 	}
 
 	// Debounce timer.
@@ -156,12 +165,10 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 				return
 			}
 			if !strings.HasSuffix(event.Name, ".jsonl") {
-				// Watch new directories.
+				// Watch new directories (including subagent dirs).
 				if event.Has(fsnotify.Create) {
 					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-						if filepath.Base(event.Name) != "subagents" {
-							fw.w.Add(event.Name)
-						}
+						fw.w.Add(event.Name)
 					}
 				}
 				continue
@@ -188,14 +195,32 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 	}
 }
 
+// parentSessionPath maps a subagent JSONL path back to its parent session JSONL.
+// e.g. /path/to/<uuid>/subagents/agent-xyz.jsonl → /path/to/<uuid>.jsonl
+// For parent session files, returns the path unchanged.
+func parentSessionPath(p string) string {
+	dir := filepath.Dir(p)
+	if filepath.Base(dir) == "subagents" {
+		sessionDir := filepath.Dir(dir)
+		return sessionDir + ".jsonl"
+	}
+	return p
+}
+
 func (fw *FileWatcher) processPending(ctx context.Context, files map[string]struct{}) {
 	if len(files) == 0 {
 		return
 	}
 
-	var paths []string
+	// Deduplicate: map subagent files to parent session paths for reindexing.
+	parentPaths := make(map[string]struct{})
 	for f := range files {
-		paths = append(paths, f)
+		parentPaths[parentSessionPath(f)] = struct{}{}
+	}
+
+	var paths []string
+	for p := range parentPaths {
+		paths = append(paths, p)
 	}
 
 	// Incrementally re-index the changed files so the UI sees fresh data.
@@ -218,13 +243,20 @@ func (fw *FileWatcher) processPending(ctx context.Context, files map[string]stru
 		}
 	}
 
-	fw.log.Info("session files changed", "count", len(paths), "indexed", indexed)
+	// Collect changed file basenames so the UI can match open sessions.
+	var changedFiles []string
+	for f := range files {
+		changedFiles = append(changedFiles, f)
+	}
+
+	fw.log.Info("session files changed", "count", len(files), "indexed", indexed)
 
 	fw.broker.Publish(Event{
 		Type: "session_change",
 		Data: map[string]any{
-			"files_changed": len(paths),
+			"files_changed": len(files),
 			"indexed":       indexed,
+			"paths":         changedFiles,
 			"timestamp":     time.Now().Format(time.RFC3339),
 		},
 	})
@@ -236,9 +268,6 @@ func (fw *FileWatcher) addDirRecursive(root string) error {
 			return nil
 		}
 		if info.IsDir() {
-			if info.Name() == "subagents" {
-				return filepath.SkipDir
-			}
 			return fw.w.Add(path)
 		}
 		return nil

@@ -98,6 +98,273 @@ function fmtNum(n) {
   return '' + n;
 }
 
+// Format number with locale separators for hover titles (e.g. 1,234,567).
+function exactNum(n) {
+  if (n == null || isNaN(n)) return '0';
+  return Number(n).toLocaleString('en-US');
+}
+
+// --- Rolling number animation ---
+
+function RollingNum({ value, format, label }) {
+  const ref = useRef(null);
+  const prevRef = useRef(value);
+  const display = format ? format(value) : fmtNum(value);
+  const exact = format ? format(value) : exactNum(value);
+  const tip = label ? exact + ' ' + label : exact;
+
+  useEffect(() => {
+    if (!ref.current) return;
+    if (prevRef.current !== value) {
+      ref.current.classList.remove('roll-tick');
+      void ref.current.offsetWidth;
+      ref.current.classList.add('roll-tick');
+      prevRef.current = value;
+    }
+  }, [value]);
+
+  return html`<span class="rolling-num" ref=${ref} title=${tip}>${display}</span>`;
+}
+
+// --- Agent data extraction ---
+
+function useAgentData(entries) {
+  return useMemo(() => {
+    const spawns = [];     // Task tool_use blocks from parent
+    const results = {};    // tool_use_id -> completion data
+    const agentMap = {};   // agentId -> stats
+
+    for (const entry of entries) {
+      // Pass 1: Collect Task tool_use spawns from parent assistant messages.
+      if (!entry.isSidechain && entry.message?.role === 'assistant' && Array.isArray(entry.message.content)) {
+        for (const block of entry.message.content) {
+          if (block.type === 'tool_use' && block.name === 'Task') {
+            const input = block.input || {};
+            spawns.push({
+              toolUseId: block.id,
+              description: input.description || '',
+              subagentType: input.subagent_type || input.subagentType || '',
+              model: input.model || '',
+              prompt: (input.prompt || '').slice(0, 200),
+              timestamp: entry.timestamp,
+              teamName: input.team_name || '',
+              agentName: input.name || '',
+            });
+          }
+        }
+      }
+
+      // Pass 1: Collect tool_result completions for Task spawns.
+      // These appear in user messages as tool_result blocks, or as top-level toolUseResult.
+      if (!entry.isSidechain && entry.message?.role === 'user' && Array.isArray(entry.message.content)) {
+        for (const block of entry.message.content) {
+          if (block.type === 'tool_result' && block.tool_use_id) {
+            results[block.tool_use_id] = {
+              timestamp: entry.timestamp,
+              isError: block.is_error || false,
+              content: typeof block.content === 'string' ? block.content.slice(0, 300) : '',
+            };
+          }
+        }
+      }
+      // Also check top-level toolUseResult (has aggregated metrics).
+      if (!entry.isSidechain && entry.toolUseResult) {
+        const r = entry.toolUseResult;
+        // Match by finding the most recent unmatched spawn.
+        // toolUseResult entries don't carry tool_use_id directly, but they
+        // appear in order after the corresponding spawn.
+        if (r.totalTokens || r.totalToolUseCount || r.totalDurationMs) {
+          // Store for later matching — we'll match by order.
+          if (!results._pending) results._pending = [];
+          results._pending.push({
+            timestamp: entry.timestamp,
+            totalTokens: r.totalTokens || 0,
+            totalToolUseCount: r.totalToolUseCount || 0,
+            totalDurationMs: r.totalDurationMs || 0,
+            success: r.success !== false,
+          });
+        }
+      }
+
+      // Pass 1: Aggregate sidechain entries by agentId.
+      if (entry.isSidechain && entry.agentId) {
+        const id = entry.agentId;
+        if (!agentMap[id]) {
+          agentMap[id] = {
+            id,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReads: 0,
+            toolUses: 0,
+            toolBreakdown: {},
+            turns: 0,
+            firstSeen: entry.timestamp,
+            lastSeen: entry.timestamp,
+            lastActivity: '',
+          };
+        }
+        const a = agentMap[id];
+        if (entry.timestamp && entry.timestamp < a.firstSeen) a.firstSeen = entry.timestamp;
+        if (entry.timestamp && entry.timestamp > a.lastSeen) a.lastSeen = entry.timestamp;
+
+        // Count tokens from assistant messages.
+        if (entry.message?.role === 'assistant' && entry.message?.usage) {
+          a.inputTokens += entry.message.usage.input_tokens || 0;
+          a.outputTokens += entry.message.usage.output_tokens || 0;
+          a.cacheReads += entry.message.usage.cache_read_input_tokens || 0;
+        }
+
+        // Count tool uses.
+        if (entry.message?.role === 'assistant' && Array.isArray(entry.message?.content)) {
+          for (const block of entry.message.content) {
+            if (block.type === 'tool_use') {
+              a.toolUses++;
+              a.toolBreakdown[block.name] = (a.toolBreakdown[block.name] || 0) + 1;
+            }
+          }
+        }
+
+        // Count user turns.
+        if (entry.message?.role === 'user') {
+          a.turns++;
+        }
+
+        // Extract progress/status.
+        if (entry.type === 'progress' && entry.content) {
+          a.lastActivity = entry.content;
+        }
+      }
+    }
+
+    // Match spawns to agents by spawn order (stable, doesn't race).
+    // First, pair each spawn with the closest-matching agentId.
+    const pairedAgentIds = new Set();
+    const spawnToAgent = new Map(); // spawnIndex -> agentId
+
+    // Sort agentIds by firstSeen to match against spawns in order.
+    const agentIdsByTime = Object.keys(agentMap).sort((a, b) => {
+      const ta = agentMap[a].firstSeen || '';
+      const tb = agentMap[b].firstSeen || '';
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
+    });
+
+    for (let si = 0; si < spawns.length; si++) {
+      // Find the next unpaired agent closest in time to this spawn.
+      for (const aid of agentIdsByTime) {
+        if (!pairedAgentIds.has(aid)) {
+          spawnToAgent.set(si, aid);
+          pairedAgentIds.add(aid);
+          break;
+        }
+      }
+    }
+
+    // Final order: spawns in order, then any unmatched agents at the end.
+    const orderedAgentIds = [];
+    for (let si = 0; si < spawns.length; si++) {
+      const aid = spawnToAgent.get(si);
+      if (aid) orderedAgentIds.push(aid);
+    }
+    for (const aid of agentIdsByTime) {
+      if (!pairedAgentIds.has(aid)) orderedAgentIds.push(aid);
+    }
+
+    // Pending ToolUseResult entries (matched by order).
+    const pendingResults = results._pending || [];
+
+    const agents = orderedAgentIds.map((id, i) => {
+      const a = agentMap[id];
+      const spawn = spawns[i] || {};
+
+      // Determine completion status.
+      // 1. Check tool_result by tool_use_id.
+      const resultByToolUse = spawn.toolUseId ? results[spawn.toolUseId] : null;
+      // 2. Check pending ToolUseResult by order.
+      const pendingResult = pendingResults[i] || null;
+
+      const isFinished = !!(resultByToolUse || pendingResult);
+      const isError = resultByToolUse?.isError || (pendingResult && !pendingResult.success) || false;
+
+      // Prefer ToolUseResult metrics if available (more accurate).
+      let durationSecs;
+      if (pendingResult?.totalDurationMs) {
+        durationSecs = Math.round(pendingResult.totalDurationMs / 1000);
+      } else {
+        const firstMs = new Date(a.firstSeen).getTime();
+        const lastMs = new Date(a.lastSeen).getTime();
+        durationSecs = Math.max(0, Math.round((lastMs - firstMs) / 1000));
+      }
+
+      // Status: running, completed, error.
+      let status = 'running';
+      if (isFinished) status = isError ? 'error' : 'completed';
+
+      return {
+        ...a,
+        description: spawn.description || '',
+        subagentType: spawn.subagentType || '',
+        model: spawn.model || '',
+        promptPreview: spawn.prompt || '',
+        teamName: spawn.teamName || '',
+        agentName: spawn.agentName || '',
+        durationSecs,
+        status,
+        isFinished,
+        isError,
+        spawnedAt: spawn.timestamp || a.firstSeen,
+        finishedAt: resultByToolUse?.timestamp || pendingResult?.timestamp || (isFinished ? a.lastSeen : null),
+        reportedTokens: pendingResult?.totalTokens || 0,
+        reportedToolUses: pendingResult?.totalToolUseCount || 0,
+      };
+    });
+
+    // Also include spawns without sidechain data (agents that may still be starting).
+    // These are spawns beyond the orderedAgentIds count.
+    for (let i = orderedAgentIds.length; i < spawns.length; i++) {
+      const spawn = spawns[i];
+      const resultByToolUse = spawn.toolUseId ? results[spawn.toolUseId] : null;
+      const pendingResult = pendingResults[i] || null;
+      const isFinished = !!(resultByToolUse || pendingResult);
+      const isError = resultByToolUse?.isError || false;
+      agents.push({
+        id: 'pending-' + i,
+        description: spawn.description || '',
+        subagentType: spawn.subagentType || '',
+        model: spawn.model || '',
+        promptPreview: spawn.prompt || '',
+        teamName: spawn.teamName || '',
+        agentName: spawn.agentName || '',
+        inputTokens: 0, outputTokens: 0, cacheReads: 0,
+        toolUses: 0, toolBreakdown: {}, turns: 0,
+        firstSeen: spawn.timestamp, lastSeen: spawn.timestamp,
+        lastActivity: '',
+        durationSecs: 0,
+        status: isFinished ? (isError ? 'error' : 'completed') : 'starting',
+        isFinished, isError,
+        spawnedAt: spawn.timestamp,
+        finishedAt: resultByToolUse?.timestamp || null,
+        reportedTokens: 0, reportedToolUses: 0,
+      });
+    }
+
+    const totalTokens = agents.reduce((s, a) => s + a.inputTokens + a.outputTokens, 0);
+    const totalToolUses = agents.reduce((s, a) => s + a.toolUses, 0);
+    const finishedCount = agents.filter(a => a.isFinished).length;
+    const runningCount = agents.filter(a => a.status === 'running').length;
+
+    return {
+      agents,
+      hasAgents: agents.length > 0,
+      totalAgents: agents.length,
+      totalTokens,
+      totalToolUses,
+      finishedCount,
+      runningCount,
+      spawns,
+    };
+  }, [entries]);
+}
+
 // --- URL state ---
 
 const TABS = ['search', 'graph', 'map', 'teams', 'stats', 'usage'];
@@ -131,22 +398,76 @@ function pushURL(tab, params) {
 const TOOL_COLORS = {
   Bash: 'var(--cyan)', Read: 'var(--green)', Write: 'var(--yellow)',
   Edit: 'var(--orange)', Grep: 'var(--magenta)', Glob: 'var(--accent)',
-  Task: 'var(--dim)', WebFetch: 'var(--faint)',
+  Task: 'var(--dim)', WebFetch: 'var(--faint)', WebSearch: 'var(--accent)',
+  LSP: '#8b5cf6', NotebookEdit: 'var(--yellow)',
+};
+
+// Tool descriptions for hover tooltips.
+const TOOL_DESCRIPTIONS = {
+  Bash: 'shell commands',
+  Read: 'file reads',
+  Write: 'file writes',
+  Edit: 'file edits',
+  Grep: 'content search',
+  Glob: 'file search',
+  Task: 'subagent spawns',
+  WebFetch: 'web fetches',
+  WebSearch: 'web searches',
+  LSP: 'code intelligence',
+  NotebookEdit: 'notebook edits',
 };
 
 // --- Tool micro-bar ---
-function ToolMicroBar({ breakdown }) {
+function ToolMicroBar({ breakdown, position, onToolClick }) {
   if (!breakdown || Object.keys(breakdown).length === 0) return null;
   const total = Object.values(breakdown).reduce((a, b) => a + b, 0);
   if (total === 0) return null;
   const sorted = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
+  const isInline = position === 'inline';
+  const flyoutRef = useRef(null);
+
+  function onEnter(e) {
+    if (flyoutRef.current) {
+      flyoutRef.current.classList.add('visible');
+      moveFlyout(e);
+    }
+  }
+  function onLeave() {
+    if (flyoutRef.current) flyoutRef.current.classList.remove('visible');
+  }
+  function moveFlyout(e) {
+    if (!flyoutRef.current) return;
+    flyoutRef.current.style.left = (e.clientX + 12) + 'px';
+    flyoutRef.current.style.top = (e.clientY + 8) + 'px';
+  }
+  function onSegClick(e, name) {
+    e.stopPropagation();
+    if (onToolClick) onToolClick(name);
+  }
+
   return html`
-    <div class="tool-bar">
-      ${sorted.map(([name, count]) => html`
-        <div class="tool-bar-seg" style="width:${(count/total*100).toFixed(1)}%;background:${TOOL_COLORS[name]||'var(--faint)'}" title="${name}: ${count}">
-          ${count/total >= 0.12 ? html`<span class="tool-bar-label">${name.slice(0,4)} ${count}</span>` : null}
-        </div>
-      `)}
+    <div class="tool-bar-container ${isInline ? 'inline' : ''} ${onToolClick ? 'clickable' : ''}"
+         onMouseEnter=${onEnter} onMouseLeave=${onLeave} onMouseMove=${moveFlyout}>
+      <div class="tool-bar">
+        ${sorted.map(([name, count]) => html`
+          <div class="tool-bar-seg" key=${name}
+               style="width:${(count/total*100).toFixed(1)}%;background:${TOOL_COLORS[name]||'var(--faint)'}"
+               onClick=${onToolClick ? (e) => onSegClick(e, name) : undefined}>
+            ${count/total >= 0.10 ? html`<span class="tool-bar-label">${name} ${count}</span>` : null}
+          </div>
+        `)}
+      </div>
+      <div class="tool-bar-flyout" ref=${flyoutRef}>
+        ${sorted.map(([name, count]) => html`
+          <div class="tool-bar-flyout-row" key=${name}>
+            <span class="tool-bar-flyout-swatch" style="background:${TOOL_COLORS[name]||'var(--faint)'}"></span>
+            <span class="tool-bar-flyout-name">${name}</span>
+            <span class="tool-bar-flyout-count">${count}</span>
+            <span class="tool-bar-flyout-pct">${(count/total*100).toFixed(0)}%</span>
+          </div>
+        `)}
+        <div class="tool-bar-flyout-total">${total} calls · ${sorted.length} types</div>
+      </div>
     </div>
   `;
 }
@@ -260,9 +581,9 @@ function App() {
         <h1>cass <span>session search</span></h1>
         ${headerStats ? html`
           <div class="header-stats">
-            <span title="Total sessions">${fmtNum(headerStats.sessions)} sessions</span>
-            <span title="Total turns">${fmtNum(headerStats.turns)} turns</span>
-            <span title="Total tokens (in+out)">${fmtNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} tokens</span>
+            <span title="${exactNum(headerStats.sessions)} sessions">${fmtNum(headerStats.sessions)} sessions</span>
+            <span title="${exactNum(headerStats.turns)} turns">${fmtNum(headerStats.turns)} turns</span>
+            <span title="${exactNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} total tokens (${exactNum(headerStats.input_tokens || 0)} in + ${exactNum(headerStats.output_tokens || 0)} out)">${fmtNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} tokens</span>
           </div>
         ` : null}
         ${busy && html`<span class="db-busy-badge">db busy</span>`}
@@ -356,6 +677,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [toolFilter, setToolFilter] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(-1);
 
   function setQuery(v) { setQueryRaw(v); }
@@ -476,8 +798,9 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
             <${HitItem} key=${h.session_id} hit=${h} num=${i + 1}
               isSelected=${selected?.session_id === h.session_id}
               isFocused=${i === selectedIdx}
-              onClick=${() => { setSelected(h); setSelectedIdx(i); }}
-              onTeamClick=${onNavigate ? (name) => onNavigate('teams', { name }) : null} />
+              onClick=${() => { setSelected(h); setSelectedIdx(i); setToolFilter(''); }}
+              onTeamClick=${onNavigate ? (name) => onNavigate('teams', { name }) : null}
+              onToolClick=${(toolName) => { setSelected(h); setSelectedIdx(i); setToolFilter(toolName); }} />
           `)}
         </ul>
       `}
@@ -485,15 +808,15 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
         <div class="empty">no results</div>
       `}
 
-      <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => setSelected(null)}></div>
-      <${SessionDetailPanel} hit=${selected} onClose=${() => setSelected(null)} />
+      <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => { setSelected(null); setToolFilter(''); }}></div>
+      <${SessionDetailPanel} hit=${selected} onClose=${() => { setSelected(null); setToolFilter(''); }} initialFilter=${toolFilter} />
     </div>
   `;
 }
 
 // --- Hit Item ---
 
-function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick }) {
+function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onToolClick }) {
   const stats = [];
   if (h.tool_calls) stats.push(h.tool_calls + ' tools');
   if (h.turns > 1) stats.push(h.turns + ' turns');
@@ -554,7 +877,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick }) {
         ${h.compactions > 0 && html`<span class="hit-compactions">${h.compactions} compaction${h.compactions > 1 ? 's' : ''}</span>`}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
       </div>
-      <${ToolMicroBar} breakdown=${h.tool_breakdown} />
+      <${ToolMicroBar} breakdown=${h.tool_breakdown} onToolClick=${onToolClick} />
     </li>
   `;
 }
@@ -663,7 +986,220 @@ function entryMatchesQuery(entry, query) {
   return false;
 }
 
-function SessionDetailPanel({ hit, onClose }) {
+// --- Agents Tab ---
+
+function AgentStatusIcon({ status }) {
+  if (status === 'completed') return html`<span class="agent-status completed" title="completed">\u2713</span>`;
+  if (status === 'error') return html`<span class="agent-status error" title="error">\u2717</span>`;
+  if (status === 'starting') return html`<span class="agent-status starting" title="starting">\u2026</span>`;
+  return html`<span class="agent-status running" title="running"><span class="streaming-dot"></span></span>`;
+}
+
+function AgentsTab({ agentData }) {
+  const [expandedAgent, setExpandedAgent] = useState(null);
+  const [viewMode, setViewMode] = useState('tree'); // 'tree' or 'table'
+
+  if (!agentData || !agentData.hasAgents) {
+    return html`<div class="empty" style="margin-top:20px">no subagent data available</div>`;
+  }
+
+  const { agents, totalAgents, totalTokens, totalToolUses, finishedCount, runningCount } = agentData;
+
+  function toggleAgent(id) {
+    setExpandedAgent(prev => prev === id ? null : id);
+  }
+
+  function renderTree() {
+    return html`
+      <div class="agent-tree">
+        ${agents.map((a, i) => {
+          const isLast = i === agents.length - 1;
+          const connector = isLast ? '\u2514\u2500' : '\u251C\u2500';
+          const isExpanded = expandedAgent === a.id;
+          const totalTok = a.inputTokens + a.outputTokens;
+          return html`
+            <div class="agent-tree-item" key=${a.id}>
+              <div class="agent-tree-row ${isExpanded ? 'expanded' : ''}" onClick=${() => toggleAgent(a.id)}>
+                <span class="agent-tree-connector">${connector}</span>
+                <${AgentStatusIcon} status=${a.status} />
+                <span class="agent-tree-name">@${a.description || a.id.slice(0, 7)}</span>
+                ${a.subagentType && html`<span class="agent-tree-type">${a.subagentType}</span>`}
+                <span class="agent-tree-stats">
+                  <${RollingNum} value=${a.toolUses} label="tool uses" /> tool use${a.toolUses !== 1 ? 's' : ''}
+                  · <${RollingNum} value=${totalTok} label="tokens" /> tok
+                  · <${RollingNum} value=${a.durationSecs} format=${fmtDuration} />
+                </span>
+              </div>
+              ${isExpanded && html`
+                <div class="agent-detail-panel">
+                  <div class="agent-detail-grid">
+                    <div class="agent-detail-item"><span class="label">status</span><span class="val agent-status-text ${a.status}">${a.status}</span></div>
+                    ${a.model && html`<div class="agent-detail-item"><span class="label">model</span><span class="val">${a.model}</span></div>`}
+                    <div class="agent-detail-item"><span class="label">input tokens</span><span class="val"><${RollingNum} value=${a.inputTokens} /></span></div>
+                    <div class="agent-detail-item"><span class="label">output tokens</span><span class="val"><${RollingNum} value=${a.outputTokens} /></span></div>
+                    ${a.cacheReads > 0 && html`<div class="agent-detail-item"><span class="label">cache reads</span><span class="val"><${RollingNum} value=${a.cacheReads} /></span></div>`}
+                    <div class="agent-detail-item"><span class="label">turns</span><span class="val"><${RollingNum} value=${a.turns} /></span></div>
+                    ${a.spawnedAt && html`<div class="agent-detail-item"><span class="label">spawned</span><span class="val">${relTime(a.spawnedAt)}</span></div>`}
+                    ${a.finishedAt && html`<div class="agent-detail-item"><span class="label">finished</span><span class="val">${relTime(a.finishedAt)}</span></div>`}
+                    <div class="agent-detail-item"><span class="label">agent id</span><span class="val" style="font-size:10px">${a.id}</span></div>
+                  </div>
+                  ${Object.keys(a.toolBreakdown).length > 0 && html`
+                    <div style="margin-top:6px">
+                      <${ToolMicroBar} breakdown=${a.toolBreakdown} position="inline" />
+                      <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">
+                        ${Object.entries(a.toolBreakdown).sort((x,y) => y[1] - x[1]).map(([name, count]) => html`
+                          <span class="tool-chip" key=${name} style="border-left: 2px solid ${TOOL_COLORS[name]||'var(--faint)'}" title="${TOOL_DESCRIPTIONS[name] || name}">${name} ${count}</span>
+                        `)}
+                      </div>
+                    </div>
+                  `}
+                  ${a.promptPreview && html`
+                    <div style="margin-top:6px;font-size:11px;color:var(--dim);border-top:1px solid var(--border);padding-top:6px">
+                      ${a.promptPreview}${a.promptPreview.length >= 200 ? '...' : ''}
+                    </div>
+                  `}
+                </div>
+              `}
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  function renderTable() {
+    return html`
+      <div class="agent-table-wrap">
+        <table class="agent-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Agent</th>
+              <th>Type</th>
+              <th style="text-align:right">Tools</th>
+              <th style="text-align:right">Tokens</th>
+              <th style="text-align:right">Duration</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${agents.map(a => {
+              const totalTok = a.inputTokens + a.outputTokens;
+              return html`
+                <tr key=${a.id} class=${expandedAgent === a.id ? 'expanded' : ''} onClick=${() => toggleAgent(a.id)}>
+                  <td style="width:16px"><${AgentStatusIcon} status=${a.status} /></td>
+                  <td class="agent-table-name">@${a.description || a.id.slice(0, 7)}</td>
+                  <td>${a.subagentType || '\u2014'}</td>
+                  <td style="text-align:right"><${RollingNum} value=${a.toolUses} /></td>
+                  <td style="text-align:right"><${RollingNum} value=${totalTok} /></td>
+                  <td style="text-align:right"><${RollingNum} value=${a.durationSecs} format=${fmtDuration} /></td>
+                  <td><span class="agent-status-text ${a.status}">${a.status}</span></td>
+                </tr>
+                ${expandedAgent === a.id && html`
+                  <tr class="agent-table-detail"><td colspan="7">
+                    <div class="agent-detail-grid">
+                      ${a.model && html`<div class="agent-detail-item"><span class="label">model</span><span class="val">${a.model}</span></div>`}
+                      <div class="agent-detail-item"><span class="label">in/out</span><span class="val"><${RollingNum} value=${a.inputTokens} /> / <${RollingNum} value=${a.outputTokens} /></span></div>
+                      <div class="agent-detail-item"><span class="label">turns</span><span class="val"><${RollingNum} value=${a.turns} /></span></div>
+                      ${a.spawnedAt && html`<div class="agent-detail-item"><span class="label">spawned</span><span class="val">${relTime(a.spawnedAt)}</span></div>`}
+                      ${a.finishedAt && html`<div class="agent-detail-item"><span class="label">finished</span><span class="val">${relTime(a.finishedAt)}</span></div>`}
+                    </div>
+                    ${Object.keys(a.toolBreakdown).length > 0 && html`
+                      <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">
+                        ${Object.entries(a.toolBreakdown).sort((x,y) => y[1] - x[1]).map(([name, count]) => html`
+                          <span class="tool-chip" key=${name} style="border-left: 2px solid ${TOOL_COLORS[name]||'var(--faint)'}" title="${TOOL_DESCRIPTIONS[name] || name}">${name} ${count}</span>
+                        `)}
+                      </div>
+                    `}
+                  </td></tr>
+                `}
+              `;
+            })}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderTimeline() {
+    if (agents.length < 2) return null;
+    // Find global time range.
+    let minT = Infinity, maxT = -Infinity;
+    for (const a of agents) {
+      const t0 = new Date(a.firstSeen).getTime();
+      const t1 = a.finishedAt ? new Date(a.finishedAt).getTime() : new Date(a.lastSeen).getTime();
+      if (isFinite(t0) && t0 < minT) minT = t0;
+      if (isFinite(t1) && t1 > maxT) maxT = t1;
+    }
+    if (!isFinite(minT) || !isFinite(maxT)) return null;
+    const range = maxT - minT || 1;
+    const barH = 16;
+    const rowH = 24;
+    const labelW = 120;
+    const barW = 300;
+    const svgW = labelW + barW + 10;
+    const svgH = agents.length * rowH + 4;
+
+    return html`
+      <div class="agent-timeline">
+        <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
+          ${agents.map((a, i) => {
+            const t0 = new Date(a.firstSeen).getTime();
+            const t1 = a.finishedAt ? new Date(a.finishedAt).getTime() : new Date(a.lastSeen).getTime();
+            const x = labelW + ((t0 - minT) / range) * barW;
+            const w = Math.max(2, ((t1 - t0) / range) * barW);
+            const y = i * rowH + (rowH - barH) / 2;
+            const label = a.description || a.id.slice(0, 7);
+            const fillColor = a.status === 'error' ? 'var(--danger)' :
+                              a.status === 'running' ? 'var(--green)' : 'var(--cyan)';
+            return html`
+              <g key=${a.id}>
+                <text x="${labelW - 4}" y="${i * rowH + rowH / 2 + 4}" text-anchor="end"
+                      style="font-size:10px;fill:var(--cyan);font-family:var(--mono)">@${label}</text>
+                <rect x="${x}" y="${y}" width="${w}" height="${barH}" rx="2"
+                      style="fill:${fillColor};opacity:0.3" />
+                <rect x="${x}" y="${y}" width="${w}" height="${barH}" rx="2"
+                      style="fill:none;stroke:${fillColor};stroke-width:1;opacity:0.6" />
+                ${a.status === 'running' && html`
+                  <rect x="${x + w - 3}" y="${y}" width="3" height="${barH}" rx="1"
+                        style="fill:${fillColor};opacity:0.8">
+                    <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.5s" repeatCount="indefinite" />
+                  </rect>
+                `}
+              </g>
+            `;
+          })}
+        </svg>
+      </div>
+    `;
+  }
+
+  return html`
+    <div class="agents-panel">
+      <div class="agents-summary">
+        <${RollingNum} value=${totalAgents} label="agents" /> agent${totalAgents !== 1 ? 's' : ''} spawned
+        · <${RollingNum} value=${totalTokens} label="tokens" /> tokens
+        · <${RollingNum} value=${totalToolUses} label="tool uses" /> tool uses
+        ${finishedCount > 0 && html`
+          <span class="agents-lifecycle">
+            · <${RollingNum} value=${finishedCount} /> finished${runningCount > 0 ? html`, <${RollingNum} value=${runningCount} /> running` : ''}
+          </span>
+        `}
+        ${finishedCount === totalAgents && totalAgents > 0 && html`
+          <span class="agents-team-done"> (team complete)</span>
+        `}
+      </div>
+      <div class="agents-view-toggle">
+        <button class=${viewMode === 'tree' ? 'active' : ''} onClick=${() => setViewMode('tree')}>tree</button>
+        <button class=${viewMode === 'table' ? 'active' : ''} onClick=${() => setViewMode('table')}>table</button>
+      </div>
+      ${viewMode === 'tree' ? renderTree() : renderTable()}
+      ${renderTimeline()}
+    </div>
+  `;
+}
+
+function SessionDetailPanel({ hit, onClose, initialFilter }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -694,7 +1230,7 @@ function SessionDetailPanel({ hit, onClose }) {
 
     const controller = new AbortController();
 
-    fetch('api/session/' + hit.session_id, {
+    fetch('api/session/' + hit.session_id + '?follow=true', {
       headers: { 'Accept': 'text/event-stream' },
       signal: controller.signal,
     }).then(res => {
@@ -710,11 +1246,29 @@ function SessionDetailPanel({ hit, onClose }) {
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
           const batch = [];
+          let currentEvent = 'entry';
           for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEvent = line.slice(7).trim();
+              continue;
+            }
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
-              if (data === '[DONE]') { setLoading(false); setStreaming(false); return; }
-              try { batch.push(JSON.parse(data)); } catch {}
+              if (currentEvent === 'done') {
+                setLoading(false); setStreaming(false);
+                return;
+              }
+              if (currentEvent === 'caught_up') {
+                // Initial load complete, now tailing live.
+                setLoading(false);
+                // Keep streaming=true — we're still receiving live updates.
+                currentEvent = 'entry';
+                continue;
+              }
+              if (currentEvent === 'entry') {
+                try { batch.push(JSON.parse(data)); } catch {}
+              }
+              currentEvent = 'entry';
             }
           }
           if (batch.length > 0) {
@@ -736,6 +1290,14 @@ function SessionDetailPanel({ hit, onClose }) {
 
     return () => controller.abort();
   }, [hit?.session_id]);
+
+  // Apply initialFilter from tool click on search hit.
+  useEffect(() => {
+    if (initialFilter) {
+      setSearchQuery(initialFilter);
+      setActiveTab('conversation');
+    }
+  }, [initialFilter, hit?.session_id]);
 
   // Fetch API requests when the tab is switched, or proactively.
   useEffect(() => {
@@ -788,6 +1350,8 @@ function SessionDetailPanel({ hit, onClose }) {
     });
     return { visibleEntries: all, matchIndices: matches };
   }, [entries, searchQuery]);
+
+  const agentData = useAgentData(entries);
 
   const matchCount = matchIndices.length;
   const matchSet = useMemo(() => new Set(matchIndices), [matchIndices]);
@@ -1027,7 +1591,7 @@ function SessionDetailPanel({ hit, onClose }) {
           ${hit.tool_breakdown && Object.keys(hit.tool_breakdown).length > 0 && html`
             <div class="detail-tool-breakdown">
               ${Object.entries(hit.tool_breakdown).sort((a,b) => b[1] - a[1]).map(([name, count]) => html`
-                <span class="tool-chip" key=${name}>${name} ${count}</span>
+                <span class="tool-chip" key=${name} style="border-left: 2px solid ${TOOL_COLORS[name]||'var(--faint)'}" title="${TOOL_DESCRIPTIONS[name] || name}">${name} ${count}</span>
               `)}
             </div>
           `}
@@ -1051,11 +1615,19 @@ function SessionDetailPanel({ hit, onClose }) {
           </div>
           
           <div class="detail-tabs">
-            <button class="detail-tab ${activeTab === 'conversation' ? 'active' : ''}" 
+            <button class="detail-tab ${activeTab === 'conversation' ? 'active' : ''}"
                     onClick=${() => setActiveTab('conversation')}>
               Conversation
             </button>
-            <button class="detail-tab ${activeTab === 'requests' ? 'active' : ''}" 
+            ${agentData.hasAgents && html`
+              <button class="detail-tab ${activeTab === 'agents' ? 'active' : ''}"
+                      onClick=${() => setActiveTab('agents')}>
+                Agents (${agentData.runningCount > 0
+                  ? agentData.runningCount + '/' + agentData.totalAgents + ' running'
+                  : agentData.totalAgents})
+              </button>
+            `}
+            <button class="detail-tab ${activeTab === 'requests' ? 'active' : ''}"
                     onClick=${() => setActiveTab('requests')}>
               API Requests
             </button>
@@ -1079,16 +1651,18 @@ function SessionDetailPanel({ hit, onClose }) {
             `}
           </div>
         `}
-        ${streaming && activeTab === 'conversation' && html`
+        ${streaming && html`
           <div class="detail-streaming">
             <div class="streaming-dot"></div>
-            streaming... ${entryCount} entries
+            ${loading ? 'streaming...' : 'live'} ${entryCount} entries
           </div>
         `}
         <div class="detail-body" ref=${bodyRef}>
           ${activeTab === 'conversation' ? html`
             ${loading && entries.length === 0 && html`<div class="loading">loading session...</div>`}
             <div class="conversation">${renderConversation()}</div>
+          ` : activeTab === 'agents' ? html`
+            <${AgentsTab} agentData=${agentData} />
           ` : renderRequestsTab()}
         </div>
       `}
@@ -2670,18 +3244,18 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
       </div>
 
       <div class="stats-grid">
-        ${card('sessions', fmtNum(agg.sessions), agg.agents + ' agents, ' + agg.workspaces + ' workspaces')}
+        ${card('sessions', fmtNum(agg.sessions), agg.agents + (agg.agents === 1 ? ' agent' : ' agents') + ', ' + agg.workspaces + (agg.workspaces === 1 ? ' workspace' : ' workspaces'))}
         ${card('tool calls', fmtNum(agg.tool_calls))}
         ${card('total tokens', fmtNum(agg.total_tokens), fmtNum(agg.input_tokens) + ' in / ' + fmtNum(agg.output_tokens) + ' out')}
         ${card('turns', fmtNum(agg.turns))}
-        ${card('files edited', fmtNum(agg.files_edited), fmtNum(agg.files_read) + ' read / ' + fmtNum(agg.files_written) + ' written')}
+        ${card('files', fmtNum(agg.files_read + agg.files_written + agg.files_edited), fmtNum(agg.files_read) + ' read · ' + fmtNum(agg.files_edited) + ' edited · ' + fmtNum(agg.files_written) + ' written')}
         ${card('lines written', fmtNum(agg.lines_written))}
         ${card('total time', fmtDuration(agg.duration_secs))}
         ${card('subagent spawns', fmtNum(agg.subagent_spawns))}
-        ${card('it2 interactions', fmtNum(agg.it2_sends + agg.it2_screens),
-          agg.it2_splits + ' splits, ' + agg.it2_sends + ' sends, ' + agg.it2_screens + ' screens')}
+        ${card('it2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
+          agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
         ${card('team ops', fmtNum(agg.team_inbox_reads + agg.team_inbox_sends + agg.team_task_ops + agg.team_spawns),
-          agg.team_inbox_sends + ' msgs, ' + agg.team_task_ops + ' tasks, ' + agg.team_spawns + ' spawns')}
+          agg.team_inbox_reads + ' reads · ' + agg.team_inbox_sends + ' msgs · ' + agg.team_task_ops + ' tasks · ' + agg.team_spawns + ' spawns')}
         ${card('last indexed', lastIdx)}
       </div>
 
