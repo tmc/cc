@@ -55,23 +55,31 @@ func ReadIndex(path string) (*SessionIndex, error) {
 	return &idx, nil
 }
 
-// FindIndexFiles finds all sessions-index.json files under ~/.claude/projects/.
+// FindIndexFiles finds all sessions-index.json files under ~/.claude/projects/ and ~/.gemini/projects/.
 func FindIndexFiles() ([]string, error) {
-	home, err := os.UserHomeDir()
+	ch, err := ClaudeHome()
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(home, ".claude", "projects")
+	gh, _ := GeminiHome()
+
 	var files []string
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+	dirs := []string{filepath.Join(ch, "projects")}
+	if gh != "" {
+		dirs = append(dirs, filepath.Join(gh, "projects"))
+	}
+
+	for _, dir := range dirs {
+		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if info.Name() == "sessions-index.json" {
+				files = append(files, path)
+			}
 			return nil
-		}
-		if info.Name() == "sessions-index.json" {
-			files = append(files, path)
-		}
-		return nil
-	})
+		})
+	}
 	return files, nil
 }
 

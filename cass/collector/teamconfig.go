@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass/store"
 )
 
@@ -19,36 +20,47 @@ type teamConfigJSON struct {
 	Members       []json.RawMessage `json:"members"`
 }
 
-// ScanTeamConfigs reads all ~/.claude/teams/*/config.json files and returns
+// ScanTeamConfigs reads all ~/.claude/teams/*/config.json and ~/.gemini/teams/*/config.json files and returns
 // parsed TeamConfig records. Pass an empty root to use the default location.
 func ScanTeamConfigs(root string) ([]store.TeamConfig, error) {
+	var roots []string
 	if root == "" {
-		home, err := os.UserHomeDir()
+		ch, err := cc.ClaudeHome()
 		if err != nil {
 			return nil, fmt.Errorf("home dir: %w", err)
 		}
-		root = filepath.Join(home, ".claude", "teams")
-	}
+		roots = append(roots, filepath.Join(ch, "teams"))
 
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil // teams dir doesn't exist — not an error
+		gh, err := cc.GeminiHome()
+		if err == nil && gh != "" {
+			roots = append(roots, filepath.Join(gh, "teams"))
 		}
-		return nil, fmt.Errorf("read teams dir: %w", err)
+	} else {
+		roots = []string{root}
 	}
 
 	var configs []store.TeamConfig
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		cfgPath := filepath.Join(root, e.Name(), "config.json")
-		tc, err := parseTeamConfig(cfgPath)
+
+	for _, r := range roots {
+		entries, err := os.ReadDir(r)
 		if err != nil {
-			continue // skip unreadable configs
+			if os.IsNotExist(err) {
+				continue // teams dir doesn't exist — not an error
+			}
+			return nil, fmt.Errorf("read teams dir %s: %w", r, err)
 		}
-		configs = append(configs, tc)
+
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			cfgPath := filepath.Join(r, e.Name(), "config.json")
+			tc, err := parseTeamConfig(cfgPath)
+			if err != nil {
+				continue // skip unreadable configs
+			}
+			configs = append(configs, tc)
+		}
 	}
 	return configs, nil
 }

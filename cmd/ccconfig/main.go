@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tmc/cc"
 )
 
 var (
@@ -21,6 +23,7 @@ var (
 	showOriginFlag = flag.Bool("show-origin", false, "Show config file source")
 	editFlag       = flag.Bool("edit", false, "Open config file in editor")
 	fileFlag       = flag.String("file", "", "Use specific config file")
+	geminiFlag     = flag.Bool("gemini", false, "Use Gemini CLI paths instead of Claude Code")
 )
 
 // Config represents a loaded configuration.
@@ -199,13 +202,13 @@ func getConfigPath() (string, error) {
 		return *fileFlag, nil
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home directory: %w", err)
+	dirName := ".claude"
+	if *geminiFlag {
+		dirName = ".gemini"
 	}
 
 	if *localFlag {
-		return filepath.Join(".", ".claude", "config"), nil
+		return filepath.Join(".", dirName, "config"), nil
 	}
 
 	if *projectFlag {
@@ -213,34 +216,50 @@ func getConfigPath() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("not in a git repository")
 		}
-		return filepath.Join(gitRoot, ".claude", "config"), nil
+		return filepath.Join(gitRoot, dirName, "config"), nil
 	}
 
 	// Default to global
-	return filepath.Join(home, ".claude", "config"), nil
+	var ch string
+	if *geminiFlag {
+		ch, _ = cc.GeminiHome()
+	} else {
+		ch, _ = cc.ClaudeHome()
+	}
+	return filepath.Join(ch, "config"), nil
 }
 
 func loadAllConfigs() []Config {
 	var configs []Config
 
-	home, _ := os.UserHomeDir()
+	var ch string
+	if *geminiFlag {
+		ch, _ = cc.GeminiHome()
+	} else {
+		ch, _ = cc.ClaudeHome()
+	}
+
+	dirName := ".claude"
+	if *geminiFlag {
+		dirName = ".gemini"
+	}
 
 	// Global config
-	globalPath := filepath.Join(home, ".claude", "config")
+	globalPath := filepath.Join(ch, "config")
 	if cfg := loadConfig(globalPath, "global"); len(cfg.values) > 0 {
 		configs = append(configs, cfg)
 	}
 
 	// Project config
 	if gitRoot, err := findGitRoot(); err == nil {
-		projectPath := filepath.Join(gitRoot, ".claude", "config")
+		projectPath := filepath.Join(gitRoot, dirName, "config")
 		if cfg := loadConfig(projectPath, "project"); len(cfg.values) > 0 {
 			configs = append(configs, cfg)
 		}
 	}
 
 	// Local config
-	localPath := filepath.Join(".", ".claude", "config")
+	localPath := filepath.Join(".", dirName, "config")
 	if cfg := loadConfig(localPath, "local"); len(cfg.values) > 0 {
 		configs = append(configs, cfg)
 	}

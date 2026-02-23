@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tmc/cc"
 )
 
 var (
@@ -216,11 +218,12 @@ func findSessionFiles() ([]string, error) {
 }
 
 func getGlobalSearchDirs() []string {
+	ch, _ := cc.ClaudeHome()
 	home, _ := os.UserHomeDir()
 	dirs := []string{
 		".",
 		".sessions",
-		filepath.Join(home, ".claude", "sessions"),
+		filepath.Join(ch, "sessions"),
 		filepath.Join(home, ".config", "claude", "sessions"),
 	}
 	return dirs
@@ -239,15 +242,15 @@ func getProjectSearchDirs() []string {
 	}
 
 	// Add user directories
-	home, _ := os.UserHomeDir()
-	if home != "" {
+	ch, _ := cc.ClaudeHome()
+	if ch != "" {
 		// Filter by git hash if in a repo
 		if gitRoot != "" {
 			hash := sha256.Sum256([]byte(gitRoot))
 			hashStr := fmt.Sprintf("%x", hash)[:8]
-			dirs = append(dirs, filepath.Join(home, ".claude", "sessions", hashStr))
+			dirs = append(dirs, filepath.Join(ch, "sessions", hashStr))
 		}
-		dirs = append(dirs, filepath.Join(home, ".claude", "sessions"))
+		dirs = append(dirs, filepath.Join(ch, "sessions"))
 	}
 
 	return dirs

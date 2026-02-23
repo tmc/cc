@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/tmc/cc"
 )
 
 var (
@@ -13,6 +15,7 @@ var (
 	createFlag   = flag.Bool("create", false, "Create cache directory if needed")
 	sessionsFlag = flag.Bool("sessions", false, "Print sessions subdirectory")
 	shortFlag    = flag.Bool("short", false, "Use ~ instead of full home path")
+	geminiFlag   = flag.Bool("gemini", false, "Use Gemini CLI path instead of Claude Code")
 )
 
 func main() {
@@ -47,7 +50,13 @@ func run() error {
 	encoded := encodePath(absDir)
 
 	// Build cache path
-	cachePath := filepath.Join(home, ".claude", "projects", encoded)
+	var ch string
+	if *geminiFlag {
+		ch, _ = cc.GeminiHome()
+	} else {
+		ch, _ = cc.ClaudeHome()
+	}
+	cachePath := filepath.Join(ch, "projects", encoded)
 	if *sessionsFlag {
 		cachePath = filepath.Join(cachePath, "sessions")
 	}

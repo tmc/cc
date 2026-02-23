@@ -33,11 +33,11 @@ type TaskStore struct {
 func NewTaskStore(namespace string) (*TaskStore, error) {
 	base := os.Getenv("CC_TASKS_DIR")
 	if base == "" {
-		home, err := os.UserHomeDir()
+		ch, err := ClaudeHome()
 		if err != nil {
 			return nil, fmt.Errorf("task store: %w", err)
 		}
-		base = filepath.Join(home, ".claude", "tasks")
+		base = filepath.Join(ch, "tasks")
 	}
 	dir := filepath.Join(base, namespace)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

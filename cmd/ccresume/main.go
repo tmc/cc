@@ -84,10 +84,14 @@ func run() error {
 	}
 
 	for _, m := range matches {
-		if *launchFlag {
-			return launchClaude(m.ProjectPath, m.SessionID)
+		bin := "claude"
+		if strings.Contains(m.FullPath, ".gemini") {
+			bin = "gemini"
 		}
-		fmt.Printf("cd %s; claude -r %s\n", m.ProjectPath, m.SessionID)
+		if *launchFlag {
+			return launchAgent(bin, m.ProjectPath, m.SessionID)
+		}
+		fmt.Printf("cd %s; %s -r %s\n", m.ProjectPath, bin, m.SessionID)
 	}
 	return nil
 }
@@ -113,13 +117,20 @@ func findMatches(query string, since time.Duration) ([]cc.IndexEntry, error) {
 
 // grepMatches searches file contents using rg
 func grepMatches(query string) ([]cc.IndexEntry, error) {
-	home, err := os.UserHomeDir()
+	ch, err := cc.ClaudeHome()
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(home, ".claude", "projects")
+	dirs := []string{filepath.Join(ch, "projects")}
+	
+	gh, _ := cc.GeminiHome()
+	if gh != "" {
+		dirs = append(dirs, filepath.Join(gh, "projects"))
+	}
 
-	cmd := exec.Command("rg", "-l", query, dir)
+	args := []string{"-l", query}
+	args = append(args, dirs...)
+	cmd := exec.Command("rg", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
@@ -140,7 +151,15 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 		if !validSessionID(sessionID) {
 			continue
 		}
-		rel, _ := filepath.Rel(dir, path)
+		
+		var rel string
+		for _, d := range dirs {
+			if strings.HasPrefix(path, d) {
+				rel, _ = filepath.Rel(d, path)
+				break
+			}
+		}
+
 		parts := strings.SplitN(rel, string(os.PathSeparator), 2)
 		if len(parts) < 1 {
 			continue
@@ -234,11 +253,11 @@ func containsAny(query string, fields ...string) bool {
 	return false
 }
 
-func launchClaude(projectPath, sessionID string) error {
+func launchAgent(bin, projectPath, sessionID string) error {
 	if err := os.Chdir(projectPath); err != nil {
 		return fmt.Errorf("chdir %s: %w", projectPath, err)
 	}
-	cmd := exec.Command("claude", "-r", sessionID)
+	cmd := exec.Command(bin, "-r", sessionID)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

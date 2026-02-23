@@ -176,38 +176,46 @@ func collapseWhitespace(s string, max int) string {
 	return s
 }
 
-// FindSessionFiles finds JSONL session files under ~/.claude/projects/.
+// FindSessionFiles finds JSONL session files under ~/.claude/projects/ and ~/.gemini/projects/.
 // It excludes subagent files and filters by modification time.
 func FindSessionFiles(since time.Duration, project string) ([]string, error) {
-	home, err := os.UserHomeDir()
+	ch, err := ClaudeHome()
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(home, ".claude", "projects")
-	cutoff := time.Now().Add(-since)
+	gh, _ := GeminiHome()
 
+	cutoff := time.Now().Add(-since)
 	var files []string
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if info.IsDir() && info.Name() == "subagents" {
-			return filepath.SkipDir
-		}
-		if !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		if info.ModTime().Before(cutoff) {
-			return nil
-		}
-		if project != "" {
-			rel, _ := filepath.Rel(dir, path)
-			if !strings.Contains(strings.ToLower(rel), strings.ToLower(project)) {
+
+	dirs := []string{filepath.Join(ch, "projects")}
+	if gh != "" {
+		dirs = append(dirs, filepath.Join(gh, "projects"))
+	}
+
+	for _, dir := range dirs {
+		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
 				return nil
 			}
-		}
-		files = append(files, path)
-		return nil
-	})
+			if info.IsDir() && info.Name() == "subagents" {
+				return filepath.SkipDir
+			}
+			if !strings.HasSuffix(path, ".jsonl") {
+				return nil
+			}
+			if info.ModTime().Before(cutoff) {
+				return nil
+			}
+			if project != "" {
+				rel, _ := filepath.Rel(dir, path)
+				if !strings.Contains(strings.ToLower(rel), strings.ToLower(project)) {
+					return nil
+				}
+			}
+			files = append(files, path)
+			return nil
+		})
+	}
 	return files, nil
 }

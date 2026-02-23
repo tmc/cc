@@ -41,11 +41,11 @@ func TeamsDir() (string, error) {
 	if dir := os.Getenv("CC_TEAMS_DIR"); dir != "" {
 		return dir, nil
 	}
-	home, err := os.UserHomeDir()
+	ch, err := ClaudeHome()
 	if err != nil {
 		return "", fmt.Errorf("teams dir: %w", err)
 	}
-	return filepath.Join(home, ".claude", "teams"), nil
+	return filepath.Join(ch, "teams"), nil
 }
 
 // TeamDir returns the path to a specific team's directory.
