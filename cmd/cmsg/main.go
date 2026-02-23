@@ -55,9 +55,9 @@ func main() {
 
 	// Create content blocks
 	type ContentBlock struct {
-		Type      string `json:"type"`
-		Text      string `json:"text,omitempty"`
-		Source    *struct {
+		Type   string `json:"type"`
+		Text   string `json:"text,omitempty"`
+		Source *struct {
 			Type      string `json:"type"`
 			MediaType string `json:"media_type"`
 			Data      string `json:"data"`

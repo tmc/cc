@@ -69,16 +69,16 @@ func (m Message) String() string {
 }
 
 type keyMap struct {
-	quit       key.Binding
-	pause      key.Binding
-	up         key.Binding
-	down       key.Binding
-	follow     key.Binding
-	raw        key.Binding
-	help       key.Binding
-	pageUp     key.Binding
-	pageDown   key.Binding
-	halfPageUp key.Binding
+	quit         key.Binding
+	pause        key.Binding
+	up           key.Binding
+	down         key.Binding
+	follow       key.Binding
+	raw          key.Binding
+	help         key.Binding
+	pageUp       key.Binding
+	pageDown     key.Binding
+	halfPageUp   key.Binding
 	halfPageDown key.Binding
 }
 
@@ -142,22 +142,22 @@ var keys = keyMap{
 }
 
 type model struct {
-	messages     []Message
-	viewport     viewport.Model
-	help         help.Model
-	showHelp     bool
-	showRaw      bool
-	paused       bool
-	follow       bool
-	speed        float64
-	file         string
-	sessionID    string
-	ready        bool
-	err          error
-	reader       *bufio.Reader
-	fileHandle   *os.File
-	playbackIdx  int
-	lastUpdate   time.Time
+	messages    []Message
+	viewport    viewport.Model
+	help        help.Model
+	showHelp    bool
+	showRaw     bool
+	paused      bool
+	follow      bool
+	speed       float64
+	file        string
+	sessionID   string
+	ready       bool
+	err         error
+	reader      *bufio.Reader
+	fileHandle  *os.File
+	playbackIdx int
+	lastUpdate  time.Time
 }
 
 type tickMsg time.Time
@@ -467,9 +467,9 @@ func findSessionFile(sessionID string) (string, error) {
 
 func main() {
 	var (
-		fileFlag  = flag.String("file", "", "Read session from file")
-		follow    = flag.Bool("follow", false, "Follow mode (like tail -f)")
-		speed     = flag.Float64("speed", 1.0, "Playback speed multiplier")
+		fileFlag = flag.String("file", "", "Read session from file")
+		follow   = flag.Bool("follow", false, "Follow mode (like tail -f)")
+		speed    = flag.Float64("speed", 1.0, "Playback speed multiplier")
 	)
 	flag.Parse()
 
@@ -503,17 +503,17 @@ func main() {
 	}
 
 	m := model{
-		messages:   messages,
-		help:       help.New(),
-		showHelp:   false,
-		showRaw:    false,
-		paused:     false,
-		follow:     *follow,
-		speed:      *speed,
-		file:       file,
-		sessionID:  sessionID,
-		reader:     reader,
-		fileHandle: fileHandle,
+		messages:    messages,
+		help:        help.New(),
+		showHelp:    false,
+		showRaw:     false,
+		paused:      false,
+		follow:      *follow,
+		speed:       *speed,
+		file:        file,
+		sessionID:   sessionID,
+		reader:      reader,
+		fileHandle:  fileHandle,
 		playbackIdx: 0,
 	}
 

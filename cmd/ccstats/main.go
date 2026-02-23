@@ -49,10 +49,10 @@ type Stats struct {
 	TotalEntries int `json:"total_entries"`
 
 	// Tokens.
-	InputTokens        int `json:"input_tokens"`
-	OutputTokens       int `json:"output_tokens"`
-	CacheReadTokens    int `json:"cache_read_tokens"`
-	CacheCreateTokens  int `json:"cache_create_tokens"`
+	InputTokens       int `json:"input_tokens"`
+	OutputTokens      int `json:"output_tokens"`
+	CacheReadTokens   int `json:"cache_read_tokens"`
+	CacheCreateTokens int `json:"cache_create_tokens"`
 
 	// Tools.
 	ToolUses  map[string]int `json:"tool_uses"`

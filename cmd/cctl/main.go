@@ -12,9 +12,9 @@ var version = "dev"
 // subcommands maps command names and aliases to binary names.
 var subcommands = map[string]string{
 	// Full names
-	"msg":     "cmsg",
-	"replay":  "creplay",
-	"sid":     "mksid",
+	"msg":      "cmsg",
+	"replay":   "creplay",
+	"sid":      "mksid",
 	"history":  "cchistory",
 	"config":   "ccconfig",
 	"loc":      "ccloc",

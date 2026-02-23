@@ -17,16 +17,16 @@ import (
 
 func main() {
 	var (
-		team           = flag.String("team", "", "team name (required)")
-		agent          = flag.String("agent", "", "agent name")
-		model          = flag.String("model", "", "model to use")
-		cwd            = flag.String("cwd", "", "working directory")
-		agentType      = flag.String("type", "general-purpose", "agent type")
-		permMode       = flag.String("permission-mode", "", "permission mode")
-		allowedTools   = flag.String("allowed-tools", "", "comma-separated allowed tools")
-		kill           = flag.Bool("kill", false, "kill agent process")
-		list           = flag.Bool("list", false, "list agent processes")
-		claudeBinary   = flag.String("claude-binary", "claude", "claude binary name")
+		team         = flag.String("team", "", "team name (required)")
+		agent        = flag.String("agent", "", "agent name")
+		model        = flag.String("model", "", "model to use")
+		cwd          = flag.String("cwd", "", "working directory")
+		agentType    = flag.String("type", "general-purpose", "agent type")
+		permMode     = flag.String("permission-mode", "", "permission mode")
+		allowedTools = flag.String("allowed-tools", "", "comma-separated allowed tools")
+		kill         = flag.Bool("kill", false, "kill agent process")
+		list         = flag.Bool("list", false, "list agent processes")
+		claudeBinary = flag.String("claude-binary", "claude", "claude binary name")
 	)
 	flag.Parse()
 

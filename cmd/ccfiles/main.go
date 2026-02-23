@@ -45,8 +45,8 @@ var (
 // FileOp represents a file operation found in a session.
 type FileOp struct {
 	File      string `json:"file"`
-	Op        string `json:"op"`        // write, edit, read, bash-write, bash-redirect, glob, grep
-	Tool      string `json:"tool"`      // source tool name
+	Op        string `json:"op"`   // write, edit, read, bash-write, bash-redirect, glob, grep
+	Tool      string `json:"tool"` // source tool name
 	SessionID string `json:"session_id,omitempty"`
 	Timestamp string `json:"timestamp,omitempty"`
 }
