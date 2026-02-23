@@ -2,7 +2,6 @@ package collector
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,15 +11,15 @@ import (
 	"github.com/tmc/cc/cass"
 )
 
-// ClaudeCode collects sessions from Claude Code's JSONL session files.
-type ClaudeCode struct {
-	// Root overrides the default ~/.claude/projects directory.
+// GeminiCLI collects sessions from Gemini CLI's JSONL session files.
+type GeminiCLI struct {
+	// Root overrides the default ~/.gemini/projects directory.
 	Root string
 }
 
-func (c *ClaudeCode) Name() string { return "claude-code" }
+func (c *GeminiCLI) Name() string { return "gemini-cli" }
 
-func (c *ClaudeCode) Detect(ctx context.Context) (*cass.DetectionResult, error) {
+func (c *GeminiCLI) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	root, err := c.root()
 	if err != nil {
 		return &cass.DetectionResult{Agent: c.Name()}, nil
@@ -36,7 +35,7 @@ func (c *ClaudeCode) Detect(ctx context.Context) (*cass.DetectionResult, error) 
 	}, nil
 }
 
-func (c *ClaudeCode) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cass.Session) error {
+func (c *GeminiCLI) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cass.Session) error {
 	defer close(out)
 
 	paths := config.Paths
@@ -56,7 +55,7 @@ func (c *ClaudeCode) Scan(ctx context.Context, config cass.ScanConfig, out chan<
 	return nil
 }
 
-func (c *ClaudeCode) scanDir(ctx context.Context, root string, config cass.ScanConfig, out chan<- cass.Session) error {
+func (c *GeminiCLI) scanDir(ctx context.Context, root string, config cass.ScanConfig, out chan<- cass.Session) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -97,7 +96,7 @@ func (c *ClaudeCode) scanDir(ctx context.Context, root string, config cass.ScanC
 	})
 }
 
-func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
+func (c *GeminiCLI) parseSession(path string) (cass.Session, error) {
 	entries, err := cc.ReadFile(path)
 	if err != nil {
 		return cass.Session{}, err
@@ -158,7 +157,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 	links := ExtractLinks(entries)
 	stats := ExtractStats(entries)
 
-	// Extract team links (native Claude Code agent teams).
+	// Extract team links (native Gemini CLI agent teams).
 	teamLinks := ExtractTeamLinks(entries)
 	links = append(links, teamLinks...)
 
@@ -188,7 +187,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 
 	return cass.Session{
 		ID:         id,
-		Agent:      "claude-code",
+		Agent:      "gemini-cli",
 		Title:      titleFromSummary(sum),
 		Workspace:  workspace,
 		SourcePath: path,
@@ -203,92 +202,13 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 	}, nil
 }
 
-func (c *ClaudeCode) root() (string, error) {
+func (c *GeminiCLI) root() (string, error) {
 	if c.Root != "" {
 		return c.Root, nil
 	}
-	ch, err := cc.ClaudeHome()
+	gh, err := cc.GeminiHome()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(ch, "projects"), nil
-}
-
-func sessionID(path string) string {
-	h := sha256.Sum256([]byte(path))
-	return fmt.Sprintf("%x", h[:16])
-}
-
-func titleFromSummary(s cc.SessionSummary) string {
-	if s.CustomTitle != "" {
-		return s.CustomTitle
-	}
-	if s.FirstPrompt != "" {
-		t := s.FirstPrompt
-		if len(t) > 80 {
-			t = t[:80] + "..."
-		}
-		return t
-	}
-	return filepath.Base(s.File)
-}
-
-// workspaceFromPath extracts the original workspace path from the encoded
-// Claude Code project directory name (e.g. "-Volumes-tmc-go-src-..." -> "/Volumes/tmc/go/src/...").
-//
-// Claude Code encodes paths by replacing "/" with "-". This is ambiguous when
-// directory names contain literal dashes (e.g. "chrome-to-har"). We resolve
-// the ambiguity by checking the filesystem: at each dash, we try treating it
-// as a path separator first (most dashes are separators); if that directory
-// exists we commit to it, otherwise we keep the dash as literal and continue.
-func workspaceFromPath(sessionPath string) string {
-	// Session files live under ~/.claude/projects/<encoded-path>/...
-	dir := filepath.Dir(sessionPath)
-	for {
-		parent := filepath.Dir(dir)
-		if filepath.Base(parent) == "projects" {
-			break
-		}
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-	encoded := filepath.Base(dir)
-	if encoded == "" || encoded == "." {
-		return ""
-	}
-	return decodePath(encoded)
-}
-
-// decodePath reconstructs the original filesystem path from an encoded
-// Claude Code project directory name. Claude Code encodes paths by
-// replacing both "/" and "." with "-", so each dash is ambiguous.
-// We resolve by checking the filesystem, using backtracking to handle
-// multi-dash directory names like "chrome-to-har" and dotted names
-// like "github.com".
-func decodePath(encoded string) string {
-	var prefix string
-	if strings.HasPrefix(encoded, "-") {
-		prefix = "/"
-		encoded = encoded[1:]
-	}
-
-	segments := strings.Split(encoded, "-")
-	if len(segments) == 0 {
-		return prefix
-	}
-
-	if result, ok := decodeSegments(prefix+segments[0], segments[1:]); ok {
-		return result
-	}
-	// Fallback: simple "/" replacement.
-	return prefix + strings.Join(segments, "/")
-}
-
-// decodeSegments tries all possible decodings of dash-separated segments
-// by checking the filesystem. Returns the decoded path and whether it
-// (or a prefix of it) exists on disk.
-func decodeSegments(current string, remaining []string) (string, bool) {
-	return cc.DecodeSegments(current, remaining)
+	return filepath.Join(gh, "projects"), nil
 }

@@ -11,7 +11,7 @@ import (
 
 // Color styles for terminal output.
 var (
-	agentStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))  // Cyan.
+	agentStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // Cyan.
 	titleStyle     = lipgloss.NewStyle().Bold(true)
 	snippetStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // Dim gray.
 	workspaceStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // Green.
@@ -110,6 +110,17 @@ func formatBytes(n int) string {
 	default:
 		return fmt.Sprintf("%dB", n)
 	}
+}
+
+// formatTokens formats a token count as a compact string (e.g. 15.2K, 3.1M).
+func formatTokens(n int) string {
+	if n >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	}
+	if n >= 1_000 {
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
+	}
+	return fmt.Sprintf("%d", n)
 }
 
 // relativeTime formats a duration since a timestamp as a human-readable string.

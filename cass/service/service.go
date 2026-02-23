@@ -70,7 +70,10 @@ func New(cfg Config) (*Service, error) {
 func defaultCollectors() []cass.Collector {
 	return []cass.Collector{
 		&collector.ClaudeCode{},
+		&collector.GeminiCLI{}, // Added for Gemini CLI support
 		&collector.OpenClaw{},
+		&collector.Antigravity{},
+		&collector.Cursor{},
 	}
 }
 
@@ -91,7 +94,7 @@ func (s *Service) Detect(ctx context.Context) ([]cass.DetectionResult, error) {
 // Index runs all collectors and indexes found sessions.
 // If force is true, it reindexes everything regardless of last scan time.
 // Returns the number of sessions indexed.
-func (s *Service) Index(ctx context.Context, force bool) (int, error) {
+func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (int, error) {
 	var since time.Time
 	if !force {
 		if ts, err := s.store.GetMeta(ctx, "last_indexed_at"); err == nil && ts != "" {
@@ -108,8 +111,18 @@ func (s *Service) Index(ctx context.Context, force bool) (int, error) {
 	)
 
 	for _, c := range s.collectors {
+		var paths []string
 		det, err := c.Detect(ctx)
-		if err != nil || !det.Found {
+		if err == nil && det != nil && det.Found {
+			paths = append(paths, det.Paths...)
+		}
+
+		// Support passing arbitrary extra paths from the CLI to capable collectors.
+		if c.Name() == "claude-code" || c.Name() == "gemini-cli" {
+			paths = append(paths, extraPaths...)
+		}
+
+		if len(paths) == 0 {
 			continue
 		}
 
@@ -154,7 +167,7 @@ func (s *Service) Index(ctx context.Context, force bool) (int, error) {
 			if scanErr != nil {
 				s.log.Error("scan", "agent", col.Name(), "err", scanErr)
 			}
-		}(c, det.Paths)
+		}(c, paths)
 	}
 
 	wg.Wait()

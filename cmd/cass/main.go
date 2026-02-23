@@ -130,7 +130,7 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	noArtifactDirs := fs.Bool("no-artifact-dirs", false, "disable artifact dir scanning")
 	fs.Parse(args)
 
-	count, err := svc.Index(ctx, *force)
+	count, err := svc.Index(ctx, *force, fs.Args()...)
 	if err != nil {
 		return err
 	}
@@ -165,11 +165,11 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
-			"indexed":           count,
-			"har_requests":      harCount,
+			"indexed":            count,
+			"har_requests":       harCount,
 			"sessionv2_requests": sessionV2Count,
-			"artifact_requests": artifactCount,
-			"team_configs":      teamConfigCount,
+			"artifact_requests":  artifactCount,
+			"team_configs":       teamConfigCount,
 		})
 	}
 	fmt.Printf("indexed %d sessions\n", count)
@@ -336,7 +336,11 @@ func runResume(ctx context.Context, svc *service.Service, args []string) error {
 	}
 
 	// Output the resume command for the user to execute.
-	cmd := fmt.Sprintf("cd %s && claude --resume", h.Workspace)
+	bin := "claude"
+	if h.Agent == "gemini-cli" {
+		bin = "gemini"
+	}
+	cmd := fmt.Sprintf("cd %s && %s --resume", h.Workspace, bin)
 	fmt.Println()
 	fmt.Println(titleStyle.Render("run:"))
 	fmt.Println(cmd)
@@ -391,14 +395,24 @@ func printHit(num int, h cass.Hit) {
 	if h.LinesWritten > 0 {
 		stats = append(stats, fmt.Sprintf("%d lines", h.LinesWritten))
 	}
-	totalTok := h.InputTokens + h.OutputTokens
-	if totalTok >= 1000 {
-		tok := fmt.Sprintf("%dk tok", totalTok/1000)
-		if h.CacheCreationInputTokens >= 1000 {
-			tok += fmt.Sprintf(" +%dkcc", h.CacheCreationInputTokens/1000)
+	
+	if h.InputTokens > 0 || h.OutputTokens > 0 || h.CacheReads > 0 || h.CacheCreationInputTokens > 0 {
+		var toks []string
+		if h.InputTokens > 0 {
+			toks = append(toks, fmt.Sprintf("in:%s", formatTokens(h.InputTokens)))
 		}
-		stats = append(stats, tok)
+		if h.OutputTokens > 0 {
+			toks = append(toks, fmt.Sprintf("out:%s", formatTokens(h.OutputTokens)))
+		}
+		if h.CacheReads > 0 {
+			toks = append(toks, fmt.Sprintf("cache_r:%s", formatTokens(h.CacheReads)))
+		}
+		if h.CacheCreationInputTokens > 0 {
+			toks = append(toks, fmt.Sprintf("cache_w:%s", formatTokens(h.CacheCreationInputTokens)))
+		}
+		stats = append(stats, strings.Join(toks, " "))
 	}
+
 	if h.IT2Sends > 0 || h.IT2Screens > 0 || h.IT2Splits > 0 {
 		var it2 []string
 		if h.IT2Splits > 0 {
@@ -760,10 +774,14 @@ func outputResume(result *cass.SearchResult) error {
 			title = title[:60] + "..."
 		}
 		fmt.Printf("# %s (%s)\n", title, h.StartedAt)
+		bin := "claude"
+		if h.Agent == "gemini-cli" {
+			bin = "gemini"
+		}
 		if h.Workspace != "" {
-			fmt.Printf("cd %s && claude --resume\n", h.Workspace)
+			fmt.Printf("cd %s && %s --resume\n", h.Workspace, bin)
 		} else if h.SourcePath != "" {
-			fmt.Printf("claude --resume  # source: %s\n", h.SourcePath)
+			fmt.Printf("%s --resume  # source: %s\n", bin, h.SourcePath)
 		}
 		fmt.Println()
 	}
