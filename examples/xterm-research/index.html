@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>xterm.js Research - Session Replay Viewer Examples</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d30 100%);
+            color: #d4d4d4;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #4ec9b0 0%, #569cd6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .subtitle {
+            font-size: 1.2em;
+            color: #888;
+            margin-bottom: 40px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .card {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            padding: 25px;
+            transition: all 0.3s ease;
+        }
+        .card:hover {
+            border-color: #569cd6;
+            box-shadow: 0 4px 20px rgba(86, 156, 214, 0.2);
+            transform: translateY(-2px);
+        }
+        .card h2 {
+            color: #4ec9b0;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        .card p {
+            color: #cccccc;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+        .card a {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #0e639c;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .card a:hover {
+            background: #1177bb;
+        }
+        .recommendation {
+            background: linear-gradient(135deg, #1a5f1f 0%, #2d7a33 100%);
+            border: 2px solid #4ec9b0;
+            padding: 30px;
+            border-radius: 8px;
+            margin-bottom: 40px;
+        }
+        .recommendation h2 {
+            color: #4ec9b0;
+            margin-bottom: 15px;
+        }
+        .recommendation p {
+            color: #e0e0e0;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        .recommendation strong {
+            color: #4ec9b0;
+        }
+        .docs-section {
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            padding: 25px;
+            margin-bottom: 40px;
+        }
+        .docs-section h2 {
+            color: #569cd6;
+            margin-bottom: 20px;
+        }
+        .docs-list {
+            list-style: none;
+        }
+        .docs-list li {
+            padding: 10px 0;
+            border-bottom: 1px solid #3e3e42;
+        }
+        .docs-list li:last-child {
+            border-bottom: none;
+        }
+        .docs-list a {
+            color: #4ec9b0;
+            text-decoration: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .docs-list a:hover {
+            color: #6ed9bf;
+        }
+        .docs-list .desc {
+            color: #888;
+            font-size: 0.9em;
+        }
+        .comparison-table {
+            width: 100%;
+            background: #252526;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 40px;
+        }
+        .comparison-table th {
+            background: #37373d;
+            color: #4ec9b0;
+            padding: 15px;
+            text-align: left;
+        }
+        .comparison-table td {
+            padding: 15px;
+            border-top: 1px solid #3e3e42;
+        }
+        .comparison-table tr:hover {
+            background: #2d2d30;
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 0.75em;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .badge.recommended {
+            background: #1a5f1f;
+            color: #4ec9b0;
+        }
+        .badge.advanced {
+            background: #5f4f1a;
+            color: #dcdcaa;
+        }
+        .footer {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+            border-top: 1px solid #3e3e42;
+            margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>xterm.js Research</h1>
+        <div class="subtitle">Session Replay Viewer Examples & Documentation</div>
+
+        <div class="recommendation">
+            <h2>Recommendation</h2>
+            <p><strong>Use ansi_up for Claude Code session replay.</strong></p>
+            <p>It's lighter (15KB vs 300KB), simpler to implement, and better suited for structured JSONL session data. Reserve xterm.js only if you need full terminal emulation with cursor positioning.</p>
+        </div>
+
+        <h2 style="margin-bottom: 20px; color: #569cd6;">Interactive Examples</h2>
+        <div class="grid">
+            <div class="card">
+                <h2>Side-by-Side Comparison <span class="badge recommended">Start Here</span></h2>
+                <p>Compare xterm.js and ansi_up rendering the same Claude Code session data side-by-side. See the difference in implementation and output.</p>
+                <a href="comparison.html">View Comparison</a>
+            </div>
+
+            <div class="card">
+                <h2>ansi_up Example <span class="badge recommended">Recommended</span></h2>
+                <p>Lightweight ANSI-to-HTML converter (15KB). Simple API, easy text selection, perfect for structured session logs.</p>
+                <a href="ansi-up-example.html">View Demo</a>
+            </div>
+
+            <div class="card">
+                <h2>xterm.js Example <span class="badge advanced">Advanced</span></h2>
+                <p>Full terminal emulator with read-only mode. Heavy (300KB) but provides authentic terminal experience.</p>
+                <a href="xterm-example.html">View Demo</a>
+            </div>
+
+            <div class="card">
+                <h2>SSE Integration</h2>
+                <p>Example showing how to stream JSONL events from a Go backend using Server-Sent Events (SSE).</p>
+                <a href="sse-integration-example.html">View Demo</a>
+            </div>
+        </div>
+
+        <div class="docs-section">
+            <h2>Documentation</h2>
+            <ul class="docs-list">
+                <li>
+                    <a href="QUICK-REFERENCE.md">
+                        <span>Quick Reference</span>
+                        <span class="desc">Minimal examples and cheat sheets</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="SUMMARY.md">
+                        <span>Complete Research Summary</span>
+                        <span class="desc">Detailed analysis and findings</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="README.md">
+                        <span>README</span>
+                        <span class="desc">Overview and testing instructions</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="alternative-ansi-converters.md">
+                        <span>Alternative Libraries</span>
+                        <span class="desc">Comparison of ANSI-to-HTML converters</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="go-sse-backend.go">
+                        <span>Go Backend Example</span>
+                        <span class="desc">SSE server implementation</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <h2 style="margin-bottom: 20px; color: #569cd6;">Quick Comparison</h2>
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>xterm.js</th>
+                    <th>ansi_up</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Bundle Size</strong></td>
+                    <td>~300KB</td>
+                    <td>~15KB <span class="badge recommended">20x smaller</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Complexity</strong></td>
+                    <td>High (terminal emulator)</td>
+                    <td>Low (one function call)</td>
+                </tr>
+                <tr>
+                    <td><strong>Text Selection</strong></td>
+                    <td>Works but quirky</td>
+                    <td>Native browser behavior</td>
+                </tr>
+                <tr>
+                    <td><strong>Use Case</strong></td>
+                    <td>Raw TTY output, cursor control</td>
+                    <td>Structured logs, JSONL events <span class="badge recommended">Better for CC</span></td>
+                </tr>
+                <tr>
+                    <td><strong>Search</strong></td>
+                    <td>Via addon</td>
+                    <td>Native browser Ctrl+F</td>
+                </tr>
+                <tr>
+                    <td><strong>Setup</strong></td>
+                    <td>Multiple imports, CSS, config</td>
+                    <td>Import + one line</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="docs-section">
+            <h2>Key Research Findings</h2>
+            <div style="line-height: 1.8; color: #cccccc;">
+                <p style="margin-bottom: 15px;">✓ <strong>xterm.js can render without a backend</strong> - Use <code style="background: #1e1e1e; padding: 2px 6px; border-radius: 3px;">disableStdin: true</code> for read-only mode</p>
+                <p style="margin-bottom: 15px;">✓ <strong>Available via esm.sh CDN</strong> - No build step required, works in browser</p>
+                <p style="margin-bottom: 15px;">✓ <strong>Addons available</strong> - FitAddon (essential), SearchAddon, WebglAddon</p>
+                <p style="margin-bottom: 15px;">✓ <strong>ansi_up is simpler</strong> - Better for structured Claude Code session data</p>
+                <p style="margin-bottom: 15px;">✓ <strong>SSE integration works great</strong> - Stream JSONL events from Go backend</p>
+            </div>
+        </div>
+
+        <div class="footer">
+            Research conducted for Claude Code session replay viewer<br>
+            All examples work standalone with no build step
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>xterm.js - Read-only Session Replay Example</title>
+
+    <!-- xterm.js CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            margin: 0 0 20px 0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        #terminal {
+            height: 600px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .controls {
+            margin-bottom: 15px;
+        }
+        button {
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #0e639c;
+            border: none;
+            color: white;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>xterm.js - Read-only Session Replay</h1>
+
+        <div class="controls">
+            <button onclick="simulateUserMessage()">Add User Message</button>
+            <button onclick="simulateAssistantMessage()">Add Assistant Message</button>
+            <button onclick="simulateToolUse()">Add Tool Use</button>
+            <button onclick="simulateToolResult()">Add Tool Result</button>
+            <button onclick="clearTerminal()">Clear</button>
+        </div>
+
+        <div id="terminal"></div>
+    </div>
+
+    <!-- xterm.js from CDN -->
+    <script type="module">
+        import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/+esm';
+        import { FitAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/+esm';
+
+        // Create terminal with read-only configuration
+        const term = new Terminal({
+            cursorBlink: false,
+            cursorStyle: 'bar',
+            disableStdin: true,  // This makes it read-only (no user input)
+            fontSize: 14,
+            fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+            theme: {
+                background: '#1e1e1e',
+                foreground: '#d4d4d4',
+                cursor: '#d4d4d4',
+                black: '#000000',
+                red: '#cd3131',
+                green: '#0dbc79',
+                yellow: '#e5e510',
+                blue: '#2472c8',
+                magenta: '#bc3fbc',
+                cyan: '#11a8cd',
+                white: '#e5e5e5',
+                brightBlack: '#666666',
+                brightRed: '#f14c4c',
+                brightGreen: '#23d18b',
+                brightYellow: '#f5f543',
+                brightBlue: '#3b8eea',
+                brightMagenta: '#d670d6',
+                brightCyan: '#29b8db',
+                brightWhite: '#e5e5e5'
+            },
+            rows: 30,
+            cols: 100
+        });
+
+        // Add FitAddon for responsive sizing
+        const fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+
+        // Open terminal in DOM
+        term.open(document.getElementById('terminal'));
+        fitAddon.fit();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            fitAddon.fit();
+        });
+
+        // ANSI color codes
+        const colors = {
+            reset: '\x1b[0m',
+            bold: '\x1b[1m',
+            dim: '\x1b[2m',
+            red: '\x1b[31m',
+            green: '\x1b[32m',
+            yellow: '\x1b[33m',
+            blue: '\x1b[34m',
+            magenta: '\x1b[35m',
+            cyan: '\x1b[36m',
+            white: '\x1b[37m',
+            bgRed: '\x1b[41m',
+            bgGreen: '\x1b[42m',
+            bgBlue: '\x1b[44m'
+        };
+
+        // Helper to write formatted messages
+        function writeMessage(type, content) {
+            const timestamp = new Date().toLocaleTimeString();
+
+            switch(type) {
+                case 'user':
+                    term.write(`${colors.cyan}${colors.bold}[${timestamp}] User:${colors.reset}\r\n`);
+                    term.write(`  ${content}\r\n\r\n`);
+                    break;
+
+                case 'assistant':
+                    term.write(`${colors.green}${colors.bold}[${timestamp}] Assistant:${colors.reset}\r\n`);
+                    term.write(`  ${content}\r\n\r\n`);
+                    break;
+
+                case 'tool_use':
+                    term.write(`${colors.yellow}${colors.bold}[${timestamp}] Tool Use:${colors.reset} ${colors.yellow}${content.name}${colors.reset}\r\n`);
+                    if (content.input) {
+                        term.write(`${colors.dim}  ${JSON.stringify(content.input, null, 2).replace(/\n/g, '\r\n  ')}${colors.reset}\r\n\r\n`);
+                    }
+                    break;
+
+                case 'tool_result':
+                    term.write(`${colors.blue}${colors.bold}[${timestamp}] Tool Result:${colors.reset}\r\n`);
+                    term.write(`${colors.dim}  ${content.replace(/\n/g, '\r\n  ')}${colors.reset}\r\n\r\n`);
+                    break;
+
+                case 'error':
+                    term.write(`${colors.red}${colors.bold}[${timestamp}] Error:${colors.reset}\r\n`);
+                    term.write(`  ${colors.red}${content}${colors.reset}\r\n\r\n`);
+                    break;
+            }
+        }
+
+        // Simulate SSE-like streaming
+        function simulateStreamingMessage(text, callback) {
+            let i = 0;
+            const interval = setInterval(() => {
+                if (i < text.length) {
+                    term.write(text[i]);
+                    i++;
+                } else {
+                    clearInterval(interval);
+                    term.write('\r\n\r\n');
+                    if (callback) callback();
+                }
+            }, 10);
+        }
+
+        // Example functions for demo
+        window.simulateUserMessage = function() {
+            writeMessage('user', 'Can you help me debug this Go code?');
+        };
+
+        window.simulateAssistantMessage = function() {
+            writeMessage('assistant', 'I\'ll help you debug that code. Let me read the file first.');
+        };
+
+        window.simulateToolUse = function() {
+            writeMessage('tool_use', {
+                name: 'Read',
+                input: { file_path: '/Volumes/tmc/go/src/github.com/tmc/cc/main.go' }
+            });
+        };
+
+        window.simulateToolResult = function() {
+            const result = `package main
+
+import (
+    "fmt"
+)
+
+func main() {
+    fmt.Println("Hello, World!")
+}`;
+            writeMessage('tool_result', result);
+        };
+
+        window.clearTerminal = function() {
+            term.clear();
+        };
+
+        // Initial welcome message
+        term.write(`${colors.bold}${colors.cyan}Session Replay Viewer${colors.reset}\r\n`);
+        term.write(`${colors.dim}Read-only terminal for displaying Claude Code sessions${colors.reset}\r\n`);
+        term.write(`${colors.dim}${'─'.repeat(80)}${colors.reset}\r\n\r\n`);
+
+        // Make term available globally for debugging
+        window.term = term;
+
+    </script>
+</body>
+</html>

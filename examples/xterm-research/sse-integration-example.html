@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSE Integration Example - Session Replay</title>
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            margin: 0 0 10px 0;
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 20px;
+        }
+        #output {
+            background: #0e0e0e;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 20px;
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            overflow-y: auto;
+            max-height: 600px;
+            white-space: pre-wrap;
+        }
+        .controls {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        input {
+            padding: 8px 12px;
+            background: #2d2d30;
+            border: 1px solid #3e3e42;
+            color: #d4d4d4;
+            border-radius: 3px;
+            font-family: monospace;
+            flex: 1;
+        }
+        button {
+            padding: 8px 16px;
+            background: #0e639c;
+            border: none;
+            color: white;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 8px 12px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status.connected {
+            background: #1a5f1f;
+            color: #4ec9b0;
+        }
+        .status.disconnected {
+            background: #5f1a1a;
+            color: #f48771;
+        }
+        .status.connecting {
+            background: #5f4f1a;
+            color: #dcdcaa;
+        }
+        .code-block {
+            background: #1e1e1e;
+            border-left: 3px solid #0e639c;
+            padding: 10px;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SSE Integration Example</h1>
+        <div class="subtitle">Streaming Claude Code session data from a Go backend</div>
+
+        <div class="controls">
+            <input type="text" id="session-id" placeholder="Session ID (or leave empty for demo)" value="">
+            <button id="connect-btn" onclick="connectSSE()">Connect</button>
+            <button id="disconnect-btn" onclick="disconnectSSE()" disabled>Disconnect</button>
+            <div class="status disconnected" id="status">Disconnected</div>
+        </div>
+
+        <div id="output"></div>
+
+        <div class="code-block">
+            <strong>Expected Go SSE endpoint format:</strong><br>
+            GET /api/sessions/:sessionId/stream<br>
+            Content-Type: text/event-stream<br>
+            <br>
+            <strong>JSONL event format:</strong><br>
+            {<br>
+            &nbsp;&nbsp;"type": "user" | "assistant" | "tool_use" | "tool_result",<br>
+            &nbsp;&nbsp;"timestamp": "2026-02-14T10:30:00Z",<br>
+            &nbsp;&nbsp;"content": "...",<br>
+            &nbsp;&nbsp;"metadata": {...}<br>
+            }
+        </div>
+    </div>
+
+    <script type="module">
+        import AnsiUp from 'https://esm.sh/ansi_up@6.0.2';
+
+        const ansi_up = new AnsiUp();
+        const output = document.getElementById('output');
+        const statusEl = document.getElementById('status');
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const sessionIdInput = document.getElementById('session-id');
+
+        let eventSource = null;
+
+        // Helper to append formatted HTML
+        function appendHTML(html) {
+            const div = document.createElement('div');
+            div.innerHTML = html;
+            output.appendChild(div);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        // Update connection status
+        function setStatus(state) {
+            statusEl.className = `status ${state}`;
+            statusEl.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+
+            connectBtn.disabled = state === 'connecting' || state === 'connected';
+            disconnectBtn.disabled = state === 'disconnected';
+        }
+
+        // Format Claude Code message event
+        function formatMessage(event) {
+            const { type, timestamp, content, metadata } = event;
+            const time = new Date(timestamp).toLocaleTimeString();
+            let ansiText = '';
+
+            switch(type) {
+                case 'user':
+                    ansiText = `\x1b[1;36m[${time}] User:\x1b[0m\n  ${content}\n\n`;
+                    break;
+
+                case 'assistant':
+                    // Handle streaming text for assistant messages
+                    ansiText = `\x1b[1;32m[${time}] Assistant:\x1b[0m\n  ${content}\n\n`;
+                    break;
+
+                case 'tool_use':
+                    const toolName = metadata?.name || 'Unknown';
+                    ansiText = `\x1b[1;33m[${time}] Tool Use: ${toolName}\x1b[0m\n`;
+                    if (metadata?.input) {
+                        ansiText += `\x1b[2m  ${JSON.stringify(metadata.input, null, 2)}\x1b[0m\n\n`;
+                    }
+                    break;
+
+                case 'tool_result':
+                    ansiText = `\x1b[1;34m[${time}] Tool Result:\x1b[0m\n`;
+                    ansiText += `\x1b[2m  ${content}\x1b[0m\n\n`;
+                    break;
+
+                case 'error':
+                    ansiText = `\x1b[1;31m[${time}] Error:\x1b[0m\n  \x1b[31m${content}\x1b[0m\n\n`;
+                    break;
+
+                default:
+                    ansiText = `\x1b[2m[${time}] ${type}: ${content}\x1b[0m\n\n`;
+            }
+
+            const html = ansi_up.ansi_to_html(ansiText);
+            appendHTML(html);
+        }
+
+        // Connect to SSE stream
+        window.connectSSE = function() {
+            const sessionId = sessionIdInput.value.trim() || 'demo';
+            const url = `/api/sessions/${sessionId}/stream`;
+
+            // For demo purposes, we'll simulate SSE since we don't have a real backend
+            // In production, this would be:
+            // eventSource = new EventSource(url);
+
+            setStatus('connecting');
+
+            // Simulate connection (remove this in production)
+            setTimeout(() => {
+                setStatus('connected');
+                simulateDemoStream();
+            }, 500);
+
+            /* Production code:
+            eventSource = new EventSource(url);
+
+            eventSource.onopen = () => {
+                setStatus('connected');
+                appendHTML(ansi_up.ansi_to_html('\x1b[2mConnected to session stream...\x1b[0m\n\n'));
+            };
+
+            eventSource.onmessage = (e) => {
+                try {
+                    const event = JSON.parse(e.data);
+                    formatMessage(event);
+                } catch (err) {
+                    console.error('Failed to parse event:', err);
+                }
+            };
+
+            eventSource.onerror = (err) => {
+                console.error('SSE error:', err);
+                setStatus('disconnected');
+                eventSource.close();
+                eventSource = null;
+
+                const errorText = '\x1b[1;31mConnection lost\x1b[0m\n\n';
+                appendHTML(ansi_up.ansi_to_html(errorText));
+            };
+            */
+        };
+
+        // Disconnect from SSE stream
+        window.disconnectSSE = function() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            setStatus('disconnected');
+            const msg = '\x1b[2mDisconnected from stream\x1b[0m\n\n';
+            appendHTML(ansi_up.ansi_to_html(msg));
+        };
+
+        // Demo simulation (remove in production)
+        function simulateDemoStream() {
+            const events = [
+                {
+                    type: 'user',
+                    timestamp: new Date().toISOString(),
+                    content: 'Can you help me implement a session replay viewer?'
+                },
+                {
+                    type: 'assistant',
+                    timestamp: new Date(Date.now() + 1000).toISOString(),
+                    content: 'I\'ll help you build a session replay viewer. Let me check what technologies we should use.'
+                },
+                {
+                    type: 'tool_use',
+                    timestamp: new Date(Date.now() + 2000).toISOString(),
+                    content: '',
+                    metadata: {
+                        name: 'WebSearch',
+                        input: { query: 'xterm.js vs ansi-to-html for log viewer' }
+                    }
+                },
+                {
+                    type: 'tool_result',
+                    timestamp: new Date(Date.now() + 3000).toISOString(),
+                    content: 'Found several options:\n- xterm.js: Full terminal emulator\n- ansi_up: Lightweight ANSI converter\n- ansi-to-html: Alternative converter'
+                },
+                {
+                    type: 'assistant',
+                    timestamp: new Date(Date.now() + 4000).toISOString(),
+                    content: 'Based on the research, I recommend using ansi_up for a lightweight session viewer. It\'s only 15KB and handles ANSI colors perfectly.'
+                }
+            ];
+
+            let i = 0;
+            const interval = setInterval(() => {
+                if (i < events.length) {
+                    formatMessage(events[i]);
+                    i++;
+                } else {
+                    clearInterval(interval);
+                    const done = '\x1b[2m--- End of demo stream ---\x1b[0m\n';
+                    appendHTML(ansi_up.ansi_to_html(done));
+                }
+            }, 1000);
+        }
+
+        // Initial message
+        const welcomeText = `\x1b[1;36mSession Replay Viewer - SSE Integration\x1b[0m
+\x1b[2mThis example shows how to stream JSONL events from a Go backend\x1b[0m
+\x1b[2m${'─'.repeat(80)}\x1b[0m
+
+`;
+        appendHTML(ansi_up.ansi_to_html(welcomeText));
+
+    </script>
+</body>
+</html>

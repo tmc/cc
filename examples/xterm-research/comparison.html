@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>xterm.js vs ansi_up - Side by Side Comparison</title>
+
+    <!-- xterm.js CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        h1 {
+            margin: 0 0 20px 0;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .panel {
+            border: 1px solid #333;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .panel h2 {
+            background: #252526;
+            margin: 0;
+            padding: 15px;
+            font-size: 16px;
+            border-bottom: 1px solid #333;
+        }
+        #terminal {
+            height: 500px;
+        }
+        #ansi-output {
+            height: 500px;
+            background: #0e0e0e;
+            padding: 20px;
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .controls {
+            margin-bottom: 15px;
+        }
+        button {
+            padding: 8px 16px;
+            margin-right: 10px;
+            background: #0e639c;
+            border: none;
+            color: white;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1177bb;
+        }
+        .pros-cons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+            padding: 20px;
+            background: #252526;
+            border-radius: 4px;
+        }
+        .pros-cons h3 {
+            margin-top: 0;
+        }
+        .pros-cons ul {
+            padding-left: 20px;
+        }
+        .pros {
+            color: #4ec9b0;
+        }
+        .cons {
+            color: #f48771;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>xterm.js vs ansi_up - Comparison for Session Replay</h1>
+
+        <div class="controls">
+            <button onclick="addToAll('user')">Add User Message</button>
+            <button onclick="addToAll('assistant')">Add Assistant Message</button>
+            <button onclick="addToAll('tool_use')">Add Tool Use</button>
+            <button onclick="addToAll('tool_result')">Add Tool Result</button>
+            <button onclick="clearAll()">Clear Both</button>
+        </div>
+
+        <div class="comparison">
+            <div class="panel">
+                <h2>xterm.js (Full Terminal Emulator)</h2>
+                <div id="terminal"></div>
+            </div>
+
+            <div class="panel">
+                <h2>ansi_up (Lightweight ANSI-to-HTML)</h2>
+                <div id="ansi-output"></div>
+            </div>
+        </div>
+
+        <div class="pros-cons">
+            <div>
+                <h3>xterm.js</h3>
+                <div class="pros">
+                    <strong>Pros:</strong>
+                    <ul>
+                        <li>Full terminal emulation (cursor control, scrollback)</li>
+                        <li>Perfect for real TTY output with ANSI codes</li>
+                        <li>Supports complex terminal features (DEC modes, etc.)</li>
+                        <li>Optional WebGL rendering for performance</li>
+                        <li>Built-in search, fit addons</li>
+                    </ul>
+                </div>
+                <div class="cons">
+                    <strong>Cons:</strong>
+                    <ul>
+                        <li>Larger bundle size (~300KB)</li>
+                        <li>More complex to set up</li>
+                        <li>Overkill for simple log viewing</li>
+                        <li>Text selection can be quirky</li>
+                        <li>Requires more memory for large scrollback</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div>
+                <h3>ansi_up</h3>
+                <div class="pros">
+                    <strong>Pros:</strong>
+                    <ul>
+                        <li>Very lightweight (~15KB)</li>
+                        <li>Simple to use (one function call)</li>
+                        <li>Easy text selection and copying</li>
+                        <li>Standard DOM rendering</li>
+                        <li>Works well with search, styling</li>
+                        <li>Better for mixed content (markdown + code)</li>
+                    </ul>
+                </div>
+                <div class="cons">
+                    <strong>Cons:</strong>
+                    <ul>
+                        <li>No terminal-specific features</li>
+                        <li>Manual scrolling/layout management</li>
+                        <li>Less authentic terminal feel</li>
+                        <li>Need to convert \\n to &lt;br&gt; manually</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/+esm';
+        import { FitAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/+esm';
+        import AnsiUp from 'https://esm.sh/ansi_up@6.0.2';
+
+        // Initialize xterm.js
+        const term = new Terminal({
+            cursorBlink: false,
+            disableStdin: true,
+            fontSize: 13,
+            fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+            theme: {
+                background: '#0e0e0e',
+                foreground: '#d4d4d4',
+            },
+            rows: 25,
+            cols: 80
+        });
+
+        const fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById('terminal'));
+        fitAddon.fit();
+
+        // Initialize ansi_up
+        const ansi_up = new AnsiUp();
+        const ansiOutput = document.getElementById('ansi-output');
+
+        // Common message formatting
+        function createMessage(type, content) {
+            const timestamp = new Date().toLocaleTimeString();
+            let ansiText = '';
+
+            switch(type) {
+                case 'user':
+                    ansiText = `\x1b[1;36m[${timestamp}] User:\x1b[0m\n  ${content}\n\n`;
+                    break;
+                case 'assistant':
+                    ansiText = `\x1b[1;32m[${timestamp}] Assistant:\x1b[0m\n  ${content}\n\n`;
+                    break;
+                case 'tool_use':
+                    ansiText = `\x1b[1;33m[${timestamp}] Tool Use: Read\x1b[0m\n\x1b[2m  ${JSON.stringify(content, null, 2)}\x1b[0m\n\n`;
+                    break;
+                case 'tool_result':
+                    ansiText = `\x1b[1;34m[${timestamp}] Tool Result:\x1b[0m\n\x1b[2m  ${content}\x1b[0m\n\n`;
+                    break;
+            }
+
+            return ansiText;
+        }
+
+        // Add to xterm.js
+        function addToXterm(ansiText) {
+            // Convert \n to \r\n for xterm
+            term.write(ansiText.replace(/\n/g, '\r\n'));
+        }
+
+        // Add to ansi_up
+        function addToAnsiUp(ansiText) {
+            const html = ansi_up.ansi_to_html(ansiText);
+            const div = document.createElement('div');
+            div.innerHTML = html;
+            ansiOutput.appendChild(div);
+            ansiOutput.scrollTop = ansiOutput.scrollHeight;
+        }
+
+        // Add message to both
+        window.addToAll = function(type) {
+            let content;
+            switch(type) {
+                case 'user':
+                    content = 'Can you help me debug this Go code?';
+                    break;
+                case 'assistant':
+                    content = 'I\'ll help you debug that code. Let me read the file first.';
+                    break;
+                case 'tool_use':
+                    content = { file_path: '/Volumes/tmc/go/src/github.com/tmc/cc/main.go' };
+                    break;
+                case 'tool_result':
+                    content = 'package main\\n\\nimport "fmt"\\n\\nfunc main() {\\n    fmt.Println("Hello!")\\n}';
+                    break;
+            }
+
+            const message = createMessage(type, content);
+            addToXterm(message);
+            addToAnsiUp(message);
+        };
+
+        window.clearAll = function() {
+            term.clear();
+            ansiOutput.innerHTML = '';
+        };
+
+        // Initial messages
+        const welcome = '\x1b[1;36mSession Replay Viewer\x1b[0m\n\x1b[2m' + '─'.repeat(60) + '\x1b[0m\n\n';
+        addToXterm(welcome);
+        addToAnsiUp(welcome);
+
+    </script>
+</body>
+</html>
