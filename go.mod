@@ -40,4 +40,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/tmc/misc/proxyman => /Volumes/tmc/go/src/github.com/tmc/misc/proxyman
+replace github.com/tmc/misc/proxyman => ../misc/proxyman
