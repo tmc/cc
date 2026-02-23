@@ -137,9 +137,10 @@ type Hit struct {
 	DurationSecs int    `json:"duration_secs,omitempty"`
 	Sparkline    string `json:"sparkline,omitempty"`
 	Compactions  int    `json:"compactions,omitempty"`
-	IT2Sends     int    `json:"it2_sends,omitempty"`
-	IT2Screens   int `json:"it2_screens,omitempty"`
-	IT2Splits    int `json:"it2_splits,omitempty"`
+	SubagentSpawns int `json:"subagent_spawns,omitempty"`
+	IT2Sends       int `json:"it2_sends,omitempty"`
+	IT2Screens     int `json:"it2_screens,omitempty"`
+	IT2Splits      int `json:"it2_splits,omitempty"`
 
 	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"`
 
