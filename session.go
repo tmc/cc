@@ -7,21 +7,24 @@ import (
 
 // Entry is a single line in a Claude Code JSONL session file.
 type Entry struct {
-	Type      string    `json:"type"`
-	SessionID string    `json:"sessionId,omitempty"`
-	UUID      string    `json:"uuid,omitempty"`
-	Timestamp time.Time `json:"timestamp,omitempty"`
+	Type       string    `json:"type"`
+	SessionID  string    `json:"sessionId,omitempty"`
+	UUID       string    `json:"uuid,omitempty"`
+	Timestamp  time.Time `json:"timestamp,omitempty"`
+	Originator string    `json:"originator,omitempty"`
+	Source     string    `json:"source,omitempty"`
+	Phase      string    `json:"phase,omitempty"`
 
 	// User/assistant message fields.
-	ParentUUID string   `json:"parentUuid,omitempty"`
-	LeafUUID   string   `json:"leafUuid,omitempty"`
-	IsSidechain bool    `json:"isSidechain,omitempty"`
-	UserType   string   `json:"userType,omitempty"`
-	CWD        string   `json:"cwd,omitempty"`
-	Version    string   `json:"version,omitempty"`
-	GitBranch  string   `json:"gitBranch,omitempty"`
-	Slug       string   `json:"slug,omitempty"`
-	Message    *Message `json:"message,omitempty"`
+	ParentUUID  string   `json:"parentUuid,omitempty"`
+	LeafUUID    string   `json:"leafUuid,omitempty"`
+	IsSidechain bool     `json:"isSidechain,omitempty"`
+	UserType    string   `json:"userType,omitempty"`
+	CWD         string   `json:"cwd,omitempty"`
+	Version     string   `json:"version,omitempty"`
+	GitBranch   string   `json:"gitBranch,omitempty"`
+	Slug        string   `json:"slug,omitempty"`
+	Message     *Message `json:"message,omitempty"`
 
 	// Custom title set via /rename command.
 	CustomTitle string `json:"customTitle,omitempty"`
@@ -63,12 +66,12 @@ type Entry struct {
 
 // Message is the core message object with role and content.
 type Message struct {
-	ID               string          `json:"id,omitempty"`
-	Role             string          `json:"role"`
-	Content          json.RawMessage `json:"content"`
-	Model            string          `json:"model,omitempty"`
-	StopReason       string          `json:"stop_reason,omitempty"`
-	Usage            *Usage          `json:"usage,omitempty"`
+	ID         string          `json:"id,omitempty"`
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content"`
+	Model      string          `json:"model,omitempty"`
+	StopReason string          `json:"stop_reason,omitempty"`
+	Usage      *Usage          `json:"usage,omitempty"`
 }
 
 // ContentBlock is a single block within a message's content array.
@@ -85,11 +88,11 @@ type ContentBlock struct {
 
 // Usage holds token usage information.
 type Usage struct {
-	InputTokens              int    `json:"input_tokens"`
-	OutputTokens             int    `json:"output_tokens"`
-	CacheReadInputTokens     int    `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens int    `json:"cache_creation_input_tokens,omitempty"`
-	ServiceTier              string `json:"service_tier,omitempty"`
+	InputTokens              int                  `json:"input_tokens"`
+	OutputTokens             int                  `json:"output_tokens"`
+	CacheReadInputTokens     int                  `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int                  `json:"cache_creation_input_tokens,omitempty"`
+	ServiceTier              string               `json:"service_tier,omitempty"`
 	CacheCreation            *CacheCreationDetail `json:"cache_creation,omitempty"`
 }
 
@@ -131,11 +134,11 @@ type ToolUseResult struct {
 	TaskID string        `json:"taskId,omitempty"`
 
 	// Usage for subagent results.
-	Usage *Usage `json:"usage,omitempty"`
-	DurationMs float64 `json:"durationMs,omitempty"`
-	TotalDurationMs float64 `json:"totalDurationMs,omitempty"`
-	TotalTokens     int     `json:"totalTokens,omitempty"`
-	TotalToolUseCount int   `json:"totalToolUseCount,omitempty"`
+	Usage             *Usage  `json:"usage,omitempty"`
+	DurationMs        float64 `json:"durationMs,omitempty"`
+	TotalDurationMs   float64 `json:"totalDurationMs,omitempty"`
+	TotalTokens       int     `json:"totalTokens,omitempty"`
+	TotalToolUseCount int     `json:"totalToolUseCount,omitempty"`
 }
 
 // FileResult holds file read results.

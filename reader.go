@@ -31,14 +31,350 @@ func (r *Reader) Next() bool {
 		if line == "" {
 			continue
 		}
-		r.entry = Entry{}
-		if err := json.Unmarshal([]byte(line), &r.entry); err != nil {
+		entry, ok := decodeEntryLine([]byte(line))
+		if !ok {
 			continue
 		}
+		r.entry = entry
 		return true
 	}
 	r.err = r.scanner.Err()
 	return false
+}
+
+type codexEnvelope struct {
+	Timestamp time.Time       `json:"timestamp"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+func decodeEntryLine(line []byte) (Entry, bool) {
+	var env codexEnvelope
+	if err := json.Unmarshal(line, &env); err != nil {
+		return Entry{}, false
+	}
+	if !isCodexEnvelopeType(env.Type) {
+		var entry Entry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			return Entry{}, false
+		}
+		return entry, true
+	}
+
+	switch env.Type {
+	case "session_meta":
+		return decodeCodexSessionMeta(env)
+	case "response_item":
+		return decodeCodexResponseItem(env)
+	case "compacted":
+		return Entry{
+			Type:      "system",
+			Subtype:   "compact_boundary",
+			Timestamp: env.Timestamp,
+		}, true
+	case "event_msg", "turn_context", "reasoning", "ghost_snapshot", "web_search_call":
+		return Entry{}, false
+	default:
+		return Entry{}, false
+	}
+}
+
+func isCodexEnvelopeType(t string) bool {
+	switch t {
+	case "session_meta", "response_item", "event_msg", "turn_context", "reasoning", "ghost_snapshot", "web_search_call", "compacted":
+		return true
+	default:
+		return false
+	}
+}
+
+func decodeCodexSessionMeta(env codexEnvelope) (Entry, bool) {
+	var payload struct {
+		ID         string `json:"id"`
+		Timestamp  string `json:"timestamp"`
+		CWD        string `json:"cwd"`
+		Originator string `json:"originator"`
+		Source     string `json:"source"`
+		CLIVersion string `json:"cli_version"`
+	}
+	if err := json.Unmarshal(env.Payload, &payload); err != nil {
+		return Entry{}, false
+	}
+
+	ts := env.Timestamp
+	if ts.IsZero() && payload.Timestamp != "" {
+		if parsed, err := time.Parse(time.RFC3339, payload.Timestamp); err == nil {
+			ts = parsed
+		}
+	}
+
+	return Entry{
+		Type:       "system",
+		Subtype:    "session_meta",
+		SessionID:  payload.ID,
+		Timestamp:  ts,
+		CWD:        payload.CWD,
+		Version:    payload.CLIVersion,
+		Originator: payload.Originator,
+		Source:     payload.Source,
+	}, true
+}
+
+func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
+	var payload struct {
+		Type      string          `json:"type"`
+		Role      string          `json:"role"`
+		Phase     string          `json:"phase"`
+		Content   json.RawMessage `json:"content"`
+		Name      string          `json:"name"`
+		CallID    string          `json:"call_id"`
+		Arguments json.RawMessage `json:"arguments"`
+		Input     json.RawMessage `json:"input"`
+		Output    json.RawMessage `json:"output"`
+	}
+	if err := json.Unmarshal(env.Payload, &payload); err != nil {
+		return Entry{}, false
+	}
+
+	switch payload.Type {
+	case "message":
+		if payload.Role != "user" && payload.Role != "assistant" {
+			return Entry{}, false
+		}
+		blocks := codexTextBlocks(payload.Content)
+		if len(blocks) == 0 {
+			return Entry{}, false
+		}
+		content, _ := json.Marshal(blocks)
+		return Entry{
+			Type:      payload.Role,
+			Timestamp: env.Timestamp,
+			Phase:     payload.Phase,
+			Message: &Message{
+				Role:    payload.Role,
+				Content: content,
+			},
+		}, true
+
+	case "function_call", "custom_tool_call":
+		toolName := payload.Name
+		toolInput := payload.Input
+		if payload.Type == "function_call" {
+			toolInput = payload.Arguments
+		}
+		toolUseName := toolName
+		if toolName == "exec_command" || toolName == "shell" {
+			toolUseName = "Bash"
+		}
+		normalized := normalizeCodexToolInput(toolName, toolInput)
+		content, _ := json.Marshal([]ContentBlock{
+			{
+				Type:  "tool_use",
+				ID:    payload.CallID,
+				Name:  toolUseName,
+				Input: normalized,
+			},
+		})
+		return Entry{
+			Type:      "assistant",
+			UUID:      payload.CallID,
+			Timestamp: env.Timestamp,
+			Phase:     payload.Phase,
+			Message: &Message{
+				ID:      payload.CallID,
+				Role:    "assistant",
+				Content: content,
+			},
+		}, true
+
+	case "function_call_output", "custom_tool_call_output":
+		stdout, status, success, errText := parseCodexToolOutput(payload.Output)
+		content, _ := json.Marshal([]ContentBlock{
+			{
+				Type:      "tool_result",
+				ToolUseID: payload.CallID,
+				Content:   stdout,
+				IsError:   !success,
+			},
+		})
+		res := &ToolUseResult{
+			Type:    "tool_result",
+			Stdout:  stdout,
+			Status:  status,
+			Success: success,
+		}
+		if errText != "" {
+			res.Error = errText
+		}
+		return Entry{
+			Type:      "user",
+			UUID:      payload.CallID,
+			Timestamp: env.Timestamp,
+			Phase:     payload.Phase,
+			Message: &Message{
+				Role:    "user",
+				Content: content,
+			},
+			ToolUseResult: res,
+		}, true
+	case "reasoning", "ghost_snapshot", "web_search_call":
+		return Entry{}, false
+	default:
+		return Entry{}, false
+	}
+}
+
+func codexTextBlocks(raw json.RawMessage) []ContentBlock {
+	var items []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &items); err == nil {
+		blocks := make([]ContentBlock, 0, len(items))
+		for _, item := range items {
+			text := strings.TrimSpace(item.Text)
+			if text == "" {
+				continue
+			}
+			blocks = append(blocks, ContentBlock{Type: "text", Text: text})
+		}
+		if len(blocks) > 0 {
+			return blocks
+		}
+	}
+	text := strings.TrimSpace(ExtractAnyText(raw))
+	if text == "" {
+		return nil
+	}
+	return []ContentBlock{{Type: "text", Text: text}}
+}
+
+func normalizeCodexToolInput(name string, raw json.RawMessage) json.RawMessage {
+	args := decodeCodexArgument(raw)
+	switch name {
+	case "exec_command":
+		command := ""
+		if v, ok := args["cmd"].(string); ok {
+			command = strings.TrimSpace(v)
+		}
+		if command == "" {
+			if v, ok := args["command"].(string); ok {
+				command = strings.TrimSpace(v)
+			}
+		}
+		b, _ := json.Marshal(map[string]string{"command": command})
+		return b
+
+	case "shell":
+		command := codexShellCommand(args["command"])
+		if command == "" {
+			if v, ok := args["command"].(string); ok {
+				command = strings.TrimSpace(v)
+			}
+		}
+		b, _ := json.Marshal(map[string]string{"command": command})
+		return b
+	}
+
+	if len(args) > 0 {
+		b, _ := json.Marshal(args)
+		return b
+	}
+	var anyVal any
+	if err := json.Unmarshal(raw, &anyVal); err == nil {
+		b, _ := json.Marshal(map[string]any{"input": anyVal})
+		return b
+	}
+	b, _ := json.Marshal(map[string]string{"input": string(raw)})
+	return b
+}
+
+func decodeCodexArgument(raw json.RawMessage) map[string]any {
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		raw = json.RawMessage(str)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return obj
+	}
+	return nil
+}
+
+func codexShellCommand(v any) string {
+	switch x := v.(type) {
+	case string:
+		return strings.TrimSpace(x)
+	case []any:
+		parts := make([]string, 0, len(x))
+		for _, it := range x {
+			if s, ok := it.(string); ok && strings.TrimSpace(s) != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) >= 3 && parts[1] == "-lc" {
+			return strings.TrimSpace(parts[2])
+		}
+		return strings.TrimSpace(strings.Join(parts, " "))
+	default:
+		return ""
+	}
+}
+
+func parseCodexToolOutput(raw json.RawMessage) (stdout, status string, success bool, errText string) {
+	output := decodeCodexOutputString(raw)
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return "", "success", true, ""
+	}
+
+	var wrapped struct {
+		Output   string `json:"output"`
+		Stderr   string `json:"stderr"`
+		Error    string `json:"error"`
+		Metadata struct {
+			ExitCode int `json:"exit_code"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal([]byte(trimmed), &wrapped) == nil && (wrapped.Output != "" || wrapped.Stderr != "" || wrapped.Error != "" || strings.Contains(trimmed, `"exit_code"`)) {
+		stdout = wrapped.Output
+		if stdout == "" {
+			stdout = wrapped.Stderr
+		}
+		if stdout == "" {
+			stdout = trimmed
+		}
+		if wrapped.Metadata.ExitCode == 0 && wrapped.Error == "" && wrapped.Stderr == "" {
+			return stdout, "success", true, ""
+		}
+		errText = wrapped.Error
+		if errText == "" {
+			errText = wrapped.Stderr
+		}
+		if errText == "" {
+			errText = stdout
+		}
+		return stdout, "error", false, errText
+	}
+
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "error") || strings.Contains(lower, "failed") || strings.Contains(lower, "panic") {
+		return trimmed, "error", false, trimmed
+	}
+	return trimmed, "success", true, ""
+}
+
+func decodeCodexOutputString(raw json.RawMessage) string {
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		return str
+	}
+	var anyVal any
+	if err := json.Unmarshal(raw, &anyVal); err == nil {
+		b, _ := json.Marshal(anyVal)
+		return string(b)
+	}
+	return string(raw)
 }
 
 // Entry returns the current entry.
@@ -152,19 +488,7 @@ func Summarize(file string, entries []Entry) SessionSummary {
 
 // ExtractText pulls the first text content from a message content field.
 func ExtractText(raw json.RawMessage) string {
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return collapseWhitespace(s, 200)
-	}
-	var blocks []ContentBlock
-	if json.Unmarshal(raw, &blocks) == nil {
-		for _, b := range blocks {
-			if b.Type == "text" && b.Text != "" {
-				return collapseWhitespace(b.Text, 200)
-			}
-		}
-	}
-	return ""
+	return collapseWhitespace(ExtractAnyText(raw), 200)
 }
 
 func collapseWhitespace(s string, max int) string {
@@ -176,7 +500,8 @@ func collapseWhitespace(s string, max int) string {
 	return s
 }
 
-// FindSessionFiles finds JSONL session files under ~/.claude/projects/ and ~/.gemini/projects/.
+// FindSessionFiles finds JSONL session files under ~/.claude/projects/,
+// ~/.gemini/projects/, and ~/.codex/sessions/.
 // It excludes subagent files and filters by modification time.
 func FindSessionFiles(since time.Duration, project string) ([]string, error) {
 	ch, err := ClaudeHome()
@@ -184,17 +509,26 @@ func FindSessionFiles(since time.Duration, project string) ([]string, error) {
 		return nil, err
 	}
 	gh, _ := GeminiHome()
+	xh, _ := CodexHome()
 
 	cutoff := time.Now().Add(-since)
 	var files []string
 
-	dirs := []string{filepath.Join(ch, "projects")}
+	type rootDir struct {
+		path string
+		kind string
+	}
+
+	dirs := []rootDir{{path: filepath.Join(ch, "projects"), kind: "claude"}}
 	if gh != "" {
-		dirs = append(dirs, filepath.Join(gh, "projects"))
+		dirs = append(dirs, rootDir{path: filepath.Join(gh, "projects"), kind: "gemini"})
+	}
+	if xh != "" {
+		dirs = append(dirs, rootDir{path: filepath.Join(xh, "sessions"), kind: "codex"})
 	}
 
 	for _, dir := range dirs {
-		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		filepath.Walk(dir.path, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return nil
 			}
@@ -208,9 +542,17 @@ func FindSessionFiles(since time.Duration, project string) ([]string, error) {
 				return nil
 			}
 			if project != "" {
-				rel, _ := filepath.Rel(dir, path)
-				if !strings.Contains(strings.ToLower(rel), strings.ToLower(project)) {
-					return nil
+				q := strings.ToLower(project)
+				switch dir.kind {
+				case "codex":
+					if !codexPathMatchesProject(path, q) {
+						return nil
+					}
+				default:
+					rel, _ := filepath.Rel(dir.path, path)
+					if !strings.Contains(strings.ToLower(rel), q) {
+						return nil
+					}
 				}
 			}
 			files = append(files, path)
@@ -218,4 +560,17 @@ func FindSessionFiles(since time.Duration, project string) ([]string, error) {
 		})
 	}
 	return files, nil
+}
+
+func codexPathMatchesProject(path, query string) bool {
+	entries, err := ReadFile(path)
+	if err != nil {
+		return strings.Contains(strings.ToLower(path), query)
+	}
+	for _, e := range entries {
+		if e.CWD != "" && strings.Contains(strings.ToLower(e.CWD), query) {
+			return true
+		}
+	}
+	return strings.Contains(strings.ToLower(path), query)
 }

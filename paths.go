@@ -31,6 +31,19 @@ func GeminiHome() (string, error) {
 	return filepath.Join(home, ".gemini"), nil
 }
 
+// CodexHome returns the base directory for Codex data.
+// It uses CODEX_HOME if set, otherwise defaults to ~/.codex.
+func CodexHome() (string, error) {
+	if h := os.Getenv("CODEX_HOME"); h != "" {
+		return h, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".codex"), nil
+}
+
 // DecodeSegments tries all possible decodings of dash-separated path segments
 // and returns the first existing path.
 func DecodeSegments(current string, remaining []string) (string, bool) {
