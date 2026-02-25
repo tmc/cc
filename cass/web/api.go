@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -425,28 +424,72 @@ func (s *Server) tailSession(ctx context.Context, w http.ResponseWriter, flusher
 }
 
 func readSessionEntries(path string) ([]cc.Entry, error) {
-	f, err := os.Open(path)
+	// Gemini CLI chat files are JSON objects, not JSONL.
+	if strings.HasSuffix(path, ".json") && strings.HasPrefix(filepath.Base(path), "session-") {
+		return readGeminiJSONSessionEntries(path)
+	}
+	return cc.ReadFile(path)
+}
+
+func readGeminiJSONSessionEntries(path string) ([]cc.Entry, error) {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-
-	var entries []cc.Entry
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 256*1024), 10*1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
-		var entry cc.Entry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			continue
-		}
-		entries = append(entries, entry)
+	var sess struct {
+		SessionID string `json:"sessionId"`
+		Messages  []struct {
+			ID        string          `json:"id"`
+			Timestamp string          `json:"timestamp"`
+			Type      string          `json:"type"`
+			Content   json.RawMessage `json:"content"`
+			Model     string          `json:"model"`
+			Tokens    struct {
+				Input  int `json:"input"`
+				Output int `json:"output"`
+				Cached int `json:"cached"`
+			} `json:"tokens"`
+		} `json:"messages"`
 	}
-	return entries, scanner.Err()
+	if err := json.Unmarshal(b, &sess); err != nil {
+		return nil, err
+	}
+
+	entries := make([]cc.Entry, 0, len(sess.Messages))
+	for _, m := range sess.Messages {
+		if len(m.Content) == 0 {
+			continue
+		}
+		if cc.ExtractAnyText(m.Content) == "" {
+			continue
+		}
+		role := "assistant"
+		if m.Type == "user" {
+			role = "user"
+		}
+		ts, _ := time.Parse(time.RFC3339, m.Timestamp)
+		e := cc.Entry{
+			Type:      "message",
+			SessionID: sess.SessionID,
+			UUID:      m.ID,
+			Timestamp: ts,
+			Message: &cc.Message{
+				ID:      m.ID,
+				Role:    role,
+				Content: m.Content,
+				Model:   m.Model,
+			},
+		}
+		if role == "assistant" {
+			e.Message.Usage = &cc.Usage{
+				InputTokens:          m.Tokens.Input,
+				OutputTokens:         m.Tokens.Output,
+				CacheReadInputTokens: m.Tokens.Cached,
+			}
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
 }
 
 // readSessionEntriesWithSubagents reads the parent session JSONL and merges
@@ -493,9 +536,6 @@ func readSessionEntriesWithSubagents(path string) ([]cc.Entry, error) {
 	})
 	return entries, nil
 }
-
-// readSessionEntries could also use cc.ReadFile but we inline to avoid
-// potential issues with the large buffer in different contexts.
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -722,7 +762,7 @@ func (s *Server) handleLimits(w http.ResponseWriter, r *http.Request) {
 	bucketParam := q.Get("bucket") // "" means all three
 
 	type bucketTrend struct {
-		Bucket    string                  `json:"bucket"`
+		Bucket    string                   `json:"bucket"`
 		Snapshots []cass.RateLimitSnapshot `json:"snapshots"`
 	}
 

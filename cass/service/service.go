@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,6 +72,7 @@ func defaultCollectors() []cass.Collector {
 	return []cass.Collector{
 		&collector.ClaudeCode{},
 		&collector.GeminiCLI{}, // Added for Gemini CLI support
+		&collector.Codex{},
 		&collector.OpenClaw{},
 		&collector.Antigravity{},
 		&collector.Cursor{},
@@ -118,7 +120,7 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 		}
 
 		// Support passing arbitrary extra paths from the CLI to capable collectors.
-		if c.Name() == "claude-code" || c.Name() == "gemini-cli" {
+		if c.Name() == "claude-code" || c.Name() == "gemini-cli" || c.Name() == "codex" {
 			paths = append(paths, extraPaths...)
 		}
 
@@ -231,33 +233,65 @@ func (s *Service) Graph(ctx context.Context, since time.Time) (*cass.GraphData, 
 // IndexPaths re-indexes session files by their parent directories.
 // Used by the file watcher for incremental updates without a full scan.
 func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, error) {
-	// Deduplicate parent directories.
-	dirs := make(map[string]struct{})
-	for _, p := range filePaths {
-		dirs[filepath.Dir(p)] = struct{}{}
-	}
-	dirList := make([]string, 0, len(dirs))
-	for d := range dirs {
-		dirList = append(dirList, d)
+	type pathGroup struct {
+		collector cass.Collector
+		dirs      map[string]struct{}
 	}
 
-	c := &collector.ClaudeCode{}
-	ch := make(chan cass.Session, 64)
-	go func() {
-		_ = c.Scan(ctx, cass.ScanConfig{Paths: dirList}, ch)
-	}()
+	groups := map[string]*pathGroup{}
+	for _, path := range filePaths {
+		col := collectorForPath(path)
+		name := col.Name()
+		g := groups[name]
+		if g == nil {
+			g = &pathGroup{
+				collector: col,
+				dirs:      map[string]struct{}{},
+			}
+			groups[name] = g
+		}
+		g.dirs[filepath.Dir(path)] = struct{}{}
+	}
 
-	var batch []cass.Session
-	for sess := range ch {
-		batch = append(batch, sess)
+	total := 0
+	for _, g := range groups {
+		dirList := make([]string, 0, len(g.dirs))
+		for dir := range g.dirs {
+			dirList = append(dirList, dir)
+		}
+
+		ch := make(chan cass.Session, 64)
+		go func(col cass.Collector, paths []string) {
+			_ = col.Scan(ctx, cass.ScanConfig{Paths: paths}, ch)
+		}(g.collector, dirList)
+
+		var batch []cass.Session
+		for sess := range ch {
+			batch = append(batch, sess)
+		}
+		if len(batch) == 0 {
+			continue
+		}
+		if err := s.store.BatchIndex(ctx, batch); err != nil {
+			return 0, fmt.Errorf("index paths: %w", err)
+		}
+		total += len(batch)
 	}
-	if len(batch) == 0 {
-		return 0, nil
+
+	return total, nil
+}
+
+func collectorForPath(path string) cass.Collector {
+	path = strings.ToLower(path)
+	sep := string(filepath.Separator)
+	switch {
+	case strings.Contains(path, sep+".codex"+sep):
+		return &collector.Codex{}
+	case strings.Contains(path, sep+".gemini"+sep):
+		return &collector.GeminiCLI{}
+	default:
+		return &collector.ClaudeCode{}
 	}
-	if err := s.store.BatchIndex(ctx, batch); err != nil {
-		return 0, fmt.Errorf("index paths: %w", err)
-	}
-	return len(batch), nil
 }
 
 // IndexArtifactDirs scans ~/.it2/sessions/*/proxy-traffic.*.jsonl files,

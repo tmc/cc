@@ -129,7 +129,7 @@ func NewFileWatcher(broker *SSEBroker, log *slog.Logger, reindex ReindexFunc) (*
 	}, nil
 }
 
-// Start begins watching ~/.claude/projects/ for session file changes.
+// Start begins watching known session roots for file changes.
 func (fw *FileWatcher) Start(ctx context.Context) {
 	defer fw.w.Close()
 
@@ -149,6 +149,14 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 		geminiRoot := filepath.Join(gh, "projects")
 		if err := fw.addDirRecursive(geminiRoot); err != nil {
 			fw.log.Warn("watch dir", "path", geminiRoot, "err", err)
+		}
+	}
+
+	xh, err := cc.CodexHome()
+	if err == nil && xh != "" {
+		codexRoot := filepath.Join(xh, "sessions")
+		if err := fw.addDirRecursive(codexRoot); err != nil {
+			fw.log.Warn("watch dir", "path", codexRoot, "err", err)
 		}
 	}
 

@@ -5,4 +5,5 @@
 //
 // Currently supported agents:
 //   - Claude Code: ~/.claude/projects/ JSONL session files
+//   - Codex: ~/.codex/sessions/ JSONL session files
 package collector
