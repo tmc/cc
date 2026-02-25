@@ -84,14 +84,11 @@ func run() error {
 	}
 
 	for _, m := range matches {
-		bin := "claude"
-		if strings.Contains(m.FullPath, ".gemini") {
-			bin = "gemini"
-		}
+		bin, args := resumeInvocation(m)
 		if *launchFlag {
-			return launchAgent(bin, m.ProjectPath, m.SessionID)
+			return launchAgent(bin, args, m.ProjectPath)
 		}
-		fmt.Printf("cd %s; %s -r %s\n", m.ProjectPath, bin, m.SessionID)
+		fmt.Println(renderResumeCommand(m.ProjectPath, bin, args))
 	}
 	return nil
 }
@@ -121,15 +118,25 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	dirs := []string{filepath.Join(ch, "projects")}
-	
+	type searchRoot struct {
+		dir  string
+		kind string
+	}
+	roots := []searchRoot{{dir: filepath.Join(ch, "projects"), kind: "claude"}}
+
 	gh, _ := cc.GeminiHome()
 	if gh != "" {
-		dirs = append(dirs, filepath.Join(gh, "projects"))
+		roots = append(roots, searchRoot{dir: filepath.Join(gh, "projects"), kind: "gemini"})
+	}
+	xh, _ := cc.CodexHome()
+	if xh != "" {
+		roots = append(roots, searchRoot{dir: filepath.Join(xh, "sessions"), kind: "codex"})
 	}
 
 	args := []string{"-l", query}
-	args = append(args, dirs...)
+	for _, root := range roots {
+		args = append(args, root.dir)
+	}
 	cmd := exec.Command("rg", args...)
 	out, err := cmd.Output()
 	if err != nil {
@@ -147,24 +154,49 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 			continue
 		}
 
-		sessionID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-		if !validSessionID(sessionID) {
-			continue
-		}
-		
-		var rel string
-		for _, d := range dirs {
-			if strings.HasPrefix(path, d) {
-				rel, _ = filepath.Rel(d, path)
+		var (
+			rootDir  string
+			rootKind string
+		)
+		for _, root := range roots {
+			if strings.HasPrefix(path, root.dir) {
+				rootDir = root.dir
+				rootKind = root.kind
 				break
 			}
 		}
-
-		parts := strings.SplitN(rel, string(os.PathSeparator), 2)
-		if len(parts) < 1 {
+		if rootDir == "" {
 			continue
 		}
-		projectPath := DecodePath(parts[0])
+
+		sessionID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+		projectPath := filepath.Dir(path)
+		switch rootKind {
+		case "codex":
+			entries, err := cc.ReadFile(path)
+			if err == nil {
+				sum := cc.Summarize(path, entries)
+				if sum.SessionID != "" {
+					sessionID = sum.SessionID
+				}
+				if sum.CWD != "" {
+					projectPath = sum.CWD
+				}
+			}
+		default:
+			rel, err := filepath.Rel(rootDir, path)
+			if err != nil {
+				continue
+			}
+			parts := strings.SplitN(rel, string(os.PathSeparator), 2)
+			if len(parts) < 1 {
+				continue
+			}
+			projectPath = DecodePath(parts[0])
+		}
+		if !validSessionID(sessionID) {
+			continue
+		}
 
 		info, err := os.Stat(path)
 		if err != nil {
@@ -253,11 +285,41 @@ func containsAny(query string, fields ...string) bool {
 	return false
 }
 
-func launchAgent(bin, projectPath, sessionID string) error {
-	if err := os.Chdir(projectPath); err != nil {
-		return fmt.Errorf("chdir %s: %w", projectPath, err)
+func resumeInvocation(m cc.IndexEntry) (string, []string) {
+	switch {
+	case strings.Contains(m.FullPath, string(filepath.Separator)+".codex"+string(filepath.Separator)):
+		if m.SessionID != "" {
+			return "codex", []string{"resume", m.SessionID}
+		}
+		return "codex", []string{"resume"}
+	case strings.Contains(m.FullPath, string(filepath.Separator)+".gemini"+string(filepath.Separator)):
+		if m.SessionID != "" {
+			return "gemini", []string{"-r", m.SessionID}
+		}
+		return "gemini", nil
+	default:
+		if m.SessionID != "" {
+			return "claude", []string{"-r", m.SessionID}
+		}
+		return "claude", nil
 	}
-	cmd := exec.Command(bin, "-r", sessionID)
+}
+
+func renderResumeCommand(projectPath, bin string, args []string) string {
+	cmd := strings.TrimSpace(strings.Join(append([]string{bin}, args...), " "))
+	if projectPath == "" {
+		return cmd
+	}
+	return fmt.Sprintf("cd %s; %s", projectPath, cmd)
+}
+
+func launchAgent(bin string, args []string, projectPath string) error {
+	if projectPath != "" {
+		if err := os.Chdir(projectPath); err != nil {
+			return fmt.Errorf("chdir %s: %w", projectPath, err)
+		}
+	}
+	cmd := exec.Command(bin, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

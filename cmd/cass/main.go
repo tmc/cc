@@ -336,11 +336,7 @@ func runResume(ctx context.Context, svc *service.Service, args []string) error {
 	}
 
 	// Output the resume command for the user to execute.
-	bin := "claude"
-	if h.Agent == "gemini-cli" {
-		bin = "gemini"
-	}
-	cmd := fmt.Sprintf("cd %s && %s --resume", h.Workspace, bin)
+	cmd := resumeCommand(h)
 	fmt.Println()
 	fmt.Println(titleStyle.Render("run:"))
 	fmt.Println(cmd)
@@ -395,7 +391,7 @@ func printHit(num int, h cass.Hit) {
 	if h.LinesWritten > 0 {
 		stats = append(stats, fmt.Sprintf("%d lines", h.LinesWritten))
 	}
-	
+
 	if h.InputTokens > 0 || h.OutputTokens > 0 || h.CacheReads > 0 || h.CacheCreationInputTokens > 0 {
 		var toks []string
 		if h.InputTokens > 0 {
@@ -774,18 +770,33 @@ func outputResume(result *cass.SearchResult) error {
 			title = title[:60] + "..."
 		}
 		fmt.Printf("# %s (%s)\n", title, h.StartedAt)
-		bin := "claude"
-		if h.Agent == "gemini-cli" {
-			bin = "gemini"
-		}
 		if h.Workspace != "" {
-			fmt.Printf("cd %s && %s --resume\n", h.Workspace, bin)
+			fmt.Println(resumeCommand(h))
 		} else if h.SourcePath != "" {
-			fmt.Printf("%s --resume  # source: %s\n", bin, h.SourcePath)
+			fmt.Printf("%s  # source: %s\n", resumeCommand(h), h.SourcePath)
 		}
 		fmt.Println()
 	}
 	return nil
+}
+
+func resumeCommand(h cass.Hit) string {
+	prefix := ""
+	if h.Workspace != "" {
+		prefix = fmt.Sprintf("cd %s && ", h.Workspace)
+	}
+
+	switch h.Agent {
+	case "gemini-cli":
+		return prefix + "gemini --resume"
+	case "codex-cli", "codex-app":
+		if h.SessionID != "" {
+			return prefix + "codex resume " + h.SessionID
+		}
+		return prefix + "codex resume"
+	default:
+		return prefix + "claude --resume"
+	}
 }
 
 // runRequests shows HAR-derived API request breakdown, optionally filtered to a session.
