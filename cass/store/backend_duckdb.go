@@ -184,8 +184,8 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 		args = append(args, req.Query)
 	}
 	if req.Filters.Agent != "" {
-		where = append(where, "agent = ?")
-		args = append(args, req.Filters.Agent)
+		where = append(where, agentFilter("agent"))
+		args = append(args, agentFilterArgs(req.Filters.Agent)...)
 	}
 	if !req.Filters.After.IsZero() {
 		where = append(where, "started_at >= ?")

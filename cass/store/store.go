@@ -363,8 +363,8 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		args = append(args, req.Query)
 	}
 	if req.Filters.Agent != "" {
-		where = append(where, "s.agent = ?")
-		args = append(args, req.Filters.Agent)
+		where = append(where, agentFilter("s.agent"))
+		args = append(args, agentFilterArgs(req.Filters.Agent)...)
 	}
 	if !req.Filters.After.IsZero() {
 		where = append(where, "s.started_at >= ?")
@@ -525,12 +525,23 @@ func (s *Store) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 	}
 
 	if filter.Agent != "" {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE agent = ?", filter.Agent); err != nil {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE "+agentFilter("agent"), agentFilterArgs(filter.Agent)...); err != nil {
 			return fmt.Errorf("delete by agent: %w", err)
 		}
 	}
 
 	return tx.Commit()
+}
+
+// agentFilter returns a SQL WHERE clause for matching agent names.
+// Matches exactly or as a prefix so that e.g. "codex" finds both
+// "codex-cli" and "codex-app".
+func agentFilter(col string) string {
+	return "(" + col + " = ? OR " + col + " LIKE ?)"
+}
+
+func agentFilterArgs(agent string) []any {
+	return []any{agent, agent + "-%"}
 }
 
 // Close checkpoints the WAL and releases the database connection.

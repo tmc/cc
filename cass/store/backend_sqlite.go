@@ -130,8 +130,8 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 		args = append(args, req.Query)
 	}
 	if req.Filters.Agent != "" {
-		where = append(where, "s.agent = ?")
-		args = append(args, req.Filters.Agent)
+		where = append(where, agentFilter("s.agent"))
+		args = append(args, agentFilterArgs(req.Filters.Agent)...)
 	}
 	if !req.Filters.After.IsZero() {
 		where = append(where, "s.started_at >= ?")

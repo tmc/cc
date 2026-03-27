@@ -146,7 +146,7 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 			return Entry{}, false
 		}
 		content, _ := json.Marshal(blocks)
-		return Entry{
+		entry := Entry{
 			Type:      payload.Role,
 			Timestamp: env.Timestamp,
 			Phase:     payload.Phase,
@@ -154,7 +154,11 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 				Role:    payload.Role,
 				Content: content,
 			},
-		}, true
+		}
+		if payload.Role == "user" && isCodexSystemPreamble(blocks) {
+			entry.IsMeta = true
+		}
+		return entry, true
 
 	case "function_call", "custom_tool_call":
 		toolName := payload.Name
@@ -222,6 +226,22 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 	default:
 		return Entry{}, false
 	}
+}
+
+// isCodexSystemPreamble detects codex user messages that contain injected
+// system instructions (AGENTS.md, permissions, etc.) rather than actual user input.
+func isCodexSystemPreamble(blocks []ContentBlock) bool {
+	if len(blocks) == 0 {
+		return false
+	}
+	text := blocks[0].Text
+	if len(text) > 200 {
+		text = text[:200]
+	}
+	return strings.HasPrefix(text, "# AGENTS.md instructions for ") ||
+		strings.HasPrefix(text, "<permissions instructions>") ||
+		strings.HasPrefix(text, "<INSTRUCTIONS>") ||
+		strings.HasPrefix(text, "<environment_context>")
 }
 
 func codexTextBlocks(raw json.RawMessage) []ContentBlock {
@@ -460,7 +480,7 @@ func Summarize(file string, entries []Entry) SessionSummary {
 			switch e.Message.Role {
 			case "user":
 				s.UserMessages++
-				if s.FirstPrompt == "" {
+				if s.FirstPrompt == "" && !e.IsMeta {
 					s.FirstPrompt = ExtractText(e.Message.Content)
 				}
 				if s.Model == "" && e.Message.Model != "" {
