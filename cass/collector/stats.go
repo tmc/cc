@@ -92,13 +92,15 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 			if e.PermissionMode == "plan" {
 				s.PlanModeTurns++
 			}
-			// Count incoming teammate messages (non-empty teammate_id only).
 			text := e.Message.TextContent()
+			// Count incoming teammate messages (non-empty teammate_id only).
 			for _, m := range teammateMessagePattern.FindAllStringSubmatch(text, -1) {
 				if m[1] != "" {
 					s.TeamMessagesRecvd++
 				}
 			}
+			// Count codex subagent notifications.
+			s.TeamMessagesRecvd += strings.Count(text, "<subagent_notification>")
 		case "assistant":
 			// Token usage.
 			// OutputTokens in JSONL is a streaming-start snapshot (value=1);
@@ -157,12 +159,18 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 					cmd := extractBashCommand(b.Input)
 					countIT2Commands(cmd, &s)
 					countTeamCommands(cmd, &s)
-				// Agent teams native tool names.
+				// Agent teams native tool names (Claude Code).
 				case "TeamCreate":
 					s.TeamSpawns++
 				case "SendMessage", "AgentMessage":
 					s.TeamInboxSends++
 				case "AgentTask":
+					s.TeamTaskOps++
+				// Codex agent team tools.
+				case "spawn_agent":
+					s.SubagentSpawns++
+					s.TeamMembersSpawned++
+				case "wait_agent", "close_agent":
 					s.TeamTaskOps++
 				}
 			}
