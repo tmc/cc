@@ -172,6 +172,8 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 					s.TeamMembersSpawned++
 				case "wait_agent", "close_agent":
 					s.TeamTaskOps++
+				case "send_input":
+					s.TeamInboxSends++
 				}
 			}
 		}

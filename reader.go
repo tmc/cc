@@ -221,11 +221,50 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 			},
 			ToolUseResult: res,
 		}, true
-	case "reasoning", "ghost_snapshot", "web_search_call":
+	case "web_search_call":
+		return decodeCodexWebSearch(env)
+	case "reasoning", "ghost_snapshot":
 		return Entry{}, false
 	default:
 		return Entry{}, false
 	}
+}
+
+func decodeCodexWebSearch(env codexEnvelope) (Entry, bool) {
+	var payload struct {
+		Status string `json:"status"`
+		Action struct {
+			Type    string   `json:"type"`
+			Query   string   `json:"query"`
+			Queries []string `json:"queries"`
+		} `json:"action"`
+	}
+	if err := json.Unmarshal(env.Payload, &payload); err != nil {
+		return Entry{}, false
+	}
+	query := payload.Action.Query
+	if query == "" && len(payload.Action.Queries) > 0 {
+		query = payload.Action.Queries[0]
+	}
+	if query == "" {
+		return Entry{}, false
+	}
+	input, _ := json.Marshal(map[string]string{"query": query})
+	content, _ := json.Marshal([]ContentBlock{
+		{
+			Type:  "tool_use",
+			Name:  "WebSearch",
+			Input: input,
+		},
+	})
+	return Entry{
+		Type:      "assistant",
+		Timestamp: env.Timestamp,
+		Message: &Message{
+			Role:    "assistant",
+			Content: content,
+		},
+	}, true
 }
 
 // isCodexSystemPreamble detects codex user messages that contain injected
