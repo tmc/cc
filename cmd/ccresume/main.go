@@ -192,7 +192,7 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 			if len(parts) < 1 {
 				continue
 			}
-			projectPath = DecodePath(parts[0])
+			projectPath = decodePath(parts[0])
 		}
 		if !validSessionID(sessionID) {
 			continue
@@ -213,61 +213,20 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 	return matches, nil
 }
 
-// DecodePath decodes Claude's encoded project directory name using stat checks
-func DecodePath(encoded string) string {
+// decodePath reconstructs the original filesystem path from an encoded
+// Claude Code project directory name.
+func decodePath(encoded string) string {
 	if encoded == "" || !strings.HasPrefix(encoded, "-") {
 		return encoded
 	}
-
-	parts := strings.Split(encoded[1:], "-")
-	return buildPath(parts, "/")
-}
-
-func buildPath(parts []string, prefix string) string {
-	if len(parts) == 0 {
-		return strings.TrimSuffix(prefix, "/")
+	segments := strings.Split(encoded[1:], "-")
+	if len(segments) == 0 {
+		return "/"
 	}
-
-	// Try shortest match first (prefer more path segments)
-	// This avoids false positives like "appledocs-examples" when "appledocs/examples" is correct
-	for i := 1; i <= len(parts); i++ {
-		segment := strings.Join(parts[:i], "-")
-		segment = fixDomain(segment)
-		candidate := prefix + segment
-
-		if dirExists(candidate) {
-			// Found a valid directory, continue with remaining parts
-			result := buildPath(parts[i:], candidate+"/")
-			// Verify the final path exists
-			if dirExists(result) {
-				return result
-			}
-			// If final path doesn't exist, try longer segment
-			continue
-		}
+	if result, ok := cc.DecodeSegments("/"+segments[0], segments[1:]); ok {
+		return result
 	}
-
-	// No valid path found, return best effort
-	segment := fixDomain(parts[0])
-	return buildPath(parts[1:], prefix+segment+"/")
-}
-
-func fixDomain(s string) string {
-	domains := []string{"github", "gitlab", "bitbucket", "golang", "gopkg"}
-	tlds := []string{"com", "org", "io", "in", "net"}
-	for _, d := range domains {
-		for _, t := range tlds {
-			if s == d+"-"+t {
-				return d + "." + t
-			}
-		}
-	}
-	return s
-}
-
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+	return "/" + strings.Join(segments, "/")
 }
 
 // validSessionID reports whether a session ID is a valid resume target.
