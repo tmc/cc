@@ -126,11 +126,15 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 
 	gh, _ := cc.GeminiHome()
 	if gh != "" {
-		roots = append(roots, searchRoot{dir: filepath.Join(gh, "projects"), kind: "gemini"})
+		if d := filepath.Join(gh, "projects"); dirExists(d) {
+			roots = append(roots, searchRoot{dir: d, kind: "gemini"})
+		}
 	}
 	xh, _ := cc.CodexHome()
 	if xh != "" {
-		roots = append(roots, searchRoot{dir: filepath.Join(xh, "sessions"), kind: "codex"})
+		if d := filepath.Join(xh, "sessions"); dirExists(d) {
+			roots = append(roots, searchRoot{dir: d, kind: "codex"})
+		}
 	}
 
 	args := []string{"-l", query}
@@ -211,6 +215,11 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 		})
 	}
 	return matches, nil
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // decodePath reconstructs the original filesystem path from an encoded
