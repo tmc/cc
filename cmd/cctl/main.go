@@ -32,6 +32,7 @@ var subcommands = map[string]string{
 	"task":     "cctask",
 	"agent":    "ccagent",
 	"approve":  "ccapprove",
+	"memory":   "ccmemory",
 
 	// Short aliases
 	"m":  "cmsg",
@@ -47,6 +48,7 @@ var subcommands = map[string]string{
 	"tk": "cctask",
 	"ag": "ccagent",
 	"ap": "ccapprove",
+	"mm": "ccmemory",
 }
 
 func main() {
@@ -140,6 +142,7 @@ Commands:
   task, tk     Manage persistent tasks
   agent, ag    Inspect agent status
   approve, ap  Handle approval workflows
+  memory, mm   List and read auto-memory files
   help         Show help for a command
   version      Show version information
 
