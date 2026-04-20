@@ -228,6 +228,13 @@ func lockFile(f *os.File) error {
 	return nil
 }
 
+func lockFileShared(f *os.File) error {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+		return fmt.Errorf("rlock file: %w", err)
+	}
+	return nil
+}
+
 func unlockFile(f *os.File) {
 	syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }

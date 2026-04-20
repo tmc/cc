@@ -3,6 +3,7 @@ package cc
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -76,12 +77,25 @@ func (s *TaskStore) Create(t TeamTask) (TeamTask, error) {
 	return t, nil
 }
 
-// Get retrieves a task by ID.
+// Get retrieves a task by ID. Takes a shared flock so a concurrent
+// Update (which truncates the file under an exclusive flock) cannot
+// expose a partial or empty read.
 func (s *TaskStore) Get(id string) (TeamTask, error) {
 	path := filepath.Join(s.dir, id+".json")
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return TeamTask{}, fmt.Errorf("get task %q: %w", id, err)
+	}
+	defer f.Close()
+
+	if err := lockFileShared(f); err != nil {
+		return TeamTask{}, fmt.Errorf("rlock task %q: %w", id, err)
+	}
+	defer unlockFile(f)
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return TeamTask{}, fmt.Errorf("read task %q: %w", id, err)
 	}
 	var t TeamTask
 	if err := json.Unmarshal(data, &t); err != nil {

@@ -53,6 +53,57 @@ func TestTaskStoreConcurrentCreate(t *testing.T) {
 	}
 }
 
+// TestTaskStoreConcurrentGetUpdate asserts that Get never observes a
+// partial or empty file while Update is truncating-and-writing under
+// an exclusive flock. Without a shared flock on Get, the truncate
+// window exposes a 0-byte file that fails json.Unmarshal.
+func TestTaskStoreConcurrentGetUpdate(t *testing.T) {
+	t.Setenv("CC_TASKS_DIR", t.TempDir())
+	s, err := NewTaskStore("team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.Create(TeamTask{Subject: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const iters = 500
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			u := task
+			u.Description = fmt.Sprintf("u%d", i)
+			_ = s.Update(u)
+		}
+	}()
+
+	for i := range iters {
+		got, err := s.Get(task.ID)
+		if err != nil {
+			close(done)
+			wg.Wait()
+			t.Fatalf("get %d: %v (partial read observed)", i, err)
+		}
+		if got.ID != task.ID {
+			close(done)
+			wg.Wait()
+			t.Fatalf("get %d: id %q, want %q", i, got.ID, task.ID)
+		}
+	}
+	close(done)
+	wg.Wait()
+}
+
 // TestTaskStoreConcurrentUpdate asserts that concurrent Update calls on
 // the same task serialize without corrupting the file. Without per-task
 // flock a concurrent reader could observe a truncated file.
