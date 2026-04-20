@@ -47,7 +47,7 @@ func run() error {
 	}
 
 	// Encode the path
-	encoded := encodePath(absDir)
+	encoded := cc.EncodePath(absDir)
 
 	// Build cache path
 	var ch string
@@ -86,12 +86,3 @@ func run() error {
 	return nil
 }
 
-// encodePath converts a filesystem path to Claude Code's cache directory format.
-// Example: /Volumes/tmc/go/src/github.com/tmc/cc → -Volumes-tmc-go-src-github-com-tmc-cc
-func encodePath(path string) string {
-	// Replace path separators with dashes
-	encoded := strings.ReplaceAll(path, string(filepath.Separator), "-")
-	// Replace dots with dashes (for domain-like paths)
-	encoded = strings.ReplaceAll(encoded, ".", "-")
-	return encoded
-}

@@ -3,7 +3,18 @@ package cc
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// EncodePath converts a filesystem path to Claude Code's project-directory
+// encoding: "/" and "." are both replaced with "-".
+//
+//	/Volumes/tmc/go/src/github.com/tmc/cc
+//	→ -Volumes-tmc-go-src-github-com-tmc-cc
+func EncodePath(path string) string {
+	s := strings.ReplaceAll(path, string(filepath.Separator), "-")
+	return strings.ReplaceAll(s, ".", "-")
+}
 
 // ClaudeHome returns the base directory for Claude data.
 // It uses CLAUDE_HOME if set, otherwise defaults to ~/.claude.
