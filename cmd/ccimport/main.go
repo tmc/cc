@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,10 +62,11 @@ func run() error {
 		return fmt.Errorf("empty source session: %s", *from)
 	}
 
-	msgs := toGeminiMessages(entries)
+	msgs, drops := toGeminiMessages(entries)
 	if len(msgs) == 0 {
 		return fmt.Errorf("no importable user/assistant messages found")
 	}
+	drops.warn(os.Stderr)
 
 	sessionID := entries[0].SessionID
 	if sessionID == "" {
@@ -127,9 +129,43 @@ func run() error {
 	return nil
 }
 
-func toGeminiMessages(entries []cc.Entry) []geminiChatMessage {
+// dropCounts tracks Claude concepts that the Gemini session format cannot
+// represent. Silent drops violate TRACE_INTEROP principle 3, so counts
+// get summarized to stderr.
+type dropCounts struct {
+	toolUses    int
+	toolResults int
+	subagents   int
+	emptyText   int
+}
+
+func (d dropCounts) warn(w io.Writer) {
+	if d.toolUses == 0 && d.toolResults == 0 && d.subagents == 0 && d.emptyText == 0 {
+		return
+	}
+	fmt.Fprintln(w, "ccimport: warning: gemini session format cannot represent:")
+	if d.toolUses > 0 {
+		fmt.Fprintf(w, "  %d tool_use blocks dropped\n", d.toolUses)
+	}
+	if d.toolResults > 0 {
+		fmt.Fprintf(w, "  %d tool_result blocks dropped\n", d.toolResults)
+	}
+	if d.subagents > 0 {
+		fmt.Fprintf(w, "  %d subagent entries dropped (isSidechain=true)\n", d.subagents)
+	}
+	if d.emptyText > 0 {
+		fmt.Fprintf(w, "  %d user/assistant entries had no text after extraction\n", d.emptyText)
+	}
+}
+
+func toGeminiMessages(entries []cc.Entry) ([]geminiChatMessage, dropCounts) {
 	var out []geminiChatMessage
+	var drops dropCounts
 	for i, e := range entries {
+		if e.IsSidechain {
+			drops.subagents++
+			continue
+		}
 		if e.Message == nil {
 			continue
 		}
@@ -137,8 +173,12 @@ func toGeminiMessages(entries []cc.Entry) []geminiChatMessage {
 		if role != "user" && role != "assistant" {
 			continue
 		}
+		drops.toolUses += len(e.Message.ToolUses())
+		drops.toolResults += len(e.Message.ToolResults())
+
 		text := strings.TrimSpace(e.Message.TextContent())
 		if text == "" {
+			drops.emptyText++
 			continue
 		}
 
@@ -153,6 +193,11 @@ func toGeminiMessages(entries []cc.Entry) []geminiChatMessage {
 			m.Type = "user"
 			// Match modern Gemini format where user content is an array of text parts.
 			m.Content = []map[string]string{{"text": text}}
+			if e.Message.Usage != nil {
+				m.Tokens.Input = e.Message.Usage.InputTokens
+				m.Tokens.Output = e.Message.Usage.OutputTokens
+				m.Tokens.Cached = e.Message.Usage.CacheReadInputTokens
+			}
 		} else {
 			m.Type = "gemini"
 			m.Content = text
@@ -165,7 +210,7 @@ func toGeminiMessages(entries []cc.Entry) []geminiChatMessage {
 		}
 		out = append(out, m)
 	}
-	return out
+	return out, drops
 }
 
 func formatTS(t time.Time) string {
