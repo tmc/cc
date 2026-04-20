@@ -32,6 +32,7 @@ var subcommands = map[string]string{
 	"task":     "cctask",
 	"agent":    "ccagent",
 	"approve":  "ccapprove",
+	"handoff":  "cchandoff",
 	"memory":   "ccmemory",
 
 	// Short aliases
@@ -48,6 +49,7 @@ var subcommands = map[string]string{
 	"tk": "cctask",
 	"ag": "ccagent",
 	"ap": "ccapprove",
+	"ho": "cchandoff",
 	"mm": "ccmemory",
 }
 
@@ -142,6 +144,7 @@ Commands:
   task, tk     Manage persistent tasks
   agent, ag    Inspect agent status
   approve, ap  Handle approval workflows
+  handoff, ho  Build cross-tool session handoff prompt
   memory, mm   List and read auto-memory files
   help         Show help for a command
   version      Show version information
@@ -152,6 +155,7 @@ Examples:
   cctl history -since 24h "error"
   cctl team -create review
   echo "Review PR" | cctl inbox -team review -to reviewer
+  cctl handoff -from session.jsonl -to gemini
 
 Run 'cctl help <command>' for more information on a specific command.
 `)
