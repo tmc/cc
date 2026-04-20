@@ -47,8 +47,16 @@ func NewTaskStore(namespace string) (*TaskStore, error) {
 }
 
 // Create creates a new task with an auto-incremented ID.
+// Holds the store-level lock for the full allocate-then-write sequence so
+// concurrent callers never collide on the same ID.
 func (s *TaskStore) Create(t TeamTask) (TeamTask, error) {
-	id, err := s.nextID()
+	lock, err := s.lockStore()
+	if err != nil {
+		return t, err
+	}
+	defer lock()
+
+	id, err := s.nextIDLocked()
 	if err != nil {
 		return t, err
 	}
@@ -62,7 +70,7 @@ func (s *TaskStore) Create(t TeamTask) (TeamTask, error) {
 	if t.BlockedBy == nil {
 		t.BlockedBy = []string{}
 	}
-	if err := s.writeTask(t); err != nil {
+	if err := s.writeTaskLocked(t); err != nil {
 		return t, err
 	}
 	return t, nil
@@ -82,7 +90,8 @@ func (s *TaskStore) Get(id string) (TeamTask, error) {
 	return t, nil
 }
 
-// Update writes an updated task to disk.
+// Update writes an updated task to disk atomically, holding an exclusive
+// lock on the task file for the duration of the write.
 func (s *TaskStore) Update(t TeamTask) error {
 	return s.writeTask(t)
 }
@@ -110,8 +119,11 @@ func (s *TaskStore) List() ([]TeamTask, error) {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		id := e.Name()[:len(e.Name())-5] // strip .json
-		t, err := s.Get(id)
+		name := e.Name()[:len(e.Name())-5]
+		if name == ".store" { // skip the store lock file
+			continue
+		}
+		t, err := s.Get(name)
 		if err != nil {
 			continue
 		}
@@ -125,16 +137,51 @@ func (s *TaskStore) List() ([]TeamTask, error) {
 	return tasks, nil
 }
 
+// writeTask holds an exclusive lock on the task file and rewrites it.
+// Truncate+seek+write under flock, so concurrent Update calls on the same
+// task serialize instead of racing.
 func (s *TaskStore) writeTask(t TeamTask) error {
+	path := filepath.Join(s.dir, t.ID+".json")
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return fmt.Errorf("open task %q: %w", t.ID, err)
+	}
+	defer f.Close()
+
+	if err := lockFile(f); err != nil {
+		return fmt.Errorf("lock task %q: %w", t.ID, err)
+	}
+	defer unlockFile(f)
+
+	return s.writeTaskLockedFile(f, t)
+}
+
+// writeTaskLocked writes the task assuming the caller already holds the
+// store-level lock (used by Create). It takes the per-task lock additionally
+// so readers using Get+flock see a consistent file.
+func (s *TaskStore) writeTaskLocked(t TeamTask) error {
+	return s.writeTask(t)
+}
+
+func (s *TaskStore) writeTaskLockedFile(f *os.File, t TeamTask) error {
 	data, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal task: %w", err)
 	}
-	path := filepath.Join(s.dir, t.ID+".json")
-	return os.WriteFile(path, data, 0o644)
+	if err := f.Truncate(0); err != nil {
+		return fmt.Errorf("truncate task: %w", err)
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return fmt.Errorf("seek task: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write task: %w", err)
+	}
+	return nil
 }
 
-func (s *TaskStore) nextID() (int, error) {
+// nextIDLocked must be called with the store lock held.
+func (s *TaskStore) nextIDLocked() (int, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return 1, nil
@@ -150,4 +197,22 @@ func (s *TaskStore) nextID() (int, error) {
 		}
 	}
 	return max + 1, nil
+}
+
+// lockStore acquires an exclusive flock on a sentinel file inside the
+// task dir and returns an unlock function. Callers must defer the unlock.
+func (s *TaskStore) lockStore() (func(), error) {
+	path := filepath.Join(s.dir, ".store.lock")
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open task store lock: %w", err)
+	}
+	if err := lockFile(f); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("lock task store: %w", err)
+	}
+	return func() {
+		unlockFile(f)
+		f.Close()
+	}, nil
 }
