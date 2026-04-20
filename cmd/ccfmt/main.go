@@ -6,12 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"image"
-	"image/color"
-	"image/draw"
-	_ "image/gif"
-	_ "image/jpeg"
-	"image/png"
 	"io"
 	"mime"
 	"net/http"
@@ -21,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tmc/apple/x/vzkit/ocr"
 	"github.com/tmc/cc"
 )
 
@@ -36,7 +29,7 @@ var (
 	toolsFlag        = flag.String("tools", "full", "Tool call rendering: full, summary, omit")
 	toolResultsFlag  = flag.String("tool-results", "full", "Tool result rendering: full, summary, omit")
 	inlineImagesFlag = flag.Bool("inline-images", true, "Inline message images as data URLs in markdown when possible")
-	redactImagesFlag = flag.Bool("redact-images", true, "Redact sensitive text from inline images in markdown when possible")
+	redactImagesFlag = flag.Bool("redact-images", false, "Redact sensitive text from inline images (requires an external redactor via redactImageDataFunc; default no-op)")
 	redactFlag       = flag.Bool("redact", true, "Redact obvious secrets such as Stripe test keys")
 )
 
@@ -917,205 +910,14 @@ func parseDataImageURL(s string) ([]byte, string, bool) {
 	return data, rest[:semi], true
 }
 
+// redactImageData is a no-op by default. OCR-based redaction lived here
+// until 2026-04-20; it was removed along with the tmc/apple/x/vzkit/ocr
+// dependency that bloated the ccfmt binary by ~10 MB. Callers wanting
+// image redaction should pipe through an external redactor (for
+// example, imgredact in tmc/misc) before or after ccfmt. Tests may
+// override redactImageDataFunc to inject behavior.
 func redactImageData(data []byte) ([]byte, error) {
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	svc := ocr.NewService(false)
-	obs, err := svc.RecognizeText(img)
-	if err != nil {
-		return nil, err
-	}
-	rects := sensitiveObservationRects(obs, img.Bounds(), 8)
-	if len(rects) == 0 {
-		return data, nil
-	}
-	dst := cloneRGBAImage(img)
-	for _, r := range mergeImageRects(rects) {
-		applyBlurImageRedaction(dst, r, color.Black, 10)
-	}
-	var out bytes.Buffer
-	if err := png.Encode(&out, dst); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
-}
-
-func sensitiveObservationRects(observations []ocr.TextObservation, bounds image.Rectangle, padding int) []image.Rectangle {
-	var rects []image.Rectangle
-	for _, obs := range observations {
-		if !looksSensitiveText(obs.Text) {
-			continue
-		}
-		rects = append(rects, paddedImageRect(observationImageRect(obs, bounds), bounds, padding))
-	}
-	return rects
-}
-
-func looksSensitiveText(s string) bool {
-	s = strings.ToLower(strings.TrimSpace(s))
-	if s == "" {
-		return false
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		switch {
-		case 'a' <= r && r <= 'z':
-			b.WriteRune(r)
-		case '0' <= r && r <= '9':
-			b.WriteRune(r)
-		}
-	}
-	norm := b.String()
-	return strings.Contains(norm, "pktest") || strings.Contains(norm, "sktest")
-}
-
-func observationImageRect(obs ocr.TextObservation, bounds image.Rectangle) image.Rectangle {
-	w, h := bounds.Dx(), bounds.Dy()
-	x1 := int(obs.BoundingBox.Origin.X * float64(w))
-	y1 := int((1 - obs.BoundingBox.Origin.Y - obs.BoundingBox.Size.Height) * float64(h))
-	x2 := int((obs.BoundingBox.Origin.X + obs.BoundingBox.Size.Width) * float64(w))
-	y2 := int((1 - obs.BoundingBox.Origin.Y) * float64(h))
-	return image.Rect(x1, y1, x2, y2).Canon()
-}
-
-func paddedImageRect(r, bounds image.Rectangle, padding int) image.Rectangle {
-	if padding < 0 {
-		padding = 0
-	}
-	r = image.Rect(r.Min.X-padding, r.Min.Y-padding, r.Max.X+padding, r.Max.Y+padding)
-	return r.Intersect(bounds)
-}
-
-func mergeImageRects(rects []image.Rectangle) []image.Rectangle {
-	if len(rects) < 2 {
-		return rects
-	}
-	merged := append([]image.Rectangle(nil), rects...)
-	changed := true
-	for changed {
-		changed = false
-		var next []image.Rectangle
-		for len(merged) > 0 {
-			r := merged[0]
-			merged = merged[1:]
-			i := 0
-			for i < len(merged) {
-				if imageRectsTouch(r, merged[i]) {
-					r = r.Union(merged[i])
-					merged = append(merged[:i], merged[i+1:]...)
-					changed = true
-					continue
-				}
-				i++
-			}
-			next = append(next, r)
-		}
-		merged = next
-	}
-	return merged
-}
-
-func imageRectsTouch(a, b image.Rectangle) bool {
-	return a.Inset(-1).Overlaps(b.Inset(-1))
-}
-
-func cloneRGBAImage(src image.Image) *image.RGBA {
-	b := src.Bounds()
-	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	draw.Draw(dst, dst.Bounds(), src, b.Min, draw.Src)
-	return dst
-}
-
-func applyBlurImageRedaction(dst *image.RGBA, r image.Rectangle, fill color.Color, blur int) {
-	if blur < 1 {
-		blur = 1
-	}
-	src := cloneImageRegion(dst, r)
-	pixelateImage(src, blur)
-	boxBlurImage(src, blur)
-	draw.Draw(dst, r, src, src.Bounds().Min, draw.Src)
-	applyImageTint(dst, r, fill, 80)
-}
-
-func cloneImageRegion(src *image.RGBA, r image.Rectangle) *image.RGBA {
-	sub := image.NewRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
-	draw.Draw(sub, sub.Bounds(), src, r.Min, draw.Src)
-	return sub
-}
-
-func pixelateImage(img *image.RGBA, size int) {
-	if size < 1 {
-		size = 1
-	}
-	b := img.Bounds()
-	for y := b.Min.Y; y < b.Max.Y; y += size {
-		for x := b.Min.X; x < b.Max.X; x += size {
-			block := image.Rect(x, y, minInt(x+size, b.Max.X), minInt(y+size, b.Max.Y))
-			c := averageImageColor(img, block)
-			draw.Draw(img, block, &image.Uniform{C: c}, image.Point{}, draw.Src)
-		}
-	}
-}
-
-func boxBlurImage(img *image.RGBA, radius int) {
-	if radius < 1 {
-		return
-	}
-	src := cloneRGBAImage(img)
-	b := img.Bounds()
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			block := image.Rect(maxInt(x-radius, b.Min.X), maxInt(y-radius, b.Min.Y), minInt(x+radius+1, b.Max.X), minInt(y+radius+1, b.Max.Y))
-			img.Set(x, y, averageImageColor(src, block))
-		}
-	}
-}
-
-func averageImageColor(img image.Image, r image.Rectangle) color.RGBA {
-	if r.Empty() {
-		return color.RGBA{}
-	}
-	var rs, gs, bs, as uint64
-	var n uint64
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		for x := r.Min.X; x < r.Max.X; x++ {
-			rr, gg, bb, aa := img.At(x, y).RGBA()
-			rs += uint64(rr >> 8)
-			gs += uint64(gg >> 8)
-			bs += uint64(bb >> 8)
-			as += uint64(aa >> 8)
-			n++
-		}
-	}
-	return color.RGBA{
-		R: uint8(rs / n),
-		G: uint8(gs / n),
-		B: uint8(bs / n),
-		A: uint8(as / n),
-	}
-}
-
-func applyImageTint(dst *image.RGBA, r image.Rectangle, fill color.Color, alpha uint8) {
-	rr, gg, bb, _ := fill.RGBA()
-	mask := color.RGBA{R: uint8(rr >> 8), G: uint8(gg >> 8), B: uint8(bb >> 8), A: alpha}
-	draw.DrawMask(dst, r, &image.Uniform{C: mask}, image.Point{}, &image.Uniform{C: color.Alpha{A: alpha}}, image.Point{}, draw.Over)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+	return data, nil
 }
 
 func imagePath(block cc.ContentBlock) string {
