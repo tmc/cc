@@ -1,6 +1,9 @@
 package cc
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // ContentBlocks parses the message content as an array of ContentBlock.
 // Returns nil if content is a plain string or unparseable.
@@ -14,22 +17,7 @@ func (m *Message) ContentBlocks() []ContentBlock {
 
 // TextContent returns the concatenated text from the message content.
 func (m *Message) TextContent() string {
-	// Try as string first.
-	var s string
-	if json.Unmarshal(m.Content, &s) == nil {
-		return s
-	}
-	// Try as blocks.
-	var out string
-	for _, b := range m.ContentBlocks() {
-		if b.Type == "text" && b.Text != "" {
-			if out != "" {
-				out += "\n"
-			}
-			out += b.Text
-		}
-	}
-	return out
+	return ExtractAnyText(m.Content)
 }
 
 // ToolUses returns only the tool_use blocks from message content.
@@ -52,4 +40,66 @@ func (m *Message) ToolResults() []ContentBlock {
 		}
 	}
 	return results
+}
+
+// ImageBlocks returns image-bearing blocks from the message content.
+func (m *Message) ImageBlocks() []ContentBlock {
+	var images []ContentBlock
+	for _, b := range m.ContentBlocks() {
+		switch b.Type {
+		case "image", "input_image", "local_image":
+			images = append(images, b)
+		}
+	}
+	return images
+}
+
+// ExtractAnyText returns text from string, block-array, or nested JSON values.
+func ExtractAnyText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+
+	var anyVal any
+	if json.Unmarshal(raw, &anyVal) != nil {
+		return ""
+	}
+	var parts []string
+	collectText(&parts, anyVal)
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func collectText(parts *[]string, v any) {
+	switch x := v.(type) {
+	case string:
+		if strings.TrimSpace(x) != "" {
+			*parts = append(*parts, x)
+		}
+	case []any:
+		for _, it := range x {
+			collectText(parts, it)
+		}
+	case map[string]any:
+		if t, ok := x["text"].(string); ok && strings.TrimSpace(t) != "" {
+			*parts = append(*parts, t)
+			return
+		}
+		// Prefer common content/parts keys first, then fallback to all values.
+		foundPreferred := false
+		if c, ok := x["content"]; ok {
+			collectText(parts, c)
+			foundPreferred = true
+		}
+		if p, ok := x["parts"]; ok {
+			collectText(parts, p)
+			foundPreferred = true
+		}
+		if foundPreferred {
+			return
+		}
+		for _, vv := range x {
+			collectText(parts, vv)
+		}
+	}
 }

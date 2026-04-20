@@ -284,28 +284,60 @@ func isCodexSystemPreamble(blocks []ContentBlock) bool {
 }
 
 func codexTextBlocks(raw json.RawMessage) []ContentBlock {
-	var items []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(raw, &items); err == nil {
-		blocks := make([]ContentBlock, 0, len(items))
-		for _, item := range items {
-			text := strings.TrimSpace(item.Text)
-			if text == "" {
-				continue
-			}
-			blocks = append(blocks, ContentBlock{Type: "text", Text: text})
-		}
-		if len(blocks) > 0 {
-			return blocks
-		}
+	if blocks := decodeCodexContentBlocks(raw); len(blocks) > 0 {
+		return blocks
 	}
 	text := strings.TrimSpace(ExtractAnyText(raw))
 	if text == "" {
 		return nil
 	}
 	return []ContentBlock{{Type: "text", Text: text}}
+}
+
+func decodeCodexContentBlocks(raw json.RawMessage) []ContentBlock {
+	var items []map[string]any
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	blocks := make([]ContentBlock, 0, len(items))
+	for _, item := range items {
+		typ, _ := item["type"].(string)
+		switch typ {
+		case "input_text", "output_text", "text":
+			text, _ := item["text"].(string)
+			text = strings.TrimSpace(text)
+			if text != "" {
+				blocks = append(blocks, ContentBlock{Type: "text", Text: text})
+			}
+		case "input_image", "image", "local_image":
+			block := ContentBlock{Type: typ}
+			if s, _ := item["path"].(string); s != "" {
+				block.Path = s
+			}
+			if s, _ := item["file_path"].(string); s != "" {
+				block.FilePath = s
+			}
+			if s, _ := item["image_url"].(string); s != "" {
+				block.ImageURL = s
+			}
+			if s, _ := item["url"].(string); s != "" {
+				block.URL = s
+			}
+			if s, _ := item["data"].(string); s != "" {
+				block.Data = s
+			}
+			if s, _ := item["mime_type"].(string); s != "" {
+				block.MIMEType = s
+			}
+			if s, _ := item["media_type"].(string); s != "" {
+				block.MediaType = s
+			}
+			if block.Path != "" || block.FilePath != "" || block.ImageURL != "" || block.URL != "" || block.Data != "" {
+				blocks = append(blocks, block)
+			}
+		}
+	}
+	return blocks
 }
 
 func normalizeCodexToolInput(name string, raw json.RawMessage) json.RawMessage {

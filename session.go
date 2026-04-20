@@ -84,6 +84,13 @@ type ContentBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+	Path      string          `json:"path,omitempty"`
+	FilePath  string          `json:"file_path,omitempty"`
+	ImageURL  string          `json:"image_url,omitempty"`
+	URL       string          `json:"url,omitempty"`
+	Data      string          `json:"data,omitempty"`
+	MIMEType  string          `json:"mime_type,omitempty"`
+	MediaType string          `json:"media_type,omitempty"`
 }
 
 // Usage holds token usage information.
