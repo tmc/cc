@@ -1,0 +1,23 @@
+# Build outputs in the repo root (named after their cmd/* source dir)
+/ccfmt
+/ccloc
+/ccmemory
+/ccresume
+/ccsessions
+/ccstats
+/cchandoff
+/cchistory
+/ccimport
+/cctl
+/cmsg
+/creplay
+/mksid
+
+# Build output tree
+/bin/
+
+# Ephemeral screenshots captured during dev
+screenshot-*.png
+
+# One-off scratch scripts
+/a.sh
