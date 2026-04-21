@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -492,6 +493,64 @@ func ReadFile(path string) ([]Entry, error) {
 	}
 	defer f.Close()
 	return ReadAll(f)
+}
+
+// ReadFileWithSubagents reads a session JSONL file and merges entries from any
+// subagent files found at <path-without-.jsonl>/subagents/agent-*.jsonl.
+// Subagent entries are tagged with AgentID (from the filename) and IsSidechain=true.
+// The merged result is sorted by timestamp.
+func ReadFileWithSubagents(path string) ([]Entry, error) {
+	entries, err := ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	subs, err := ReadSubagents(path)
+	if err != nil {
+		return entries, nil
+	}
+	entries = append(entries, subs...)
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
+	return entries, nil
+}
+
+// ReadSubagents reads entries from subagent files under
+// <path-without-.jsonl>/subagents/agent-*.jsonl. Each entry is tagged with
+// AgentID derived from the filename and IsSidechain=true. Returns a nil slice
+// and nil error if the subagents directory does not exist.
+func ReadSubagents(path string) ([]Entry, error) {
+	subagentDir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
+	infos, err := os.ReadDir(subagentDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var entries []Entry
+	for _, fi := range infos {
+		name := fi.Name()
+		if !strings.HasSuffix(name, ".jsonl") {
+			continue
+		}
+		if strings.HasPrefix(name, "agent-acompact") {
+			continue
+		}
+		sub, err := ReadFile(filepath.Join(subagentDir, name))
+		if err != nil {
+			continue
+		}
+		agentID := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
+		for i := range sub {
+			if sub[i].AgentID == "" {
+				sub[i].AgentID = agentID
+			}
+			sub[i].IsSidechain = true
+		}
+		entries = append(entries, sub...)
+	}
+	return entries, nil
 }
 
 // SessionSummary holds summarized metadata for a session file.
