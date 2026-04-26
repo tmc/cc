@@ -187,19 +187,21 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 	teamName, agentName, isTeamLead := ClassifyTeamRole(entries)
 
 	return cass.Session{
-		ID:         id,
-		Agent:      "claude-code",
-		Title:      titleFromSummary(sum),
-		Workspace:  workspace,
-		SourcePath: path,
-		StartedAt:  sum.FirstTime,
-		EndedAt:    sum.LastTime,
-		Messages:   messages,
-		Stats:      stats,
-		Metadata:   meta,
-		TeamName:   teamName,
-		AgentName:  agentName,
-		IsTeamLead: isTeamLead,
+		ID:           id,
+		Agent:        "claude-code",
+		Title:        titleFromSummary(sum),
+		Workspace:    workspace,
+		GitCommonDir: sum.GitCommonDir,
+		Branch:       sum.Branch,
+		SourcePath:   path,
+		StartedAt:    sum.FirstTime,
+		EndedAt:      sum.LastTime,
+		Messages:     messages,
+		Stats:        stats,
+		Metadata:     meta,
+		TeamName:     teamName,
+		AgentName:    agentName,
+		IsTeamLead:   isTeamLead,
 	}, nil
 }
 
