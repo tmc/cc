@@ -186,6 +186,42 @@ func (s *Store) migrate() error {
 
 		CREATE INDEX IF NOT EXISTS idx_rl_bucket ON rate_limit_snapshots(bucket, timestamp);
 
+		CREATE TABLE IF NOT EXISTS subagent_runs (
+			parent_session_id TEXT NOT NULL,
+			agent_id TEXT NOT NULL,
+			parent_claude_sid TEXT NOT NULL DEFAULT '',
+			workspace TEXT NOT NULL DEFAULT '',
+			git_common_dir TEXT NOT NULL DEFAULT '',
+			agent_type TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			enqueued_at INTEGER NOT NULL DEFAULT 0,
+			dequeued_at INTEGER NOT NULL DEFAULT 0,
+			started_at INTEGER NOT NULL DEFAULT 0,
+			ended_at INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL DEFAULT '',
+			tool_use_id TEXT NOT NULL DEFAULT '',
+			output_file TEXT NOT NULL DEFAULT '',
+			worktree_path TEXT NOT NULL DEFAULT '',
+			worktree_branch TEXT NOT NULL DEFAULT '',
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			tool_uses INTEGER NOT NULL DEFAULT 0,
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			entry_count INTEGER NOT NULL DEFAULT 0,
+			source_path TEXT NOT NULL DEFAULT '',
+			meta_path TEXT NOT NULL DEFAULT '',
+			is_compaction INTEGER NOT NULL DEFAULT 0,
+			indexed_at INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (parent_session_id, agent_id),
+			FOREIGN KEY (parent_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_subagent_runs_started ON subagent_runs(started_at);
+		CREATE INDEX IF NOT EXISTS idx_subagent_runs_workspace ON subagent_runs(workspace);
+		CREATE INDEX IF NOT EXISTS idx_subagent_runs_git ON subagent_runs(git_common_dir);
+		CREATE INDEX IF NOT EXISTS idx_subagent_runs_model ON subagent_runs(model);
+		CREATE INDEX IF NOT EXISTS idx_subagent_runs_agent_type ON subagent_runs(agent_type);
+
 		CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
 			title,
 			content,
@@ -234,6 +270,7 @@ func (s *Store) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN git_common_dir TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE sessions ADD COLUMN branch TEXT NOT NULL DEFAULT ''",
 		"CREATE INDEX IF NOT EXISTS idx_sessions_git_common_dir ON sessions(git_common_dir)",
+		"ALTER TABLE sessions ADD COLUMN subagent_run_count INTEGER NOT NULL DEFAULT 0",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -253,8 +290,8 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			tool_calls, input_tokens, output_tokens, files_read, files_written, files_edited, lines_written,
 			turns, duration_secs, subagent_spawns, it2_splits, it2_sends, it2_screens, it2_buffers,
 			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns, sparkline, stats_json,
-			team_name, agent_name, is_team_lead, git_common_dir, branch)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			team_name, agent_name, is_team_lead, git_common_dir, branch, subagent_run_count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare sessions: %w", err)
@@ -269,6 +306,22 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		return fmt.Errorf("prepare links: %w", err)
 	}
 	defer linkStmt.Close()
+
+	runStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO subagent_runs (
+			parent_session_id, agent_id, parent_claude_sid, workspace, git_common_dir,
+			agent_type, description, model,
+			enqueued_at, dequeued_at, started_at, ended_at,
+			status, tool_use_id, output_file, worktree_path, worktree_branch,
+			total_tokens, tool_uses, duration_ms, entry_count,
+			source_path, meta_path, is_compaction, indexed_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare subagent_runs: %w", err)
+	}
+	defer runStmt.Close()
 
 	now := time.Now().Unix()
 	for _, sess := range sessions {
@@ -309,9 +362,50 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			sess.IsTeamLead,
 			sess.GitCommonDir,
 			sess.Branch,
+			len(sess.Subagents),
 		)
 		if err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
+		}
+
+		// Subagent runs: clear and reinsert for this session.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM subagent_runs WHERE parent_session_id = ?", sess.ID); err != nil {
+			return fmt.Errorf("clear subagent_runs %s: %w", sess.ID, err)
+		}
+		for _, run := range sess.Subagents {
+			isCompaction := 0
+			if run.IsCompaction {
+				isCompaction = 1
+			}
+			if _, err := runStmt.ExecContext(ctx,
+				sess.ID,
+				run.AgentID,
+				run.ParentClaudeSID,
+				run.Workspace,
+				run.GitCommonDir,
+				run.AgentType,
+				run.Description,
+				run.Model,
+				run.EnqueuedAt.Unix(),
+				run.DequeuedAt.Unix(),
+				run.StartedAt.Unix(),
+				run.EndedAt.Unix(),
+				run.Status,
+				run.ToolUseID,
+				run.OutputFile,
+				run.WorktreePath,
+				run.WorktreeBranch,
+				run.TotalTokens,
+				run.ToolUses,
+				run.DurationMs,
+				run.EntryCount,
+				run.SourcePath,
+				run.MetaPath,
+				isCompaction,
+				now,
+			); err != nil {
+				return fmt.Errorf("insert subagent_run %s/%s: %w", sess.ID, run.AgentID, err)
+			}
 		}
 
 		// Store iTerm2 <-> Claude session mapping.
@@ -529,12 +623,23 @@ func (s *Store) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 		for i, id := range filter.IDs {
 			args[i] = id
 		}
+		// Delete subagent_runs first; we don't rely on FK cascade because
+		// SQLite's foreign_keys pragma is off by default per connection.
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM subagent_runs WHERE parent_session_id IN (%s)", placeholders), args...); err != nil {
+			return fmt.Errorf("delete subagent_runs by id: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM sessions WHERE id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete by id: %w", err)
 		}
 	}
 
 	if filter.Agent != "" {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM subagent_runs WHERE parent_session_id IN (SELECT id FROM sessions WHERE "+agentFilter("agent")+")",
+			agentFilterArgs(filter.Agent)...,
+		); err != nil {
+			return fmt.Errorf("delete subagent_runs by agent: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE "+agentFilter("agent"), agentFilterArgs(filter.Agent)...); err != nil {
 			return fmt.Errorf("delete by agent: %w", err)
 		}

@@ -81,6 +81,7 @@ func (b *sqliteBackend) migrate() error {
 	for _, col := range []string{
 		"ALTER TABLE sessions ADD COLUMN git_common_dir TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE sessions ADD COLUMN branch TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE sessions ADD COLUMN subagent_run_count INTEGER NOT NULL DEFAULT 0",
 	} {
 		b.db.Exec(col)
 	}
@@ -100,6 +101,12 @@ func (b *sqliteBackend) BatchIndex(ctx context.Context, sessions []cass.Session)
 	}
 	defer stmt.Close()
 
+	runStmt, err := tx.PrepareContext(ctx, insertSubagentRunSQL)
+	if err != nil {
+		return fmt.Errorf("prepare subagent_runs: %w", err)
+	}
+	defer runStmt.Close()
+
 	now := time.Now().Unix()
 	for _, sess := range sessions {
 		content := buildContentCapped(sess, b.maxFTSBytes)
@@ -117,8 +124,29 @@ func (b *sqliteBackend) BatchIndex(ctx context.Context, sessions []cass.Session)
 			sess.Stats.Sparkline, string(statsJSON),
 			sess.TeamName, sess.AgentName, sess.IsTeamLead,
 			sess.GitCommonDir, sess.Branch,
+			len(sess.Subagents),
 		); err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
+		}
+
+		if _, err := tx.ExecContext(ctx, "DELETE FROM subagent_runs WHERE parent_session_id = ?", sess.ID); err != nil {
+			return fmt.Errorf("clear subagent_runs %s: %w", sess.ID, err)
+		}
+		for _, run := range sess.Subagents {
+			isCompaction := 0
+			if run.IsCompaction {
+				isCompaction = 1
+			}
+			if _, err := runStmt.ExecContext(ctx,
+				sess.ID, run.AgentID, run.ParentClaudeSID, run.Workspace, run.GitCommonDir,
+				run.AgentType, run.Description, run.Model,
+				run.EnqueuedAt.Unix(), run.DequeuedAt.Unix(), run.StartedAt.Unix(), run.EndedAt.Unix(),
+				run.Status, run.ToolUseID, run.OutputFile, run.WorktreePath, run.WorktreeBranch,
+				run.TotalTokens, run.ToolUses, run.DurationMs, run.EntryCount,
+				run.SourcePath, run.MetaPath, isCompaction, now,
+			); err != nil {
+				return fmt.Errorf("insert subagent_run %s/%s: %w", sess.ID, run.AgentID, err)
+			}
 		}
 	}
 	return tx.Commit()
@@ -362,8 +390,45 @@ const sessionsSchema = `
 		agent_name TEXT NOT NULL DEFAULT '',
 		is_team_lead INTEGER NOT NULL DEFAULT 0,
 		git_common_dir TEXT NOT NULL DEFAULT '',
-		branch TEXT NOT NULL DEFAULT ''
+		branch TEXT NOT NULL DEFAULT '',
+		subagent_run_count INTEGER NOT NULL DEFAULT 0
 	);
+
+	CREATE TABLE IF NOT EXISTS subagent_runs (
+		parent_session_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		parent_claude_sid TEXT NOT NULL DEFAULT '',
+		workspace TEXT NOT NULL DEFAULT '',
+		git_common_dir TEXT NOT NULL DEFAULT '',
+		agent_type TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		enqueued_at INTEGER NOT NULL DEFAULT 0,
+		dequeued_at INTEGER NOT NULL DEFAULT 0,
+		started_at INTEGER NOT NULL DEFAULT 0,
+		ended_at INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT '',
+		tool_use_id TEXT NOT NULL DEFAULT '',
+		output_file TEXT NOT NULL DEFAULT '',
+		worktree_path TEXT NOT NULL DEFAULT '',
+		worktree_branch TEXT NOT NULL DEFAULT '',
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		tool_uses INTEGER NOT NULL DEFAULT 0,
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		entry_count INTEGER NOT NULL DEFAULT 0,
+		source_path TEXT NOT NULL DEFAULT '',
+		meta_path TEXT NOT NULL DEFAULT '',
+		is_compaction INTEGER NOT NULL DEFAULT 0,
+		indexed_at INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (parent_session_id, agent_id),
+		FOREIGN KEY (parent_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_subagent_runs_started ON subagent_runs(started_at);
+	CREATE INDEX IF NOT EXISTS idx_subagent_runs_workspace ON subagent_runs(workspace);
+	CREATE INDEX IF NOT EXISTS idx_subagent_runs_git ON subagent_runs(git_common_dir);
+	CREATE INDEX IF NOT EXISTS idx_subagent_runs_model ON subagent_runs(model);
+	CREATE INDEX IF NOT EXISTS idx_subagent_runs_agent_type ON subagent_runs(agent_type);
 `
 
 // triggersSchema keeps session_fts in sync with sessions.
@@ -392,6 +457,18 @@ const insertSessionSQL = `
 		lines_written, turns, duration_secs, subagent_spawns, it2_splits, it2_sends,
 		it2_screens, it2_buffers, team_inbox_reads, team_inbox_sends, team_task_ops,
 		team_spawns, sparkline, stats_json, team_name, agent_name, is_team_lead,
-		git_common_dir, branch
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		git_common_dir, branch, subagent_run_count
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+// insertSubagentRunSQL inserts a single subagent run row.
+const insertSubagentRunSQL = `
+	INSERT INTO subagent_runs (
+		parent_session_id, agent_id, parent_claude_sid, workspace, git_common_dir,
+		agent_type, description, model,
+		enqueued_at, dequeued_at, started_at, ended_at,
+		status, tool_use_id, output_file, worktree_path, worktree_branch,
+		total_tokens, tool_uses, duration_ms, entry_count,
+		source_path, meta_path, is_compaction, indexed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
