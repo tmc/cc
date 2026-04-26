@@ -232,21 +232,18 @@ func getGlobalSearchDirs() []string {
 func getProjectSearchDirs() []string {
 	dirs := []string{"."}
 
-	// Find git root
-	gitRoot, err := findGitRoot()
+	gitCtx, err := cc.ResolveGitContext("")
 	if err == nil {
 		dirs = append(dirs,
-			filepath.Join(gitRoot, ".sessions"),
-			filepath.Join(gitRoot, ".claude", "sessions"),
+			filepath.Join(gitCtx.WorktreePath, ".sessions"),
+			filepath.Join(gitCtx.WorktreePath, ".claude", "sessions"),
 		)
 	}
 
-	// Add user directories
 	ch, _ := cc.ClaudeHome()
 	if ch != "" {
-		// Filter by git hash if in a repo
-		if gitRoot != "" {
-			hash := sha256.Sum256([]byte(gitRoot))
+		if err == nil {
+			hash := sha256.Sum256([]byte(gitCtx.GitCommonDir))
 			hashStr := fmt.Sprintf("%x", hash)[:8]
 			dirs = append(dirs, filepath.Join(ch, "sessions", hashStr))
 		}
@@ -254,24 +251,6 @@ func getProjectSearchDirs() []string {
 	}
 
 	return dirs
-}
-
-func findGitRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("not in a git repository")
-		}
-		dir = parent
-	}
 }
 
 func searchFile(path string, re *regexp.Regexp) ([]Match, error) {

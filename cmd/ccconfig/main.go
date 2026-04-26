@@ -212,11 +212,11 @@ func getConfigPath() (string, error) {
 	}
 
 	if *projectFlag {
-		gitRoot, err := findGitRoot()
+		gitCtx, err := cc.ResolveGitContext("")
 		if err != nil {
 			return "", fmt.Errorf("not in a git repository")
 		}
-		return filepath.Join(gitRoot, dirName, "config"), nil
+		return filepath.Join(gitCtx.WorktreePath, dirName, "config"), nil
 	}
 
 	// Default to global
@@ -250,9 +250,8 @@ func loadAllConfigs() []Config {
 		configs = append(configs, cfg)
 	}
 
-	// Project config
-	if gitRoot, err := findGitRoot(); err == nil {
-		projectPath := filepath.Join(gitRoot, dirName, "config")
+	if gitCtx, err := cc.ResolveGitContext(""); err == nil {
+		projectPath := filepath.Join(gitCtx.WorktreePath, dirName, "config")
 		if cfg := loadConfig(projectPath, "project"); len(cfg.values) > 0 {
 			configs = append(configs, cfg)
 		}
@@ -379,20 +378,3 @@ func writeConfig(path string, values map[string]string) error {
 	return nil
 }
 
-func findGitRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("not in a git repository")
-		}
-		dir = parent
-	}
-}

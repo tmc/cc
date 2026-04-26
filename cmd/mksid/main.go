@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
+
+	"github.com/tmc/cc"
 )
 
 var (
@@ -98,13 +99,12 @@ func generateGitHash() string {
 		return "00000000"
 	}
 
-	// Find git repository root
-	gitRoot, err := findGitRoot()
+	gitCtx, err := cc.ResolveGitContext("")
+	var gitRoot string
 	if err != nil {
 		if *verbose {
 			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		}
-		// Fall back to CWD hash
 		cwd, err := os.Getwd()
 		if err != nil {
 			if *verbose {
@@ -117,6 +117,7 @@ func generateGitHash() string {
 			fmt.Fprintf(os.Stderr, "Falling back to CWD: %s\n", cwd)
 		}
 	} else {
+		gitRoot = gitCtx.GitCommonDir
 		if *verbose {
 			fmt.Fprintf(os.Stderr, "Git repo: %s\n", gitRoot)
 		}
@@ -133,31 +134,3 @@ func generateGitHash() string {
 	return hashStr
 }
 
-// findGitRoot finds the root directory of the git repository.
-// It traverses up from the current working directory looking for a .git directory.
-func findGitRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("get working directory: %w", err)
-	}
-
-	for {
-		gitPath := filepath.Join(dir, ".git")
-		if info, err := os.Stat(gitPath); err == nil {
-			// Found .git - check if it's a directory or file (for worktrees)
-			if info.IsDir() {
-				return dir, nil
-			}
-			// .git file (worktree) - still use this directory as root
-			return dir, nil
-		}
-
-		// Move up one directory
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached filesystem root without finding .git
-			return "", fmt.Errorf("no git repository found")
-		}
-		dir = parent
-	}
-}
