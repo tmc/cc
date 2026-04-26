@@ -43,6 +43,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "  links      show inter-session communication graph")
 		fmt.Fprintln(os.Stderr, "  map        show iTerm2 <-> Claude session ID mappings")
 		fmt.Fprintln(os.Stderr, "  stats      show index statistics")
+		fmt.Fprintln(os.Stderr, "  subagents  list Task subagent runs")
 		fmt.Fprintln(os.Stderr, "  requests   show HAR-derived API request breakdown")
 		fmt.Fprintln(os.Stderr, "  web        start web UI server")
 		os.Exit(1)
@@ -84,6 +85,8 @@ func run() error {
 		return runMap(ctx, svc, args[1:], *jsonOutput)
 	case "stats":
 		return runStats(ctx, svc, *jsonOutput)
+	case "subagents":
+		return runSubagents(ctx, svc, args[1:], *jsonOutput)
 	case "requests":
 		return runRequests(ctx, svc, args[1:], *jsonOutput)
 	case "web":
@@ -492,7 +495,126 @@ func runStats(ctx context.Context, svc *service.Service, jsonOut bool) error {
 			fmt.Printf("%-28s %v\n", k, v)
 		}
 	}
+
+	// Subagent runs summary.
+	if sum, err := svc.SubagentRunsSummary(ctx); err == nil && sum.TotalRuns > 0 {
+		fmt.Printf("%-28s %d runs across %d sessions\n", "subagent_runs", sum.TotalRuns, sum.SessionsWithRuns)
+		if sum.TotalTokens > 0 {
+			fmt.Printf("%-28s %d\n", "subagent_total_tokens", sum.TotalTokens)
+		}
+		if sum.TotalDurationMs > 0 {
+			fmt.Printf("%-28s %s\n", "subagent_total_duration", time.Duration(sum.TotalDurationMs)*time.Millisecond)
+		}
+	}
 	return nil
+}
+
+func runSubagents(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
+	fs := flag.NewFlagSet("subagents", flag.ExitOnError)
+	workspace := fs.String("workspace", "", "filter by workspace path substring")
+	gitCommonDir := fs.String("git-common-dir", "", "filter by resolved git common dir")
+	model := fs.String("model", "", "filter by model id (exact match)")
+	agentType := fs.String("agent-type", "", "filter by agent type (e.g. general-purpose)")
+	limit := fs.Int("limit", 50, "max rows to return")
+	byType := fs.Bool("by-agent-type", false, "show count histogram by agent type instead of listing runs")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *byType {
+		sum, err := svc.SubagentRunsSummary(ctx)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(sum.ByAgentType)
+		}
+		// Stable order: most-frequent first.
+		var rows []agentTypeCount
+		for k, v := range sum.ByAgentType {
+			rows = append(rows, agentTypeCount{k, v})
+		}
+		sortByCountDesc(rows)
+		for _, r := range rows {
+			fmt.Printf("%6d  %s\n", r.v, r.k)
+		}
+		return nil
+	}
+
+	runs, err := svc.SubagentRuns(ctx, store.SubagentRunFilter{
+		Workspace:    *workspace,
+		GitCommonDir: *gitCommonDir,
+		Model:        *model,
+		AgentType:    *agentType,
+		Limit:        *limit,
+	})
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(runs)
+	}
+	if len(runs) == 0 {
+		return nil
+	}
+	for _, r := range runs {
+		started := "-"
+		if !r.StartedAt.IsZero() {
+			started = r.StartedAt.Format("2006-01-02 15:04")
+		}
+		dur := "-"
+		if r.DurationMs > 0 {
+			dur = (time.Duration(r.DurationMs) * time.Millisecond).Round(time.Millisecond).String()
+		}
+		title := r.ParentTitle
+		if len(title) > 50 {
+			title = title[:47] + "..."
+		}
+		fmt.Printf("%s  %-10s  %-15s  %-22s  %8s  %7d tok  %-9s  %s\n",
+			started, r.AgentID, agentTypeOrDash(r.AgentType), modelOrDash(r.Model),
+			dur, r.TotalTokens, statusOrDash(r.Status), title)
+	}
+	return nil
+}
+
+func agentTypeOrDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func modelOrDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func statusOrDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+type agentTypeCount struct {
+	k string
+	v int
+}
+
+// sortByCountDesc sorts in descending count order, breaking ties on key.
+func sortByCountDesc(rows []agentTypeCount) {
+	for i := 1; i < len(rows); i++ {
+		for j := i; j > 0; j-- {
+			a, b := rows[j-1], rows[j]
+			if b.v > a.v || (b.v == a.v && b.k < a.k) {
+				rows[j-1], rows[j] = b, a
+			} else {
+				break
+			}
+		}
+	}
 }
 
 func runWeb(ctx context.Context, svc *service.Service, args []string, logger *slog.Logger) error {

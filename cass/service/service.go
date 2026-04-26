@@ -449,6 +449,16 @@ func (s *Service) TeamConfigs(ctx context.Context) ([]store.TeamConfig, error) {
 	return s.store.TeamConfigs(ctx)
 }
 
+// SubagentRuns lists Task subagent invocations matching the given filter.
+func (s *Service) SubagentRuns(ctx context.Context, f store.SubagentRunFilter) ([]store.SubagentRunListEntry, error) {
+	return s.store.SubagentRuns(ctx, f)
+}
+
+// SubagentRunsSummary returns aggregate counts and per-agent-type histogram.
+func (s *Service) SubagentRunsSummary(ctx context.Context) (store.SubagentRunSummary, error) {
+	return s.store.SubagentRunsSummary(ctx)
+}
+
 // Close releases resources.
 func (s *Service) Close() error {
 	return s.store.Close()
