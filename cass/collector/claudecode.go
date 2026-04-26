@@ -98,18 +98,23 @@ func (c *ClaudeCode) scanDir(ctx context.Context, root string, config cass.ScanC
 }
 
 func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
-	entries, err := cc.ReadFile(path)
+	parentEntries, err := cc.ReadFile(path)
 	if err != nil {
 		return cass.Session{}, err
 	}
-	if len(entries) == 0 {
+	if len(parentEntries) == 0 {
 		return cass.Session{}, fmt.Errorf("empty session: %s", path)
 	}
 
-	// Merge subagent entries. Subagent files live at:
+	// Merge subagent entries into a separate slice for content/FTS purposes.
+	// Subagent files live at:
 	//   <parent-dir>/<parent-uuid>/subagents/agent-<agentId>.jsonl
 	// They share the parent's sessionId, so their tokens accumulate correctly.
 	// Exclude acompact-* files (compaction subagents that duplicate history).
+	//
+	// We keep parentEntries separate so queue-operation pairing in
+	// extractSubagentRuns sees only the parent's events.
+	entries := parentEntries
 	subagentDir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
 	if infos, err := os.ReadDir(subagentDir); err == nil {
 		for _, fi := range infos {
@@ -186,7 +191,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 	// Classify team role from JSONL data.
 	teamName, agentName, isTeamLead := ClassifyTeamRole(entries)
 
-	return cass.Session{
+	session := cass.Session{
 		ID:           id,
 		Agent:        "claude-code",
 		Title:        titleFromSummary(sum),
@@ -202,7 +207,9 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 		TeamName:     teamName,
 		AgentName:    agentName,
 		IsTeamLead:   isTeamLead,
-	}, nil
+	}
+	session.Subagents = extractSubagentRuns(path, parentEntries, session)
+	return session, nil
 }
 
 func (c *ClaudeCode) root() (string, error) {
