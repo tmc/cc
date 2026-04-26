@@ -559,6 +559,7 @@ type SessionSummary struct {
 	File         string    `json:"file"`
 	Project      string    `json:"project"`
 	CWD          string    `json:"cwd,omitempty"`
+	DistinctCWDs []string  `json:"distinct_cwds,omitempty"`
 	GitBranch    string    `json:"git_branch,omitempty"`
 	Version      string    `json:"version,omitempty"`
 	Slug         string    `json:"slug,omitempty"`
@@ -577,6 +578,7 @@ type SessionSummary struct {
 // Summarize builds a SessionSummary from entries.
 func Summarize(file string, entries []Entry) SessionSummary {
 	s := SessionSummary{File: file}
+	seenCWDs := map[string]bool{}
 	for _, e := range entries {
 		s.TotalLines++
 		if e.SessionID != "" && s.SessionID == "" {
@@ -585,8 +587,12 @@ func Summarize(file string, entries []Entry) SessionSummary {
 		if e.Version != "" && s.Version == "" {
 			s.Version = e.Version
 		}
-		if e.CWD != "" && s.CWD == "" {
+		if e.CWD != "" {
 			s.CWD = e.CWD
+			if !seenCWDs[e.CWD] {
+				seenCWDs[e.CWD] = true
+				s.DistinctCWDs = append(s.DistinctCWDs, e.CWD)
+			}
 		}
 		if e.GitBranch != "" && s.GitBranch == "" {
 			s.GitBranch = e.GitBranch

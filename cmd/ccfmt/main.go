@@ -280,20 +280,26 @@ func writeMarkdownEntry(w io.Writer, e cc.Entry) error {
 }
 
 type sessionMeta struct {
-	title     string
-	sessionID string
-	cwd       string
-	started   time.Time
+	title        string
+	sessionID    string
+	cwd          string
+	distinctCWDs []string
+	started      time.Time
 }
 
 func summarize(entries []cc.Entry) sessionMeta {
 	var meta sessionMeta
+	seen := map[string]bool{}
 	for _, e := range entries {
 		if meta.sessionID == "" && e.SessionID != "" {
 			meta.sessionID = e.SessionID
 		}
-		if meta.cwd == "" && e.CWD != "" {
+		if e.CWD != "" {
 			meta.cwd = e.CWD
+			if !seen[e.CWD] {
+				seen[e.CWD] = true
+				meta.distinctCWDs = append(meta.distinctCWDs, e.CWD)
+			}
 		}
 		if meta.started.IsZero() && !e.Timestamp.IsZero() {
 			meta.started = e.Timestamp
