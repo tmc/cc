@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -62,5 +64,55 @@ func TestRenderResumeCommand(t *testing.T) {
 	want := "cd /work/proj; codex resume sid-123"
 	if got != want {
 		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
+func TestResolveMatchPrefersLatestExistingCWD(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, "stale-does-not-exist")
+	live := filepath.Join(dir, "live")
+	if err := os.MkdirAll(live, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	session := filepath.Join(dir, "session.jsonl")
+	writeJSONL(t, session, []map[string]any{
+		{"sessionId": "s1", "cwd": stale},
+		{"sessionId": "s1", "cwd": live},
+	})
+
+	r := resolveMatch(cc.IndexEntry{FullPath: session, ProjectPath: stale})
+	if r.target != live {
+		t.Fatalf("target = %q, want %q", r.target, live)
+	}
+}
+
+func TestResolveMatchFallsBackToProjectPath(t *testing.T) {
+	dir := t.TempDir()
+	gone := filepath.Join(dir, "gone-1")
+	gone2 := filepath.Join(dir, "gone-2")
+	session := filepath.Join(dir, "session.jsonl")
+	writeJSONL(t, session, []map[string]any{
+		{"sessionId": "s1", "cwd": gone},
+		{"sessionId": "s1", "cwd": gone2},
+	})
+
+	r := resolveMatch(cc.IndexEntry{FullPath: session, ProjectPath: dir})
+	if r.target != dir {
+		t.Fatalf("target = %q, want %q", r.target, dir)
+	}
+}
+
+func writeJSONL(t *testing.T, path string, lines []map[string]any) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	for _, l := range lines {
+		if err := enc.Encode(l); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

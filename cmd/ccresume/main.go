@@ -64,33 +64,61 @@ func run() error {
 		return fmt.Errorf("no sessions found matching %q", query)
 	}
 
-	// Sort by modified time, newest first
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].ModifiedTime().After(matches[j].ModifiedTime())
+	resolved := make([]resolvedMatch, len(matches))
+	for i, m := range matches {
+		resolved[i] = resolveMatch(m)
+	}
+
+	sort.SliceStable(resolved, func(i, j int) bool {
+		return resolved[i].entry.ModifiedTime().After(resolved[j].entry.ModifiedTime())
 	})
 
-	// If current directory matches a result, prioritize it
-	cwd, _ := os.Getwd()
-	for i, m := range matches {
-		if strings.HasPrefix(cwd, m.ProjectPath) || strings.HasPrefix(m.ProjectPath, cwd) {
-			// Move matching entry to front
-			matches = append([]cc.IndexEntry{m}, append(matches[:i], matches[i+1:]...)...)
-			break
+	if cur, err := cc.ResolveGitContext(""); err == nil && cur.GitCommonDir != "" {
+		for i, r := range resolved {
+			if r.summary.GitCommonDir == cur.GitCommonDir {
+				resolved = append([]resolvedMatch{r}, append(resolved[:i], resolved[i+1:]...)...)
+				break
+			}
 		}
 	}
 
 	if *oneFlag {
-		matches = matches[:1]
+		resolved = resolved[:1]
 	}
 
-	for _, m := range matches {
-		bin, args := resumeInvocation(m)
+	for _, r := range resolved {
+		bin, args := resumeInvocation(r.entry)
 		if *launchFlag {
-			return launchAgent(bin, args, m.ProjectPath)
+			return launchAgent(bin, args, r.target)
 		}
-		fmt.Println(renderResumeCommand(m.ProjectPath, bin, args))
+		fmt.Println(renderResumeCommand(r.target, bin, args))
 	}
 	return nil
+}
+
+type resolvedMatch struct {
+	entry   cc.IndexEntry
+	summary cc.SessionSummary
+	target  string
+}
+
+func resolveMatch(m cc.IndexEntry) resolvedMatch {
+	r := resolvedMatch{entry: m, target: m.ProjectPath}
+	entries, err := cc.ReadFile(m.FullPath)
+	if err != nil {
+		return r
+	}
+	r.summary = cc.Summarize(m.FullPath, entries)
+	for i := len(r.summary.DistinctCWDs) - 1; i >= 0; i-- {
+		if dirExists(r.summary.DistinctCWDs[i]) {
+			r.target = r.summary.DistinctCWDs[i]
+			return r
+		}
+	}
+	if r.summary.GitCommonDir != "" && dirExists(r.summary.GitCommonDir) {
+		r.target = r.summary.GitCommonDir
+	}
+	return r
 }
 
 func findMatches(query string, since time.Duration) ([]cc.IndexEntry, error) {
