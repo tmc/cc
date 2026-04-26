@@ -78,6 +78,12 @@ func (b *sqliteBackend) migrate() error {
 	if _, err := b.db.Exec(schema); err != nil {
 		return err
 	}
+	for _, col := range []string{
+		"ALTER TABLE sessions ADD COLUMN git_common_dir TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE sessions ADD COLUMN branch TEXT NOT NULL DEFAULT ''",
+	} {
+		b.db.Exec(col)
+	}
 	return nil
 }
 
@@ -110,6 +116,7 @@ func (b *sqliteBackend) BatchIndex(ctx context.Context, sessions []cass.Session)
 			sess.Stats.TeamTaskOps, sess.Stats.TeamSpawns,
 			sess.Stats.Sparkline, string(statsJSON),
 			sess.TeamName, sess.AgentName, sess.IsTeamLead,
+			sess.GitCommonDir, sess.Branch,
 		); err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
 		}
@@ -145,6 +152,10 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 		where = append(where, "s.workspace LIKE ?")
 		args = append(args, "%"+req.Filters.Workspace+"%")
 	}
+	if req.Filters.GitCommonDir != "" {
+		where = append(where, "s.git_common_dir = ?")
+		args = append(args, req.Filters.GitCommonDir)
+	}
 	if req.Filters.Team != "" {
 		where = append(where, "s.team_name = ?")
 		args = append(args, req.Filters.Team)
@@ -179,7 +190,7 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 		orderClause = "ORDER BY s.ended_at DESC"
 	}
 
-	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead`
+	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch`
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -216,6 +227,7 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 			&h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
 			&h.Sparkline, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits,
 			&statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
+			&h.GitCommonDir, &h.Branch,
 		); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
@@ -348,7 +360,9 @@ const sessionsSchema = `
 		stats_json TEXT NOT NULL DEFAULT '{}',
 		team_name TEXT NOT NULL DEFAULT '',
 		agent_name TEXT NOT NULL DEFAULT '',
-		is_team_lead INTEGER NOT NULL DEFAULT 0
+		is_team_lead INTEGER NOT NULL DEFAULT 0,
+		git_common_dir TEXT NOT NULL DEFAULT '',
+		branch TEXT NOT NULL DEFAULT ''
 	);
 `
 
@@ -377,6 +391,7 @@ const insertSessionSQL = `
 		tool_calls, input_tokens, output_tokens, files_read, files_written, files_edited,
 		lines_written, turns, duration_secs, subagent_spawns, it2_splits, it2_sends,
 		it2_screens, it2_buffers, team_inbox_reads, team_inbox_sends, team_task_ops,
-		team_spawns, sparkline, stats_json, team_name, agent_name, is_team_lead
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		team_spawns, sparkline, stats_json, team_name, agent_name, is_team_lead,
+		git_common_dir, branch
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `

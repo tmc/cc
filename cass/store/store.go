@@ -231,6 +231,9 @@ func (s *Store) migrate() error {
 		"ALTER TABLE api_requests ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
 		"CREATE INDEX IF NOT EXISTS idx_apireq_account ON api_requests(account_uuid)",
 		"ALTER TABLE api_requests ADD COLUMN context_breakdown_json TEXT NOT NULL DEFAULT '{}'",
+		"ALTER TABLE sessions ADD COLUMN git_common_dir TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE sessions ADD COLUMN branch TEXT NOT NULL DEFAULT ''",
+		"CREATE INDEX IF NOT EXISTS idx_sessions_git_common_dir ON sessions(git_common_dir)",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -250,8 +253,8 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			tool_calls, input_tokens, output_tokens, files_read, files_written, files_edited, lines_written,
 			turns, duration_secs, subagent_spawns, it2_splits, it2_sends, it2_screens, it2_buffers,
 			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns, sparkline, stats_json,
-			team_name, agent_name, is_team_lead)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			team_name, agent_name, is_team_lead, git_common_dir, branch)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare sessions: %w", err)
@@ -304,6 +307,8 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			sess.TeamName,
 			sess.AgentName,
 			sess.IsTeamLead,
+			sess.GitCommonDir,
+			sess.Branch,
 		)
 		if err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
@@ -378,6 +383,10 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		where = append(where, "s.workspace LIKE ?")
 		args = append(args, "%"+req.Filters.Workspace+"%")
 	}
+	if req.Filters.GitCommonDir != "" {
+		where = append(where, "s.git_common_dir = ?")
+		args = append(args, req.Filters.GitCommonDir)
+	}
 	if req.Filters.Team != "" {
 		where = append(where, "s.team_name = ?")
 		args = append(args, req.Filters.Team)
@@ -415,7 +424,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	}
 
 	// Build query with BM25 ranking when doing FTS.
-	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.subagent_spawns, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead`
+	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.subagent_spawns, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch`
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -453,7 +462,8 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		var isTeamLead int
 		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
 			&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
-			&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead); err != nil {
+			&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
+			&h.GitCommonDir, &h.Branch); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		if startedUnix > 0 {
