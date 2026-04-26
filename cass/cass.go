@@ -7,16 +7,18 @@ import (
 
 // Session is the normalized representation of a coding session from any agent.
 type Session struct {
-	ID         string         `json:"id"`
-	Agent      string         `json:"agent"`
-	Title      string         `json:"title"`
-	Workspace  string         `json:"workspace"`
-	SourcePath string         `json:"source_path"`
-	StartedAt  time.Time      `json:"started_at"`
-	EndedAt    time.Time      `json:"ended_at"`
-	Messages   []Message      `json:"messages"`
-	Stats      SessionStats   `json:"stats"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
+	ID           string         `json:"id"`
+	Agent        string         `json:"agent"`
+	Title        string         `json:"title"`
+	Workspace    string         `json:"workspace"`
+	GitCommonDir string         `json:"git_common_dir,omitempty"`
+	Branch       string         `json:"branch,omitempty"`
+	SourcePath   string         `json:"source_path"`
+	StartedAt    time.Time      `json:"started_at"`
+	EndedAt      time.Time      `json:"ended_at"`
+	Messages     []Message      `json:"messages"`
+	Stats        SessionStats   `json:"stats"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 
 	// Agent teams context (native Claude Code teams).
 	TeamName   string `json:"team_name,omitempty"`
@@ -100,11 +102,12 @@ type SearchRequest struct {
 
 // Filters constrains search results.
 type Filters struct {
-	Agent     string    // Filter by agent slug.
-	Workspace string    // Filter by workspace path.
-	Team      string    // Filter by agent team name.
-	After     time.Time // Sessions started after this time.
-	Before    time.Time // Sessions started before this time.
+	Agent        string    // Filter by agent slug.
+	Workspace    string    // Filter by workspace path.
+	GitCommonDir string    // Filter by resolved git common dir (stable across worktrees).
+	Team         string    // Filter by agent team name.
+	After        time.Time // Sessions started after this time.
+	Before       time.Time // Sessions started before this time.
 }
 
 // SearchResult holds search results.
@@ -115,15 +118,17 @@ type SearchResult struct {
 
 // Hit is a single search result.
 type Hit struct {
-	SessionID  string  `json:"session_id"`
-	Agent      string  `json:"agent"`
-	Title      string  `json:"title"`
-	Snippet    string  `json:"snippet"`
-	Score      float64 `json:"score"`
-	Workspace  string  `json:"workspace,omitempty"`
-	SourcePath string  `json:"source_path,omitempty"`
-	StartedAt  string  `json:"started_at,omitempty"`
-	EndedAt    string  `json:"ended_at,omitempty"`
+	SessionID    string  `json:"session_id"`
+	Agent        string  `json:"agent"`
+	Title        string  `json:"title"`
+	Snippet      string  `json:"snippet"`
+	Score        float64 `json:"score"`
+	Workspace    string  `json:"workspace,omitempty"`
+	GitCommonDir string  `json:"git_common_dir,omitempty"`
+	Branch       string  `json:"branch,omitempty"`
+	SourcePath   string  `json:"source_path,omitempty"`
+	StartedAt    string  `json:"started_at,omitempty"`
+	EndedAt      string  `json:"ended_at,omitempty"`
 
 	// Stats summary (populated when available).
 	ToolCalls    int `json:"tool_calls,omitempty"`
@@ -229,9 +234,10 @@ type GraphData struct {
 
 // GraphNode represents a session in the communication graph.
 type GraphNode struct {
-	ID        string `json:"id"`         // iTerm2 session ID (short prefix).
-	Workspace string `json:"workspace"`
-	Title     string `json:"title"`
+	ID           string `json:"id"`         // iTerm2 session ID (short prefix).
+	Workspace    string `json:"workspace"`
+	GitCommonDir string `json:"git_common_dir,omitempty"`
+	Title        string `json:"title"`
 	StartedAt int64  `json:"started_at,omitempty"`
 	ToolCalls int    `json:"tool_calls,omitempty"`
 	Turns     int    `json:"turns,omitempty"`
