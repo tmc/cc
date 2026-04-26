@@ -554,6 +554,9 @@ func ReadSubagents(path string) ([]Entry, error) {
 }
 
 // SessionSummary holds summarized metadata for a session file.
+// GitBranch is the branch recorded in the session entries; the embedded
+// GitContext fields are resolved from the latest CWD on the local
+// filesystem and may differ if the worktree has since moved or changed.
 type SessionSummary struct {
 	SessionID    string    `json:"session_id"`
 	File         string    `json:"file"`
@@ -561,6 +564,7 @@ type SessionSummary struct {
 	CWD          string    `json:"cwd,omitempty"`
 	DistinctCWDs []string  `json:"distinct_cwds,omitempty"`
 	GitBranch    string    `json:"git_branch,omitempty"`
+	GitContext
 	Version      string    `json:"version,omitempty"`
 	Slug         string    `json:"slug,omitempty"`
 	Model        string    `json:"model,omitempty"`
@@ -637,6 +641,11 @@ func Summarize(file string, entries []Entry) SessionSummary {
 					}
 				}
 			}
+		}
+	}
+	if s.CWD != "" {
+		if ctx, err := ResolveGitContext(s.CWD); err == nil {
+			s.GitContext = ctx
 		}
 	}
 	return s

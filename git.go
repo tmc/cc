@@ -11,10 +11,10 @@ import (
 // GitDir and GitCommonDir differ for linked worktrees: GitDir is
 // .git/worktrees/<name>, GitCommonDir is the main repo's .git.
 type GitContext struct {
-	WorktreePath string
-	GitDir       string
-	GitCommonDir string
-	Branch       string
+	WorktreePath string `json:"worktree_path,omitempty"`
+	GitDir       string `json:"git_dir,omitempty"`
+	GitCommonDir string `json:"git_common_dir,omitempty"`
+	Branch       string `json:"branch,omitempty"`
 }
 
 // ResolveGitContext returns the GitContext for path. An empty path
