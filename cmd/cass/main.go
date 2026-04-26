@@ -192,6 +192,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	agent := fs.String("agent", "", "filter by agent slug")
 	workspace := fs.String("workspace", "", "filter by workspace path or project name")
+	gitCommonDir := fs.String("git-common-dir", "", "filter by resolved git common dir (stable across worktrees)")
 	pwd := fs.Bool("pwd", false, "filter to current working directory")
 	since := fs.Duration("since", 0, "sessions within duration (e.g. 12h, 24h, 168h)")
 	after := fs.String("after", "", "sessions after date (RFC3339 or YYYY-MM-DD)")
@@ -220,8 +221,9 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 		Sort:  cass.SortMode(*sort),
 		Limit: *limit,
 		Filters: cass.Filters{
-			Agent:     *agent,
-			Workspace: ws,
+			Agent:        *agent,
+			Workspace:    ws,
+			GitCommonDir: *gitCommonDir,
 		},
 	}
 
