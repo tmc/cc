@@ -93,13 +93,13 @@ func readEntries(args []string) ([]cc.Entry, string, error) {
 		return entries, "stdin", err
 	}
 	if len(args) == 1 {
-		entries, err := cc.ReadFile(args[0])
+		entries, err := cc.ReadFileWithSubagents(args[0])
 		return entries, args[0], err
 	}
 
 	var all []cc.Entry
 	for _, path := range args {
-		entries, err := cc.ReadFile(path)
+		entries, err := cc.ReadFileWithSubagents(path)
 		if err != nil {
 			return nil, "", err
 		}
@@ -339,44 +339,70 @@ func shouldIncludeEntry(e cc.Entry) bool {
 func textLabel(e cc.Entry) string {
 	switch {
 	case e.IsCompactSummary:
-		return "compact summary"
+		return decorateTextLabel("compact summary", e)
 	case e.Type == "system" && e.Subtype == "compact_boundary":
-		return "compacted"
+		return decorateTextLabel("compacted", e)
 	case isToolResultEntry(e):
-		return "tool result"
+		return decorateTextLabel("tool result", e)
 	case e.Message != nil && e.Message.Role != "":
-		if e.Phase != "" {
-			return e.Message.Role + " " + e.Phase
-		}
-		return e.Message.Role
+		return decorateTextLabel(e.Message.Role, e)
 	default:
-		if e.Phase != "" {
-			return e.Type + " " + e.Phase
-		}
-		return e.Type
+		return decorateTextLabel(e.Type, e)
 	}
 }
 
 func markdownLabel(e cc.Entry) string {
 	switch {
 	case e.IsCompactSummary:
-		return "Compact Summary"
+		return decorateMarkdownLabel("Compact Summary", e)
 	case e.Type == "system" && e.Subtype == "compact_boundary":
-		return "Compacted"
+		return decorateMarkdownLabel("Compacted", e)
 	case isToolResultEntry(e):
-		return "Tool Result"
+		return decorateMarkdownLabel("Tool Result", e)
 	case e.Message != nil && e.Message.Role != "":
-		label := strings.Title(e.Message.Role)
-		if e.Phase != "" {
-			label += " (" + e.Phase + ")"
-		}
-		return label
+		return decorateMarkdownLabel(strings.Title(e.Message.Role), e)
 	default:
-		label := strings.Title(e.Type)
-		if e.Phase != "" {
-			label += " (" + e.Phase + ")"
-		}
-		return label
+		return decorateMarkdownLabel(strings.Title(e.Type), e)
+	}
+}
+
+func decorateTextLabel(base string, e cc.Entry) string {
+	if ctx := entryContext(e); ctx != "" {
+		return base + " [" + ctx + "]"
+	}
+	return base
+}
+
+func decorateMarkdownLabel(base string, e cc.Entry) string {
+	if ctx := entryContext(e); ctx != "" {
+		return base + " (" + ctx + ")"
+	}
+	return base
+}
+
+func entryContext(e cc.Entry) string {
+	var parts []string
+	if e.Phase != "" {
+		parts = append(parts, e.Phase)
+	}
+	if actor := entryActor(e); actor != "" {
+		parts = append(parts, actor)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func entryActor(e cc.Entry) string {
+	switch {
+	case e.AgentName != "" && e.TeamName != "":
+		return "agent " + e.AgentName + "@" + e.TeamName
+	case e.AgentName != "":
+		return "agent " + e.AgentName
+	case e.AgentID != "":
+		return "subagent " + e.AgentID
+	case e.IsSidechain:
+		return "subagent"
+	default:
+		return ""
 	}
 }
 

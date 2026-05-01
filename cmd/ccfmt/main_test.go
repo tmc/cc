@@ -190,6 +190,41 @@ func TestRunMarkdownToolResultImageUsesRedactor(t *testing.T) {
 	}
 }
 
+func TestRunMarkdownIncludesSubagentEntries(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "session.jsonl")
+	writeFile(t, path, strings.Join([]string{
+		`{"timestamp":"2026-04-10T21:03:53Z","type":"session_meta","payload":{"id":"sid-123","cwd":"/work/repo","cli_version":"0.1.0","originator":"Codex Desktop","source":"vscode"}}`,
+		`{"timestamp":"2026-04-10T21:03:54Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"review the changes"}]}}`,
+	}, "\n")+"\n")
+
+	subDir := filepath.Join(tmp, "session", "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	writeFile(t, filepath.Join(subDir, "agent-reviewer.jsonl"), strings.Join([]string{
+		`{"timestamp":"2026-04-10T21:03:55Z","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I found the regression in the retry path."}]}}`,
+	}, "\n")+"\n")
+
+	resetFlagsForTest()
+	*formatFlag = "markdown"
+
+	var out bytes.Buffer
+	if err := run(&out, []string{path}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"## Assistant (subagent reviewer)",
+		"I found the regression in the retry path.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("markdown output missing %q\n%s", want, got)
+		}
+	}
+}
+
 func TestRunMarkdownRedactsMessageSecrets(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "session.jsonl")
