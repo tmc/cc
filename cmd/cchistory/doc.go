@@ -1,15 +1,15 @@
-// Command chistory searches through Claude Code session history.
+// Command cchistory searches through Claude Code session history.
 //
 // # Usage
 //
-//	chistory [options] [pattern]
-//	chistory                          # Show all history (like bash history)
-//	chistory 50                       # Show last 50 entries
-//	chistory "error handling"         # Search for pattern
-//	chistory -local                   # Current directory only
-//	chistory -session SID             # Specific session only
+//	cchistory [options] [pattern]
+//	cchistory                          # Show all history (like bash history)
+//	cchistory 50                       # Show last 50 entries
+//	cchistory "error handling"         # Search for pattern
+//	cchistory -local                   # Current directory only
+//	cchistory -session SID             # Specific session only
 //
-// The chistory command works like bash history but for Claude Code sessions.
+// The cchistory command works like bash history but for Claude Code sessions.
 // It shows commands and responses from session NDJSON files, with smart
 // defaults for the current directory and time-based filtering.
 //
@@ -17,31 +17,31 @@
 //
 // Show recent history:
 //
-//	chistory           # All recent sessions
-//	chistory 100       # Last 100 messages
-//	chistory -n 50     # Last 50 messages (explicit)
+//	cchistory           # All recent sessions
+//	cchistory 100       # Last 100 messages
+//	cchistory -n 50     # Last 50 messages (explicit)
 //
 // Search history:
 //
-//	chistory pattern   # Search all messages
+//	cchistory pattern   # Search all messages
 //	!pattern           # Shell expansion (if configured)
 //
 // # Directory Awareness
 //
-// By default, chistory is directory-aware:
+// By default, cchistory is directory-aware:
 //
 //   - Searches sessions for current git repo (via mksid hash)
 //   - Falls back to CWD-based session discovery
 //   - Use -global to search all sessions across all projects
 //   - Use -local to restrict to current directory only
 //
-// This means running chistory in different projects shows relevant history.
+// This means running cchistory in different projects shows relevant history.
 //
 // # Arguments
 //
 //	[N]
 //	    Show last N messages (like history N)
-//	    Example: chistory 50
+//	    Example: cchistory 50
 //
 //	pattern
 //	    Search pattern (supports regex)
@@ -154,7 +154,7 @@
 //
 // # Search Behavior
 //
-// By default, chistory searches all message content:
+// By default, cchistory searches all message content:
 //
 //   - User messages (commands)
 //   - Assistant messages (responses)
@@ -188,54 +188,54 @@
 //
 // Basic usage (like bash history):
 //
-//	chistory              # Show recent history for current project
-//	chistory 50           # Show last 50 messages
-//	chistory "git"        # Search for "git" in history
+//	cchistory              # Show recent history for current project
+//	cchistory 50           # Show last 50 messages
+//	cchistory "git"        # Search for "git" in history
 //
 // Directory-aware searches:
 //
-//	chistory -local       # Current directory only
-//	chistory -global      # All projects
-//	cd /other/project && chistory  # Different project's history
+//	cchistory -local       # Current directory only
+//	cchistory -global      # All projects
+//	cd /other/project && cchistory  # Different project's history
 //
 // Focus on specific session:
 //
-//	chistory -session 20241115-abc123-def456
-//	chistory -session $(ls -t *.ndjson | head -1)
+//	cchistory -session 20241115-abc123-def456
+//	cchistory -session $(ls -t *.ndjson | head -1)
 //
 // Search for patterns:
 //
-//	chistory "authentication"
-//	chistory -commands "git commit"
-//	chistory -responses database
+//	cchistory "authentication"
+//	cchistory -commands "git commit"
+//	cchistory -responses database
 //
 // Time-based filtering:
 //
-//	chistory -since 1h          # Last hour
-//	chistory -since 24h "error" # Last day's errors
-//	chistory -n 1000            # Last 1000 messages
+//	cchistory -since 1h          # Last hour
+//	cchistory -since 24h "error" # Last day's errors
+//	cchistory -n 1000            # Last 1000 messages
 //
 // Output formats:
 //
-//	chistory -files             # List session files
-//	chistory -count "TODO"      # Count matches
-//	chistory -format json       # JSON output
+//	cchistory -files             # List session files
+//	cchistory -count "TODO"      # Count matches
+//	cchistory -format json       # JSON output
 //
 // With context (like grep):
 //
-//	chistory -context 2 "error occurred"
-//	chistory -A 3 "function"    # Show 3 after
-//	chistory -B 2 "error"       # Show 2 before
+//	cchistory -context 2 "error occurred"
+//	cchistory -A 3 "function"    # Show 3 after
+//	cchistory -B 2 "error"       # Show 2 before
 //
 // Search specific content types:
 //
-//	chistory -tool-use "Read"
-//	chistory -i -responses "error|failed|exception"
+//	cchistory -tool-use "Read"
+//	cchistory -i -responses "error|failed|exception"
 //
 // Combined filters:
 //
-//	chistory -local -since 24h -commands "git"
-//	chistory -session SID -responses -i "todo"
+//	cchistory -local -since 24h -commands "git"
+//	cchistory -session SID -responses -i "todo"
 //
 // # Time Filters
 //
@@ -276,7 +276,7 @@
 //
 // # Integration
 //
-// The chistory command integrates with other cc utilities:
+// The cchistory command integrates with other cc utilities:
 //
 //   - Search sessions created by cmsg
 //   - Find sessions by mksid-generated IDs
@@ -293,49 +293,49 @@
 //
 // Find and replay recent session:
 //
-//	chistory -files -n 1 | creplay -file
-//	SID=$(chistory -files | head -1)
+//	cchistory -files -n 1 | creplay -file
+//	SID=$(cchistory -files | head -1)
 //	creplay -file "$SID"
 //
 // Re-run last command (like !!):
 //
-//	chistory -commands -n 1 --no-filename
+//	cchistory -commands -n 1 --no-filename
 //
 // Review today's work:
 //
-//	chistory -since 1d | less
+//	cchistory -since 1d | less
 //
 // Count commands per day:
 //
-//	chistory -commands -since 30d -format json | jq -r '.timestamp[:10]' | sort | uniq -c
+//	cchistory -commands -since 30d -format json | jq -r '.timestamp[:10]' | sort | uniq -c
 //
 // Extract all tool uses:
 //
-//	chistory -tool-use ".*" -format json | jq -r '.name'
+//	cchistory -tool-use ".*" -format json | jq -r '.name'
 //
 // Find sessions with errors:
 //
-//	chistory -i "error|failed|exception" -files | xargs -I {} echo "Review: {}"
+//	cchistory -i "error|failed|exception" -files | xargs -I {} echo "Review: {}"
 //
 // History per project:
 //
-//	cd ~/project1 && chistory -n 50  # Project 1 history
-//	cd ~/project2 && chistory -n 50  # Project 2 history
+//	cd ~/project1 && cchistory -n 50  # Project 1 history
+//	cd ~/project2 && cchistory -n 50  # Project 2 history
 //
 // # Advanced Patterns
 //
 // Regex patterns support full Go regexp syntax:
 //
-//	chistory "func.*\{.*\}"           # Find function definitions
-//	chistory "git (commit|push|pull)" # Find git operations
-//	chistory "(?i)todo|fixme"         # Case-insensitive markers
-//	chistory "^import\s"              # Lines starting with import
+//	cchistory "func.*\{.*\}"           # Find function definitions
+//	cchistory "git (commit|push|pull)" # Find git operations
+//	cchistory "(?i)todo|fixme"         # Case-insensitive markers
+//	cchistory "^import\s"              # Lines starting with import
 //
 // # Output Redirection
 //
 // Results can be piped or redirected:
 //
-//	chistory pattern > results.txt
-//	chistory -format json pattern | jq '.content'
-//	chistory pattern | grep -v "noise"
+//	cchistory pattern > results.txt
+//	cchistory -format json pattern | jq '.content'
+//	cchistory pattern | grep -v "noise"
 package main

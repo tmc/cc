@@ -2,13 +2,13 @@
 //
 // # Usage
 //
-//	cconfig [options] <key> [value]
-//	cconfig --list                    # List all config
-//	cconfig --get key                 # Get a value
-//	cconfig key value                 # Set a value
-//	cconfig --unset key               # Remove a key
+//	ccconfig [options] <key> [value]
+//	ccconfig --list                    # List all config
+//	ccconfig --get key                 # Get a value
+//	ccconfig key value                 # Set a value
+//	ccconfig --unset key               # Remove a key
 //
-// The cconfig command works like git config, managing configuration at
+// The ccconfig command works like git config, managing configuration at
 // three levels: local (directory), project (git repo), and global (user).
 //
 // # Configuration Levels
@@ -25,22 +25,22 @@
 //
 // Get a config value:
 //
-//	cconfig sessions.path
-//	cconfig --get sessions.path
+//	ccconfig sessions.path
+//	ccconfig --get sessions.path
 //
 // Set a config value:
 //
-//	cconfig sessions.path ~/my-sessions
-//	cconfig user.name "Alice"
+//	ccconfig sessions.path ~/my-sessions
+//	ccconfig user.name "Alice"
 //
 // List all configuration:
 //
-//	cconfig --list
-//	cconfig -l
+//	ccconfig --list
+//	ccconfig -l
 //
 // Remove a setting:
 //
-//	cconfig --unset sessions.path
+//	ccconfig --unset sessions.path
 //
 // # Scope Options
 //
@@ -96,33 +96,33 @@
 //
 // Set global session path:
 //
-//	cconfig --global sessions.path ~/claude-sessions
+//	ccconfig --global sessions.path ~/claude-sessions
 //
 // Set project-specific retention:
 //
-//	cconfig --project sessions.retention 90d
+//	ccconfig --project sessions.retention 90d
 //
 // Set local history limit:
 //
-//	cconfig --local history.limit 500
+//	ccconfig --local history.limit 500
 //
 // List all settings with their sources:
 //
-//	cconfig --list --show-origin
+//	ccconfig --list --show-origin
 //
 // Get effective value (respecting precedence):
 //
-//	cconfig sessions.path
+//	ccconfig sessions.path
 //
 // Set user info globally:
 //
-//	cconfig --global user.name "Alice Developer"
-//	cconfig --global user.email "alice@example.com"
+//	ccconfig --global user.name "Alice Developer"
+//	ccconfig --global user.email "alice@example.com"
 //
 // Configure replay defaults:
 //
-//	cconfig --global replay.speed 1.5
-//	cconfig --global replay.theme "dracula"
+//	ccconfig --global replay.speed 1.5
+//	ccconfig --global replay.theme "dracula"
 //
 // # Configuration File Format
 //
@@ -201,28 +201,28 @@
 //
 // Different scopes for same key:
 //
-//	cconfig --global history.limit 100   # User default
-//	cconfig --project history.limit 500  # This repo
-//	cconfig --local history.limit 1000   # This directory
+//	ccconfig --global history.limit 100   # User default
+//	ccconfig --project history.limit 500  # This repo
+//	ccconfig --local history.limit 1000   # This directory
 //
 // Check which value is active:
 //
-//	cconfig history.limit                # Shows 1000 (local wins)
-//	cconfig --show-origin history.limit  # Shows where it's from
+//	ccconfig history.limit                # Shows 1000 (local wins)
+//	ccconfig --show-origin history.limit  # Shows where it's from
 //
 // List config from specific scope:
 //
-//	cconfig --global --list
-//	cconfig --project --list
-//	cconfig --local --list
+//	ccconfig --global --list
+//	ccconfig --project --list
+//	ccconfig --local --list
 //
 // # Editing Config Files
 //
 // Open in editor:
 //
-//	cconfig --global --edit
-//	cconfig --project --edit
-//	cconfig --local --edit
+//	ccconfig --global --edit
+//	ccconfig --project --edit
+//	ccconfig --local --edit
 //
 // Uses $EDITOR or falls back to sensible defaults.
 //
@@ -230,9 +230,9 @@
 //
 // Config values are validated on set:
 //
-//	cconfig sessions.retention "invalid"  # Error: invalid duration
-//	cconfig replay.speed "abc"            # Error: not a number
-//	cconfig --type bool replay.follow "maybe"  # Error: not a bool
+//	ccconfig sessions.retention "invalid"  # Error: invalid duration
+//	ccconfig replay.speed "abc"            # Error: not a number
+//	ccconfig --type bool replay.follow "maybe"  # Error: not a bool
 //
 // Valid formats:
 //
@@ -245,7 +245,7 @@
 //
 // Import from environment variables:
 //
-//	cconfig --import-env
+//	ccconfig --import-env
 //
 // Migrates:
 //
@@ -255,26 +255,26 @@
 //
 // Export to environment:
 //
-//	eval $(cconfig --export)
+//	eval $(ccconfig --export)
 //
 // # Integration Examples
 //
 // Use in scripts:
 //
 //	#!/bin/bash
-//	SESSION_PATH=$(cconfig sessions.path)
-//	LIMIT=$(cconfig history.limit)
+//	SESSION_PATH=$(ccconfig sessions.path)
+//	LIMIT=$(ccconfig history.limit)
 //	chistory -n "$LIMIT" -sessions "$SESSION_PATH"
 //
 // Check if setting exists:
 //
-//	if cconfig --get sessions.path &>/dev/null; then
+//	if ccconfig --get sessions.path &>/dev/null; then
 //	  echo "Sessions path is configured"
 //	fi
 //
 // Conditional execution:
 //
-//	if [ "$(cconfig replay.follow)" = "true" ]; then
+//	if [ "$(ccconfig replay.follow)" = "true" ]; then
 //	  cctl replay -follow "$SID"
 //	else
 //	  cctl replay "$SID"
@@ -285,12 +285,12 @@
 // Example workflow:
 //
 //	cd ~/project1
-//	cconfig --project sessions.path ./.sessions
-//	cconfig --project history.limit 1000
+//	ccconfig --project sessions.path ./.sessions
+//	ccconfig --project history.limit 1000
 //
 //	cd ~/project2
-//	cconfig --project sessions.path /shared/sessions
-//	cconfig --project sessions.retention 7d
+//	ccconfig --project sessions.path /shared/sessions
+//	ccconfig --project sessions.retention 7d
 //
 // Each project maintains independent settings.
 //
@@ -319,25 +319,25 @@
 //
 // Configure and use chistory:
 //
-//	cconfig --global history.limit 500
-//	cconfig --global history.format json
+//	ccconfig --global history.limit 500
+//	ccconfig --global history.format json
 //	chistory pattern  # Uses configured defaults
 //
 // Configure replay behavior:
 //
-//	cconfig --global replay.speed 2.0
-//	cconfig --global replay.follow true
+//	ccconfig --global replay.speed 2.0
+//	ccconfig --global replay.follow true
 //	cctl replay $SID  # Uses configured defaults
 //
 // Per-project session management:
 //
 //	cd ~/work-project
-//	cconfig --project sessions.path ~/work-sessions
+//	ccconfig --project sessions.path ~/work-sessions
 //	cctl msg "work query" > session.ndjson
 //	# Saved to ~/work-sessions/
 //
 //	cd ~/personal-project
-//	cconfig --project sessions.path ~/personal-sessions
+//	ccconfig --project sessions.path ~/personal-sessions
 //	cctl msg "personal query" > session.ndjson
 //	# Saved to ~/personal-sessions/
 //
