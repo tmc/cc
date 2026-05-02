@@ -26,8 +26,8 @@ var (
 	geminiFlag     = flag.Bool("gemini", false, "Use Gemini CLI paths instead of Claude Code")
 )
 
-// Config represents a loaded configuration.
-type Config struct {
+// loadedConfig represents a loaded configuration.
+type loadedConfig struct {
 	values map[string]string
 	file   string
 	scope  string
@@ -229,8 +229,8 @@ func getConfigPath() (string, error) {
 	return filepath.Join(ch, "config"), nil
 }
 
-func loadAllConfigs() []Config {
-	var configs []Config
+func loadAllConfigs() []loadedConfig {
+	var configs []loadedConfig
 
 	var ch string
 	if *geminiFlag {
@@ -266,8 +266,8 @@ func loadAllConfigs() []Config {
 	return configs
 }
 
-func loadConfig(path, scope string) Config {
-	cfg := Config{
+func loadConfig(path, scope string) loadedConfig {
+	cfg := loadedConfig{
 		values: make(map[string]string),
 		file:   path,
 		scope:  scope,

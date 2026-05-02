@@ -36,8 +36,8 @@ var (
 	noFilename    = flag.Bool("no-filename", false, "Suppress filename prefixes")
 )
 
-// Message represents a session message.
-type Message struct {
+// sessionMessage represents a session message.
+type sessionMessage struct {
 	Type    string          `json:"type"`
 	Name    string          `json:"name,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"`
@@ -48,8 +48,8 @@ type Message struct {
 	raw string
 }
 
-// Match represents a search result.
-type Match struct {
+// searchMatch represents a search result.
+type searchMatch struct {
 	File    string `json:"file"`
 	Line    int    `json:"line"`
 	Type    string `json:"type"`
@@ -103,7 +103,7 @@ func run() error {
 	}
 
 	// Collect all matches
-	var allMatches []Match
+	var allMatches []searchMatch
 	fileCounts := make(map[string]int)
 
 	for _, file := range files {
@@ -253,15 +253,15 @@ func getProjectSearchDirs() []string {
 	return dirs
 }
 
-func searchFile(path string, re *regexp.Regexp) ([]Match, error) {
+func searchFile(path string, re *regexp.Regexp) ([]searchMatch, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	var messages []Message
-	var matches []Match
+	var messages []sessionMessage
+	var matches []searchMatch
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024) // 10MB max line
 
@@ -273,7 +273,7 @@ func searchFile(path string, re *regexp.Regexp) ([]Match, error) {
 			continue
 		}
 
-		var msg Message
+		var msg sessionMessage
 		msg.raw = line
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			continue // Skip malformed lines
@@ -290,7 +290,7 @@ func searchFile(path string, re *regexp.Regexp) ([]Match, error) {
 
 		// Match against pattern
 		if re == nil || re.MatchString(content) {
-			matches = append(matches, Match{
+			matches = append(matches, searchMatch{
 				File:    path,
 				Line:    lineNum,
 				Type:    getMessageType(msg),
@@ -307,7 +307,7 @@ func searchFile(path string, re *regexp.Regexp) ([]Match, error) {
 	return matches, scanner.Err()
 }
 
-func matchesFilter(msg Message) bool {
+func matchesFilter(msg sessionMessage) bool {
 	if *commandsFlag {
 		return msg.Type == "user" || (msg.Message != nil && msg.Message.Role == "user")
 	}
@@ -320,14 +320,14 @@ func matchesFilter(msg Message) bool {
 	return true
 }
 
-func getMessageType(msg Message) string {
+func getMessageType(msg sessionMessage) string {
 	if msg.Message != nil {
 		return msg.Message.Role
 	}
 	return msg.Type
 }
 
-func extractContent(msg Message) string {
+func extractContent(msg sessionMessage) string {
 	// Try message.content first
 	if msg.Message != nil && msg.Message.Content != nil {
 		return extractFromContent(msg.Message.Content)
@@ -370,7 +370,7 @@ func extractFromContent(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func addContext(matches []Match, messages []Message, path string) []Match {
+func addContext(matches []searchMatch, messages []sessionMessage, path string) []searchMatch {
 	// Simplified context - just expand line ranges
 	before := *bFlag
 	after := *aFlag
@@ -380,7 +380,7 @@ func addContext(matches []Match, messages []Message, path string) []Match {
 	}
 
 	seen := make(map[int]bool)
-	var result []Match
+	var result []searchMatch
 
 	for _, m := range matches {
 		start := m.Line - before
@@ -399,7 +399,7 @@ func addContext(matches []Match, messages []Message, path string) []Match {
 			seen[i] = true
 			if i-1 < len(messages) {
 				msg := messages[i-1]
-				result = append(result, Match{
+				result = append(result, searchMatch{
 					File:    path,
 					Line:    i,
 					Type:    getMessageType(msg),
@@ -416,7 +416,7 @@ func addContext(matches []Match, messages []Message, path string) []Match {
 	return result
 }
 
-func outputMatches(matches []Match) error {
+func outputMatches(matches []searchMatch) error {
 	switch *formatFlag {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)

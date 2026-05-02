@@ -30,8 +30,8 @@ var (
 	formatFlag = flag.String("format", "text", "Output format: text, json")
 )
 
-// Stats holds aggregated statistics for a session.
-type Stats struct {
+// sessionStats holds aggregated statistics for a session.
+type sessionStats struct {
 	SessionID string `json:"session_id,omitempty"`
 	File      string `json:"file"`
 	Slug      string `json:"slug,omitempty"`
@@ -76,7 +76,7 @@ func run() error {
 		return fmt.Errorf("no files specified; use file args or -since flag")
 	}
 
-	var allStats []Stats
+	var allStats []sessionStats
 	for _, f := range files {
 		s, err := statsForFile(f)
 		if err != nil {
@@ -132,13 +132,13 @@ func resolveFiles() ([]string, error) {
 	return cc.FindSessionFiles(since, "")
 }
 
-func statsForFile(path string) (Stats, error) {
+func statsForFile(path string) (sessionStats, error) {
 	entries, err := cc.ReadFile(path)
 	if err != nil {
-		return Stats{}, err
+		return sessionStats{}, err
 	}
 
-	s := Stats{
+	s := sessionStats{
 		File:     path,
 		ToolUses: make(map[string]int),
 	}
@@ -203,7 +203,7 @@ func statsForFile(path string) (Stats, error) {
 	return s, nil
 }
 
-func output(stats []Stats) error {
+func output(stats []sessionStats) error {
 	if *formatFlag == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")

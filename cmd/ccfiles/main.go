@@ -42,8 +42,8 @@ var (
 	countFlag  = flag.Bool("count", false, "Show file counts sorted by frequency")
 )
 
-// FileOp represents a file operation found in a session.
-type FileOp struct {
+// fileOp represents a file operation found in a session.
+type fileOp struct {
 	File      string `json:"file"`
 	Op        string `json:"op"`   // write, edit, read, bash-write, bash-redirect, glob, grep
 	Tool      string `json:"tool"` // source tool name
@@ -70,7 +70,7 @@ func run() error {
 		}
 	}()
 
-	var ops []FileOp
+	var ops []fileOp
 	for _, r := range readers {
 		rd := cc.NewReader(r)
 		var sessionID, ts string
@@ -96,12 +96,12 @@ func run() error {
 
 	// Filter.
 	if *writesFlag {
-		ops = filter(ops, func(o FileOp) bool {
+		ops = filter(ops, func(o fileOp) bool {
 			return o.Op == "write" || o.Op == "edit" || o.Op == "bash-write" || o.Op == "bash-redirect"
 		})
 	}
 	if *readsFlag {
-		ops = filter(ops, func(o FileOp) bool {
+		ops = filter(ops, func(o fileOp) bool {
 			return o.Op == "read"
 		})
 	}
@@ -142,12 +142,12 @@ func inputs() ([]io.Reader, []io.Closer, error) {
 	return readers, closers, nil
 }
 
-func extractOps(e cc.Entry) []FileOp {
+func extractOps(e cc.Entry) []fileOp {
 	if e.Message == nil {
 		return nil
 	}
 
-	var ops []FileOp
+	var ops []fileOp
 
 	for _, tu := range e.Message.ToolUses() {
 		switch tu.Name {
@@ -157,7 +157,7 @@ func extractOps(e cc.Entry) []FileOp {
 			}
 			json.Unmarshal(tu.Input, &inp)
 			if inp.FilePath != "" {
-				ops = append(ops, FileOp{File: inp.FilePath, Op: "write", Tool: "Write"})
+				ops = append(ops, fileOp{File: inp.FilePath, Op: "write", Tool: "Write"})
 			}
 
 		case "Edit":
@@ -166,7 +166,7 @@ func extractOps(e cc.Entry) []FileOp {
 			}
 			json.Unmarshal(tu.Input, &inp)
 			if inp.FilePath != "" {
-				ops = append(ops, FileOp{File: inp.FilePath, Op: "edit", Tool: "Edit"})
+				ops = append(ops, fileOp{File: inp.FilePath, Op: "edit", Tool: "Edit"})
 			}
 
 		case "Read":
@@ -175,7 +175,7 @@ func extractOps(e cc.Entry) []FileOp {
 			}
 			json.Unmarshal(tu.Input, &inp)
 			if inp.FilePath != "" {
-				ops = append(ops, FileOp{File: inp.FilePath, Op: "read", Tool: "Read"})
+				ops = append(ops, fileOp{File: inp.FilePath, Op: "read", Tool: "Read"})
 			}
 
 		case "NotebookEdit":
@@ -184,7 +184,7 @@ func extractOps(e cc.Entry) []FileOp {
 			}
 			json.Unmarshal(tu.Input, &inp)
 			if inp.NotebookPath != "" {
-				ops = append(ops, FileOp{File: inp.NotebookPath, Op: "edit", Tool: "NotebookEdit"})
+				ops = append(ops, fileOp{File: inp.NotebookPath, Op: "edit", Tool: "NotebookEdit"})
 			}
 
 		case "Bash":
@@ -218,11 +218,11 @@ var (
 	perlRe = regexp.MustCompile(`perl\s+-p?i[e]?\s+(?:-e\s+)?'[^']*'\s+(\S+)`)
 )
 
-func bashFileOps(cmd string) []FileOp {
+func bashFileOps(cmd string) []fileOp {
 	if cmd == "" {
 		return nil
 	}
-	var ops []FileOp
+	var ops []fileOp
 	seen := make(map[string]bool)
 
 	add := func(file, op string) {
@@ -239,7 +239,7 @@ func bashFileOps(cmd string) []FileOp {
 			return
 		}
 		seen[key] = true
-		ops = append(ops, FileOp{File: file, Op: "bash-" + op, Tool: "Bash"})
+		ops = append(ops, fileOp{File: file, Op: "bash-" + op, Tool: "Bash"})
 	}
 
 	for _, m := range redirectRe.FindAllStringSubmatch(cmd, -1) {
@@ -270,8 +270,8 @@ func bashFileOps(cmd string) []FileOp {
 	return ops
 }
 
-func filter(ops []FileOp, fn func(FileOp) bool) []FileOp {
-	var out []FileOp
+func filter(ops []fileOp, fn func(fileOp) bool) []fileOp {
+	var out []fileOp
 	for _, o := range ops {
 		if fn(o) {
 			out = append(out, o)
@@ -280,7 +280,7 @@ func filter(ops []FileOp, fn func(FileOp) bool) []FileOp {
 	return out
 }
 
-func output(ops []FileOp) error {
+func output(ops []fileOp) error {
 	if *countFlag {
 		counts := make(map[string]int)
 		for _, o := range ops {
