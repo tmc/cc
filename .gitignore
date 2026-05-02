@@ -21,3 +21,7 @@ screenshot-*.png
 
 # One-off scratch scripts
 /a.sh
+
+
+# beads issue-tracker working tree (local planning state)
+/.beads/
