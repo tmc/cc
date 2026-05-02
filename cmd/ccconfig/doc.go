@@ -264,7 +264,7 @@
 //	#!/bin/bash
 //	SESSION_PATH=$(ccconfig sessions.path)
 //	LIMIT=$(ccconfig history.limit)
-//	chistory -n "$LIMIT" -sessions "$SESSION_PATH"
+//	cchistory -n "$LIMIT" -sessions "$SESSION_PATH"
 //
 // Check if setting exists:
 //
@@ -317,11 +317,11 @@
 //
 // # Examples with Other Tools
 //
-// Configure and use chistory:
+// Configure and use cchistory:
 //
 //	ccconfig --global history.limit 500
 //	ccconfig --global history.format json
-//	chistory pattern  # Uses configured defaults
+//	cchistory pattern  # Uses configured defaults
 //
 // Configure replay behavior:
 //
