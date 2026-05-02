@@ -49,10 +49,15 @@ func main() {
 }
 
 func run() error {
-	readers, err := inputs()
+	readers, closers, err := inputs()
 	if err != nil {
 		return err
 	}
+	defer func() {
+		for _, c := range closers {
+			c.Close()
+		}
+	}()
 
 	var count int
 	for _, r := range readers {
@@ -84,20 +89,25 @@ func run() error {
 	return nil
 }
 
-func inputs() ([]io.Reader, error) {
+func inputs() ([]io.Reader, []io.Closer, error) {
 	args := flag.Args()
 	if len(args) == 0 {
-		return []io.Reader{os.Stdin}, nil
+		return []io.Reader{os.Stdin}, nil, nil
 	}
 	var readers []io.Reader
+	var closers []io.Closer
 	for _, path := range args {
 		f, err := os.Open(path)
 		if err != nil {
-			return nil, err
+			for _, c := range closers {
+				c.Close()
+			}
+			return nil, nil, err
 		}
 		readers = append(readers, f)
+		closers = append(closers, f)
 	}
-	return readers, nil
+	return readers, closers, nil
 }
 
 func match(e cc.Entry) bool {
