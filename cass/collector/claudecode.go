@@ -18,8 +18,10 @@ type ClaudeCode struct {
 	Root string
 }
 
+// Name returns the agent slug "claude-code".
 func (c *ClaudeCode) Name() string { return "claude-code" }
 
+// Detect reports whether Claude Code session data is present on the system.
 func (c *ClaudeCode) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	root, err := c.root()
 	if err != nil {
@@ -36,6 +38,8 @@ func (c *ClaudeCode) Detect(ctx context.Context) (*cass.DetectionResult, error) 
 	}, nil
 }
 
+// Scan walks Claude Code session paths and sends decoded sessions to out.
+// It closes out when scanning completes.
 func (c *ClaudeCode) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cass.Session) error {
 	defer close(out)
 

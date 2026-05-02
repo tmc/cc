@@ -14,8 +14,10 @@ type Antigravity struct {
 	Root string
 }
 
+// Name returns the agent slug "antigravity".
 func (c *Antigravity) Name() string { return "antigravity" }
 
+// Detect reports whether Antigravity session data is present on the system.
 func (c *Antigravity) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	root, err := c.root()
 	if err != nil {
@@ -32,6 +34,9 @@ func (c *Antigravity) Detect(ctx context.Context) (*cass.DetectionResult, error)
 	}, nil
 }
 
+// Scan walks Antigravity session paths and sends decoded sessions to out.
+// It closes out when scanning completes. Scanning is currently a placeholder
+// and produces no sessions.
 func (c *Antigravity) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cass.Session) error {
 	defer close(out)
 

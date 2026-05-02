@@ -88,6 +88,7 @@ type Stats struct {
 // Statter is an optional interface backends can implement to expose
 // index size statistics for benchmarking.
 type Statter interface {
+	// BackendStats returns size statistics about the underlying index.
 	BackendStats(ctx context.Context) (Stats, error)
 }
 

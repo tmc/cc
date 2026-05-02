@@ -17,8 +17,10 @@ type Codex struct {
 	Root string
 }
 
+// Name returns the agent slug "codex".
 func (c *Codex) Name() string { return "codex" }
 
+// Detect reports whether Codex session data is present on the system.
 func (c *Codex) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	root, err := c.root()
 	if err != nil {
@@ -35,6 +37,8 @@ func (c *Codex) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	}, nil
 }
 
+// Scan walks Codex session paths and sends decoded sessions to out.
+// It closes out when scanning completes.
 func (c *Codex) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cass.Session) error {
 	defer close(out)
 

@@ -22,8 +22,10 @@ type GeminiCLI struct {
 	Root string
 }
 
+// Name returns the agent slug "gemini-cli".
 func (c *GeminiCLI) Name() string { return "gemini-cli" }
 
+// Detect reports whether Gemini CLI session data is present on the system.
 func (c *GeminiCLI) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	paths, err := c.roots()
 	if err != nil {
@@ -39,6 +41,8 @@ func (c *GeminiCLI) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	}, nil
 }
 
+// Scan walks Gemini CLI session paths and sends decoded sessions to out.
+// It closes out when scanning completes.
 func (c *GeminiCLI) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cass.Session) error {
 	defer close(out)
 

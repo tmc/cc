@@ -14,8 +14,10 @@ type Cursor struct {
 	Root string
 }
 
+// Name returns the agent slug "cursor".
 func (c *Cursor) Name() string { return "cursor" }
 
+// Detect reports whether Cursor workspace data is present on the system.
 func (c *Cursor) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	root, err := c.root()
 	if err != nil {
@@ -32,6 +34,9 @@ func (c *Cursor) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	}, nil
 }
 
+// Scan walks Cursor session paths and sends decoded sessions to out.
+// It closes out when scanning completes. Scanning is currently a placeholder
+// and produces no sessions.
 func (c *Cursor) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cass.Session) error {
 	defer close(out)
 

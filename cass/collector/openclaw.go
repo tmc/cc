@@ -14,14 +14,16 @@ import (
 )
 
 // OpenClaw collects sessions from OpenClaw's JSONL session files.
-// Sessions live at ~/.openclaw/agents/<agent-id>/sessions/<session-id>.jsonl
+// Sessions live at ~/.openclaw/agents/<agent-id>/sessions/<session-id>.jsonl.
 type OpenClaw struct {
 	// Root overrides the default ~/.openclaw/agents directory.
 	Root string
 }
 
+// Name returns the agent slug "openclaw".
 func (c *OpenClaw) Name() string { return "openclaw" }
 
+// Detect reports whether OpenClaw session data is present on the system.
 func (c *OpenClaw) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	root, err := c.root()
 	if err != nil {
@@ -38,6 +40,8 @@ func (c *OpenClaw) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 	}, nil
 }
 
+// Scan walks OpenClaw session paths and sends decoded sessions to out.
+// It closes out when scanning completes.
 func (c *OpenClaw) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cass.Session) error {
 	defer close(out)
 
