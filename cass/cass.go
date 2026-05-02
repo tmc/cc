@@ -117,19 +117,26 @@ type Collector interface {
 type SearchMode int
 
 const (
-	SearchLexical  SearchMode = iota // FTS5 full-text search.
-	SearchSemantic                   // Reserved for future embedding search.
-	SearchHybrid                     // Reserved for combined search.
+	// SearchLexical performs FTS5 full-text search.
+	SearchLexical SearchMode = iota
+	// SearchSemantic is reserved for future embedding search.
+	SearchSemantic
+	// SearchHybrid is reserved for combined lexical and semantic search.
+	SearchHybrid
 )
 
 // SortMode controls result ordering.
 type SortMode string
 
 const (
-	SortRecent    SortMode = "recent"    // ended_at DESC (most recently active).
-	SortRelevance SortMode = "relevance" // BM25 rank (only meaningful with a query).
-	SortStarted   SortMode = "started"   // started_at DESC.
-	SortOldest    SortMode = "oldest"    // started_at ASC.
+	// SortRecent orders results by ended_at descending (most recently active).
+	SortRecent SortMode = "recent"
+	// SortRelevance orders results by BM25 rank; only meaningful with a query.
+	SortRelevance SortMode = "relevance"
+	// SortStarted orders results by started_at descending.
+	SortStarted SortMode = "started"
+	// SortOldest orders results by started_at ascending.
+	SortOldest SortMode = "oldest"
 )
 
 // SearchRequest encapsulates query parameters.
