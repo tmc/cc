@@ -1,81 +1,45 @@
-// Command cmsg formats stdin as Claude messages in NDJSON format.
+// Command cmsg formats stdin as a single Claude message in NDJSON.
+//
+// cmsg reads stdin to EOF, optionally runs the content through a Go
+// text/template, optionally attaches an image, and writes one
+// newline-terminated JSON object describing a Claude message.
 //
 // # Usage
 //
-//	cmsg [-type TYPE]
+//	cmsg [-type TYPE] [-template TMPL] [-image PATH]
 //
-// The cmsg command reads from stdin and outputs a Claude message as
-// newline-delimited JSON (NDJSON). This format is streaming-compatible
-// and designed for use in Unix pipelines.
+// # Flags
 //
-// # Options
+//	-type TYPE       Message type / role: user (default), assistant, system.
+//	-template TMPL   Go text/template applied to stdin; the input is `.`.
+//	-image PATH      Path to an image file. The bytes are base64-encoded
+//	                 and attached as an `image` content block whose media
+//	                 type is detected from the file contents.
 //
-//	-type string
-//	    Message type (default "user")
-//	    Valid types: user, assistant, system
+// # Output
 //
-//	-template string
-//	    Go template for content transformation
-//	    Template receives stdin content as string data ({{.}})
+// One line of JSON shaped as:
 //
-//	-image string
-//	    Path to image file to include in message
-//	    Image is base64-encoded with auto-detected media type
+//	{"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}
 //
-// # Message Format
-//
-// Output is a single-line JSON object representing a Claude message:
-//
-//	{"type":"user","message":{"role":"user","content":[{"type":"text","text":"the input text"}]}}
-//
-// The entire stdin is read and placed into the text field of a content block.
-// For streaming scenarios, call cmsg once per logical message.
-//
-// # Streaming Compatibility
-//
-// The cmsg command is designed for streaming workflows:
-//
-//   - Reads from stdin until EOF
-//   - Outputs single-line NDJSON
-//   - No buffering beyond stdin read
-//   - Composable via pipes
+// When -image is supplied, an additional `{"type":"image","source":{...}}`
+// content block is included.
 //
 // # Examples
 //
-// Format a simple user message:
+// Wrap stdin as a user message:
 //
-//	echo "Hello, Claude" | cmsg
+//	echo "hello, claude" | cmsg
 //
-// Create a session with multiple messages:
+// Wrap a file as an assistant message:
 //
-//	SID=$(mksid)
-//	echo "First message" | cmsg | tee -a session-$SID.ndjson
-//	echo "Second message" | cmsg | tee -a session-$SID.ndjson
+//	cat reply.txt | cmsg -type assistant
 //
-// Format an assistant message:
+// Apply a template before wrapping:
 //
-//	echo "Response text" | cmsg -type assistant
+//	cat code.go | cmsg -template "Review this code:\n\n{{.}}"
 //
-// Pipe multiple sources:
+// Attach an image:
 //
-//	cat prompt.txt | cmsg | tee session.ndjson
-//	cat response.txt | cmsg -type assistant | tee -a session.ndjson
-//
-// Use templates to transform content:
-//
-//	echo "code review" | cmsg -template "Please review: {{.}}"
-//	cat file.go | cmsg -template "Analyze this code:\n\n{{.}}"
-//
-// Include images in messages:
-//
-//	echo "What's in this image?" | cmsg -image screenshot.png
-//	cmsg -image diagram.jpg -template "Explain this diagram"
-//
-// # Integration
-//
-// The cmsg command integrates with other cc utilities:
-//
-//   - Use mksid to generate session IDs
-//   - Append output to session files for replay with creplay
-//   - Chain with other tools via standard Unix pipes
+//	echo "what's in this?" | cmsg -image screenshot.png
 package main

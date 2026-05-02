@@ -1,47 +1,46 @@
-// Command ccspawn spawns Claude Code agent processes in teammate mode.
+// Command ccspawn launches Claude Code agent processes in teammate mode.
 //
-// Ccspawn launches Claude Code CLI processes configured for multi-agent
-// collaboration via the teammate protocol. Agents are spawned using a PTY
-// wrapper to satisfy Claude Code's terminal requirements.
+// ccspawn registers an agent in the team config, execs the `claude`
+// binary with the appropriate `--teammate-mode` and identity flags,
+// records the agent PID under ~/.claude/teams/<team>/pids/, and
+// forwards stdin/stdout/stderr until the agent exits.
+// CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 is added to the agent's
+// environment.
 //
 // # Usage
 //
-//	ccspawn -team TEAM -agent NAME [-model M] [-cwd DIR]
+//	ccspawn -team TEAM -agent NAME [flags]
 //	ccspawn -team TEAM -agent NAME -kill
 //	ccspawn -team TEAM -list
 //
-// # Spawning
+// # Flags
 //
-// When spawning an agent, ccspawn:
-//
-//  1. Registers the agent in the team config
-//  2. Launches claude with --teammate-mode and agent flags
-//  3. Records the PID at ~/.claude/teams/{team}/pids/{agent}.pid
-//  4. Forwards stdout/stderr to the terminal
-//
-// The CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 environment variable is set
-// automatically.
-//
-// # Process Management
-//
-// Use -kill to send SIGTERM to an agent (SIGKILL after 5s).
-// Use -list to show all agent processes and their liveness status.
+//	-team NAME             Team name (required).
+//	-agent NAME            Agent name (required for spawn / -kill).
+//	-model M               Model to pass through as --model.
+//	-cwd DIR               Working directory for the agent (default: cwd).
+//	-type TYPE             Agent type (default "general-purpose").
+//	-permission-mode MODE  Pass through as --permission-mode.
+//	-allowed-tools LIST    Comma-separated --allowedTools entries.
+//	-claude-binary NAME    Binary to exec (default "claude", looked up on PATH).
+//	-kill                  Send SIGTERM to the agent (SIGKILL after 5s).
+//	-list                  List agent PIDs and liveness for the team.
 //
 // # Examples
 //
-// Spawn a reviewer agent:
+// Spawn a reviewer agent on a specific model:
 //
 //	ccspawn -team review -agent reviewer -model claude-sonnet-4-5-20250929
 //
-// Spawn in background:
+// Limit a worker to a tool subset:
 //
-//	ccspawn -team review -agent worker &
+//	ccspawn -team review -agent worker -allowed-tools Read,Grep,Bash
 //
-// Kill an agent:
-//
-//	ccspawn -team review -agent worker -kill
-//
-// List all agents:
+// Show liveness:
 //
 //	ccspawn -team review -list
+//
+// Kill a stuck agent:
+//
+//	ccspawn -team review -agent worker -kill
 package main

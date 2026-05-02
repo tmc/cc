@@ -1,38 +1,41 @@
-// Command ccapprove handles plan and permission approval workflows.
+// Command ccapprove handles plan and permission approval requests.
 //
-// Ccapprove monitors agent inboxes for approval requests and sends approval
-// or denial responses. It reads permission_request and plan_approval_request
-// messages from the controller inbox and writes responses to agent inboxes.
+// ccapprove inspects a controller-style inbox for pending
+// `plan_approval_request` and `permission_request` messages, then
+// records `*_response` replies into both the controller inbox and
+// the requesting agent's inbox.
 //
 // # Usage
 //
-//	ccapprove -team TEAM -list                 # pending approvals
-//	ccapprove -team TEAM -approve AGENT        # approve pending request
-//	ccapprove -team TEAM -deny AGENT           # deny with optional -reason
-//	ccapprove -team TEAM -auto                 # auto-approve daemon
-//	ccapprove -team TEAM -follow               # watch for requests
+//	ccapprove -team TEAM [flags]
 //
-// # Auto-Approve Mode
+// # Flags
 //
-// In auto-approve mode (-auto), ccapprove watches for incoming approval
-// requests and automatically approves them. This is useful for unattended
-// operation.
+//	-team NAME       Team name (required).
+//	-list            List pending approval requests (default action).
+//	-approve AGENT   Approve the pending request from AGENT.
+//	-deny AGENT      Deny the pending request from AGENT.
+//	-reason TEXT     Feedback string attached to a -deny response.
+//	-auto            Daemon mode: auto-approve every request as it arrives.
+//	-follow          Stream new pending requests as they appear.
+//	-inbox NAME      Inbox to monitor (default "controller").
+//	-format FMT      Output format: text (default), json.
 //
 // # Examples
 //
-// List pending approvals:
+// Show what is waiting on the controller:
 //
 //	ccapprove -team review -list
 //
-// Approve a specific agent's request:
+// Approve the reviewer's pending plan:
 //
 //	ccapprove -team review -approve reviewer
 //
-// Deny with reason:
+// Deny with feedback:
 //
 //	ccapprove -team review -deny reviewer -reason "needs tests"
 //
-// Run auto-approve daemon:
+// Run the auto-approve daemon (e.g. for unattended runs):
 //
-//	ccapprove -team review -auto &
+//	ccapprove -team review -auto
 package main

@@ -1,36 +1,44 @@
-// Command ccfmt formats coding session transcripts.
+// Command ccfmt formats coding-agent session transcripts.
 //
-// It reads Claude Code and Codex session JSONL and renders them in cleaner
-// formats for humans. The markdown format is intended for publishing session
-// transcripts on GitHub or GitHub Pages.
+// ccfmt reads Claude Code or Codex JSONL session files (or stdin) and
+// renders them in cleaner formats for humans. The markdown format is
+// intended for publishing transcripts on GitHub or GitHub Pages.
 //
 // # Usage
 //
-//	ccfmt [flags] [session.jsonl]
-//	ccfmt -format markdown session.jsonl > session.md
-//	ccsessions -format jsonl | ccfmt
+//	ccfmt [flags] [session.jsonl ...]
+//
+// With no positional arguments, ccfmt reads from stdin. Subagent
+// JSONL files alongside the session are loaded automatically.
+//
+// # Flags
+//
+//	-format FMT          Output format: text (default), markdown/md, json, jsonl.
+//	-title TITLE         Optional document title (markdown only).
+//	-meta                Keep injected preamble and session metadata entries.
+//	-timestamps          Include per-entry timestamps in the output.
+//	-cleanup PRESET      Apply a preset that adjusts -tools/-tool-results/-max-bytes:
+//	                     none (default), publish, digest.
+//	-tools MODE          Tool-call rendering: full (default), summary, omit.
+//	-tool-results MODE   Tool-result rendering: full (default), summary, omit.
+//	-commentary          Include commentary-phase assistant messages (default true).
+//	-max-bytes N         Truncate any text or tool-result block past N bytes
+//	                     (default 4000; 0 disables truncation).
+//	-inline-images       Inline message images as base64 data URLs (default true).
+//	-redact              Redact obvious secrets (e.g. Stripe test keys, default true).
+//	-redact-images       Pass image bytes through redactImageDataFunc (default no-op).
+//
+// # Examples
+//
+// Render a session as a publishable markdown post:
+//
 //	ccfmt -format markdown -cleanup publish session.jsonl > session.md
 //
-// # Formats
+// Pipe filtered JSONL through another tool:
 //
-//	text
-//	    Compact readable transcript for terminal output.
+//	ccsessions -format jsonl | ccfmt -format jsonl
 //
-//	markdown
-//	    GitHub-friendly transcript with headings and fenced code blocks.
+// Get a terminal-friendly transcript with timestamps:
 //
-//	json
-//	    Filtered session entries as pretty JSON.
-//
-//	jsonl
-//	    Filtered session entries as newline-delimited JSON.
-//
-// By default, ccfmt omits injected system preambles and session metadata.
-// Use -meta to keep those entries in the output.
-//
-// # Cleanup
-//
-// Use -cleanup publish to generate a cleaner transcript for publication.
-// That preset summarizes tool calls and tool results instead of emitting full
-// fenced blocks for every command and command output.
+//	ccfmt -timestamps session.jsonl
 package main

@@ -1,73 +1,37 @@
-// Command ccloc prints the Claude Code agent cache location for a directory.
+// Command ccloc prints the Claude Code project cache directory for a path.
+//
+// Claude Code stores per-project session data under
+// ~/.claude/projects/<encoded-path>/, where the encoding replaces path
+// separators with dashes (`/Volumes/tmc/go` → `-Volumes-tmc-go`).
+// ccloc resolves a directory to its cache path and optionally checks
+// or creates it.
 //
 // # Usage
 //
-//	ccloc [directory]
-//	ccloc                      # Cache location for current directory
-//	ccloc /path/to/project     # Cache location for specific path
+//	ccloc [flags] [DIR]
 //
-// The ccloc command returns the path where Claude Code stores agent
-// cache data for a given directory. This is useful for scripting,
-// debugging, and inspecting session data.
+// DIR defaults to the current directory. The path is made absolute
+// before encoding.
 //
-// # Output Format
+// # Flags
 //
-// By default, prints the full path:
-//
-//	~/.claude/projects/-Volumes-tmc-go-src-github-com-tmc-cc/
-//
-// The path encoding replaces path separators with dashes.
-//
-// # Options
-//
-//	-check
-//	    Check if the cache directory exists (exit 0 if yes, 1 if no)
-//
-//	-create
-//	    Create the cache directory if it doesn't exist
-//
-//	-sessions
-//	    Print the sessions subdirectory path
-//
-//	-expand
-//	    Expand ~ to the actual home directory
+//	-check       Exit 0 if the cache directory exists, 1 otherwise.
+//	-create      Create the cache directory if it does not exist.
+//	-sessions    Print the `sessions` subdirectory of the cache path.
+//	-short       Replace the leading $HOME with `~`.
+//	-gemini      Resolve under ~/.gemini instead of ~/.claude.
 //
 // # Examples
 //
-// Get cache location for current directory:
+// Print the cache path for the current directory:
 //
 //	ccloc
 //
-// Get cache location for specific project:
+// Check whether a path has a cache and create one if not:
 //
-//	ccloc ~/go/src/github.com/tmc/appledocs
+//	ccloc -check ~/work || ccloc -create ~/work
 //
-// Check if cache exists:
+// Print the Gemini sessions subdirectory in shortened form:
 //
-//	if ccloc -check; then
-//	  echo "Cache exists"
-//	fi
-//
-// Create cache directory:
-//
-//	ccloc -create
-//
-// Get sessions directory:
-//
-//	ccloc -sessions
-//	# ~/.claude/projects/-path-to-project/sessions/
-//
-// Use in scripts:
-//
-//	CACHE=$(ccloc -expand)
-//	ls "$CACHE"
-//
-// # Path Encoding
-//
-// Claude Code encodes directory paths by replacing separators:
-//
-//	/Volumes/tmc/go/src/github.com/tmc/cc
-//	→ -Volumes-tmc-go-src-github-com-tmc-cc
-//
-// This ensures unique, filesystem-safe directory names.
+//	ccloc -gemini -sessions -short
 package main
