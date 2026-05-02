@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+// Scanner buffer sizes for JSONL session lines. Sessions can carry
+// large tool_result payloads (file contents, base64-encoded images),
+// so MaxLineSize is generous.
+const (
+	initialBufferSize = 256 * 1024
+	MaxLineSize       = 10 * 1024 * 1024
+)
+
 // Reader reads entries from a JSONL session file.
 type Reader struct {
 	scanner *bufio.Scanner
@@ -21,7 +29,7 @@ type Reader struct {
 // NewReader creates a Reader from an io.Reader.
 func NewReader(r io.Reader) *Reader {
 	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 256*1024), 10*1024*1024)
+	s.Buffer(make([]byte, initialBufferSize), MaxLineSize)
 	return &Reader{scanner: s}
 }
 
