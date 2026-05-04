@@ -895,6 +895,14 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
   if (h.it2_screens) it2.push(h.it2_screens + ' reads');
   const primaryGoal = h.goals && h.goals.length ? h.goals[h.goals.length - 1] : null;
   const primaryGoalGates = goalGateSummary(primaryGoal?.completion_gates);
+  const primaryGoalStatus = primaryGoal?.status || 'active';
+  const primaryGoalBlocked = primaryGoalGates.unresolved > 0;
+  const primaryGoalBadgeClass = primaryGoal
+    ? 'hit-goal-badge ' + primaryGoalStatus + (primaryGoalBlocked ? ' blocked' : '')
+    : '';
+  const primaryGoalBadgeText = primaryGoalBlocked
+    ? primaryGoalGates.unresolved + ' gate' + (primaryGoalGates.unresolved === 1 ? '' : 's')
+    : primaryGoalStatus + ' goal';
   const visibleSkills = (h.skills || []).filter(s => s.kind !== 'available');
   const primarySkill = visibleSkills.length ? visibleSkills[visibleSkills.length - 1] : (h.skills && h.skills.length ? h.skills[h.skills.length - 1] : null);
 
@@ -923,9 +931,9 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         ${teamBadge}
         ${adHocBadge}
         ${primaryGoal && html`
-          <span class="hit-goal-badge ${primaryGoal.status || 'active'} ${primaryGoalGates.unresolved > 0 ? 'blocked' : ''}"
+          <span class=${primaryGoalBadgeClass}
             title=${primaryGoal.objective}>
-            ${primaryGoalGates.unresolved > 0 ? primaryGoalGates.unresolved + ' gate' + (primaryGoalGates.unresolved === 1 ? '' : 's') : (primaryGoal.status || 'active') + ' goal'}
+            ${primaryGoalBadgeText}
           </span>
         `}
         ${primarySkill && html`
@@ -1665,6 +1673,28 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
           const gateSummary = goalGateSummary(gates);
           const unresolved = gates.filter(gate => ['required', 'missing', 'blocked'].includes(gate.status || 'required'));
           const complete = gates.filter(gate => (gate.status || 'required') === 'complete');
+          const gateSummaryClass = gateSummary.unresolved > 0 ? 'blocked' : 'complete';
+          const gateSummaryText = gateSummary.unresolved > 0
+            ? gateSummary.unresolved + ' unresolved'
+            : gateSummary.complete + ' complete';
+          const unresolvedRows = unresolved.map(gate => html`
+            <div class="detail-goal-gate ${gate.status || 'required'}" title=${gate.evidence || gate.source || ''}>
+              <span class="detail-goal-gate-status">${gate.status || 'required'}</span>
+              <span class="detail-goal-gate-name">${gate.name}</span>
+            </div>
+          `);
+          const completeRows = complete.map(gate => html`
+            <div class="detail-goal-gate complete" title=${gate.evidence || gate.source || ''}>
+              <span class="detail-goal-gate-status">complete</span>
+              <span class="detail-goal-gate-name">${gate.name}</span>
+            </div>
+          `);
+          const completeBlock = complete.length > 0 ? html`
+            <details class="detail-goal-gate-complete">
+              <summary>${complete.length} ready</summary>
+              ${completeRows}
+            </details>
+          ` : null;
           return html`
             <div class="detail-goal-card ${status}" key=${i}>
               <div class="detail-goal-head">
@@ -1681,29 +1711,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
                 <div class="detail-goal-gates">
                   <div class="detail-goal-gates-head">
                     <span>Completion gates</span>
-                    <strong class=${gateSummary.unresolved > 0 ? 'blocked' : 'complete'}>
-                      ${gateSummary.unresolved > 0
-                        ? gateSummary.unresolved + ' unresolved'
-                        : gateSummary.complete + ' complete'}
-                    </strong>
+                    <strong class=${gateSummaryClass}>${gateSummaryText}</strong>
                   </div>
-                  ${unresolved.map(gate => html`
-                    <div class="detail-goal-gate ${gate.status || 'required'}" title=${gate.evidence || gate.source || ''}>
-                      <span class="detail-goal-gate-status">${gate.status || 'required'}</span>
-                      <span class="detail-goal-gate-name">${gate.name}</span>
-                    </div>
-                  `)}
-                  ${complete.length > 0 && html`
-                    <details class="detail-goal-gate-complete">
-                      <summary>${complete.length} ready</summary>
-                      ${complete.map(gate => html`
-                        <div class="detail-goal-gate complete" title=${gate.evidence || gate.source || ''}>
-                          <span class="detail-goal-gate-status">complete</span>
-                          <span class="detail-goal-gate-name">${gate.name}</span>
-                        </div>
-                      `)}
-                    </details>
-                  `)}
+	                  ${unresolvedRows}
+	                  ${completeBlock}
                 </div>
               `}
               ${goal.completion_budget_report && html`
