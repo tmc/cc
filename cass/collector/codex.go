@@ -275,7 +275,18 @@ func extractCodexGoals(entries []cc.Entry) []cass.Goal {
 				if n, ok := parseGoalIntLine(text, "Token budget"); ok {
 					g.TokenBudget = &n
 				}
+				g.CompletionGates = parseGoalPromptGates(text, e.Timestamp)
 				upsert(g)
+			}
+		}
+		if e.Message != nil && e.Message.Role == "assistant" && len(goals) > 0 {
+			if gates := parseAssistantGoalGates(e.Message.TextContent(), e.Timestamp); len(gates) > 0 {
+				upsert(cass.Goal{
+					Objective:       goals[len(goals)-1].Objective,
+					Status:          goals[len(goals)-1].Status,
+					LastObservedAt:  e.Timestamp,
+					CompletionGates: gates,
+				})
 			}
 		}
 		if e.ToolUseResult != nil && e.ToolUseResult.Stdout != "" {
@@ -306,6 +317,103 @@ func parseGoalIntLine(text, key string) (int, bool) {
 		return n, err == nil
 	}
 	return 0, false
+}
+
+func parseGoalPromptGates(text string, at time.Time) []cass.GoalGate {
+	var gates []cass.GoalGate
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+		switch {
+		case strings.HasPrefix(name, "Time spent pursuing goal:"),
+			strings.HasPrefix(name, "Tokens used:"),
+			strings.HasPrefix(name, "Token budget:"),
+			strings.HasPrefix(name, "Tokens remaining:"):
+			continue
+		}
+		gates = appendGoalGate(gates, cass.GoalGate{
+			Name:       name,
+			Status:     "required",
+			Source:     "developer",
+			ObservedAt: at,
+		})
+	}
+	return gates
+}
+
+func parseAssistantGoalGates(text string, at time.Time) []cass.GoalGate {
+	var gates []cass.GoalGate
+	status := ""
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.HasPrefix(lower, "missing completion gates:"):
+			status = "missing"
+			continue
+		case strings.HasPrefix(lower, "ready evidence/prep:"),
+			strings.HasPrefix(lower, "ready artifacts"),
+			strings.HasPrefix(lower, "ready evidence"):
+			status = "complete"
+			continue
+		case strings.HasPrefix(lower, "completion status: not achieved"),
+			strings.Contains(lower, "still blocked"),
+			strings.Contains(lower, "blocked on"):
+			gates = appendGoalGate(gates, cass.GoalGate{
+				Name:       trimmed,
+				Status:     "blocked",
+				Source:     "assistant",
+				ObservedAt: at,
+			})
+			continue
+		case status != "" && isSectionBreak(trimmed):
+			status = ""
+			continue
+		}
+		if status == "" || !strings.HasPrefix(trimmed, "- ") {
+			continue
+		}
+		gates = appendGoalGate(gates, cass.GoalGate{
+			Name:       strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")),
+			Status:     status,
+			Source:     "assistant",
+			ObservedAt: at,
+		})
+	}
+	return gates
+}
+
+func isSectionBreak(line string) bool {
+	return line != "" && !strings.HasPrefix(line, "- ") && strings.HasSuffix(line, ":")
+}
+
+func appendGoalGate(gates []cass.GoalGate, gate cass.GoalGate) []cass.GoalGate {
+	gate.Name = strings.TrimSpace(gate.Name)
+	if gate.Name == "" {
+		return gates
+	}
+	for i := range gates {
+		if gates[i].Name != gate.Name {
+			continue
+		}
+		if gate.Status != "" {
+			gates[i].Status = gate.Status
+		}
+		if gate.Source != "" {
+			gates[i].Source = gate.Source
+		}
+		if gate.Evidence != "" {
+			gates[i].Evidence = gate.Evidence
+		}
+		if !gate.ObservedAt.IsZero() && (gates[i].ObservedAt.IsZero() || gate.ObservedAt.After(gates[i].ObservedAt)) {
+			gates[i].ObservedAt = gate.ObservedAt
+		}
+		return gates
+	}
+	return append(gates, gate)
 }
 
 func parseCodexGoalToolOutput(text string) (cass.Goal, bool) {
@@ -372,5 +480,12 @@ func mergeGoal(dst *cass.Goal, src cass.Goal) {
 	}
 	if src.CompletionBudgetReport != "" {
 		dst.CompletionBudgetReport = src.CompletionBudgetReport
+	}
+	mergeGoalGates(dst, src.CompletionGates)
+}
+
+func mergeGoalGates(dst *cass.Goal, src []cass.GoalGate) {
+	for _, gate := range src {
+		dst.CompletionGates = appendGoalGate(dst.CompletionGates, gate)
 	}
 }

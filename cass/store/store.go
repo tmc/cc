@@ -1613,6 +1613,18 @@ func buildContent(sess cass.Session) string {
 		}
 		b.WriteString(goal.Objective)
 		b.WriteByte('\n')
+		for _, gate := range goal.CompletionGates {
+			if gate.Name == "" {
+				continue
+			}
+			b.WriteString("goal gate ")
+			if gate.Status != "" {
+				b.WriteString(gate.Status)
+				b.WriteByte(' ')
+			}
+			b.WriteString(gate.Name)
+			b.WriteByte('\n')
+		}
 	}
 	for _, skill := range sess.Skills {
 		if skill.Name == "" {

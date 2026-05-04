@@ -596,6 +596,12 @@ func runGoals(ctx context.Context, svc *service.Service, args []string, jsonOut 
 			}
 			meta += formatTokens(g.TokensUsed) + " tok"
 		}
+		if n := goalGateCount(g.CompletionGates, "missing") + goalGateCount(g.CompletionGates, "blocked"); n > 0 {
+			if meta != "" {
+				meta += "  "
+			}
+			meta += fmt.Sprintf("%d blocked gates", n)
+		}
 		if when != "" {
 			if meta != "" {
 				meta += "  "
@@ -608,6 +614,16 @@ func runGoals(ctx context.Context, svc *service.Service, args []string, jsonOut 
 		}
 	}
 	return nil
+}
+
+func goalGateCount(gates []cass.GoalGate, status string) int {
+	n := 0
+	for _, gate := range gates {
+		if gate.Status == status {
+			n++
+		}
+	}
+	return n
 }
 
 func runSkills(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {

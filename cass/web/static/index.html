@@ -1656,6 +1656,16 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
                 ${used > 0 && html`<span>${fmtNum(used)} tok${budget ? ' / ' + fmtNum(budget) : ''}</span>`}
                 ${goal.thread_id && html`<span>${goal.thread_id.slice(0, 8)}</span>`}
               </div>
+              ${goal.completion_gates?.length > 0 && html`
+                <div class="detail-goal-gates">
+                  ${goal.completion_gates.map(gate => html`
+                    <span class="detail-goal-gate ${gate.status || 'required'}" title=${gate.evidence || gate.source || ''}>
+                      <strong>${gate.status || 'required'}</strong>
+                      ${gate.name}
+                    </span>
+                  `)}
+                </div>
+              `}
               ${goal.completion_budget_report && html`
                 <div class="detail-goal-report">${goal.completion_budget_report}</div>
               `}

@@ -699,6 +699,29 @@ mark.search-hl {
   margin-top: 4px;
   font-variant-numeric: tabular-nums;
 }
+.detail-goal-gates {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+.detail-goal-gate {
+  color: var(--dim);
+  line-height: 1.35;
+}
+.detail-goal-gate strong {
+  color: var(--faint);
+  font-size: 10px;
+  margin-right: 5px;
+  text-transform: uppercase;
+}
+.detail-goal-gate.missing strong,
+.detail-goal-gate.blocked strong {
+  color: var(--danger);
+}
+.detail-goal-gate.complete strong {
+  color: var(--green);
+}
 .detail-goal-report {
   margin-top: 5px;
   color: var(--dim);

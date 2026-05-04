@@ -341,6 +341,9 @@ func TestGoalsRoundTrip(t *testing.T) {
 				TokensUsed:      99,
 				TimeUsedSeconds: 88,
 				UpdatedAt:       time.Unix(190, 0),
+				CompletionGates: []cass.GoalGate{
+					{Name: "AC-valid focused Metal trace", Status: "missing"},
+				},
 			},
 		},
 	}
@@ -361,6 +364,17 @@ func TestGoalsRoundTrip(t *testing.T) {
 	}
 	if len(h.Goals) != 1 || h.Goals[0].Objective != "ship goal support" {
 		t.Fatalf("hit goals = %#v", h.Goals)
+	}
+	if len(h.Goals[0].CompletionGates) != 1 || h.Goals[0].CompletionGates[0].Name != "AC-valid focused Metal trace" {
+		t.Fatalf("hit goal gates = %#v", h.Goals[0].CompletionGates)
+	}
+
+	result, err = s.Search(ctx, cass.SearchRequest{Query: "Metal trace", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("gate search hits = %d, want 1", len(result.Hits))
 	}
 
 	goals, err := s.Goals(ctx, "complete", 10)

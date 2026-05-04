@@ -36,16 +36,26 @@ type Session struct {
 
 // Goal is one goal-mode objective observed in a session.
 type Goal struct {
-	ThreadID               string    `json:"thread_id,omitempty"`
-	Objective              string    `json:"objective"`
-	Status                 string    `json:"status,omitempty"`
-	TokenBudget            *int      `json:"token_budget,omitempty"`
-	TokensUsed             int       `json:"tokens_used,omitempty"`
-	TimeUsedSeconds        int       `json:"time_used_seconds,omitempty"`
-	CreatedAt              time.Time `json:"created_at,omitempty"`
-	UpdatedAt              time.Time `json:"updated_at,omitempty"`
-	LastObservedAt         time.Time `json:"last_observed_at,omitempty"`
-	CompletionBudgetReport string    `json:"completion_budget_report,omitempty"`
+	ThreadID               string     `json:"thread_id,omitempty"`
+	Objective              string     `json:"objective"`
+	Status                 string     `json:"status,omitempty"`
+	CompletionGates        []GoalGate `json:"completion_gates,omitempty"`
+	TokenBudget            *int       `json:"token_budget,omitempty"`
+	TokensUsed             int        `json:"tokens_used,omitempty"`
+	TimeUsedSeconds        int        `json:"time_used_seconds,omitempty"`
+	CreatedAt              time.Time  `json:"created_at,omitempty"`
+	UpdatedAt              time.Time  `json:"updated_at,omitempty"`
+	LastObservedAt         time.Time  `json:"last_observed_at,omitempty"`
+	CompletionBudgetReport string     `json:"completion_budget_report,omitempty"`
+}
+
+// GoalGate is one observed completion requirement for a goal.
+type GoalGate struct {
+	Name       string    `json:"name"`
+	Status     string    `json:"status,omitempty"` // required, missing, blocked, complete
+	Source     string    `json:"source,omitempty"`
+	Evidence   string    `json:"evidence,omitempty"`
+	ObservedAt time.Time `json:"observed_at,omitempty"`
 }
 
 // GoalHit is a goal joined with its parent session.

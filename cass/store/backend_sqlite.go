@@ -377,6 +377,21 @@ func buildContentCapped(sess cass.Session, maxBytes int) string {
 			return b.String()
 		}
 		b.WriteString(line)
+		for _, gate := range goal.CompletionGates {
+			if gate.Name == "" {
+				continue
+			}
+			line := "goal gate "
+			if gate.Status != "" {
+				line += gate.Status + " "
+			}
+			line += gate.Name + "\n"
+			if maxBytes > 0 && b.Len()+len(line) > maxBytes {
+				b.WriteString(line[:maxBytes-b.Len()])
+				return b.String()
+			}
+			b.WriteString(line)
+		}
 	}
 	for _, msg := range sess.Messages {
 		if msg.Content == "" {
