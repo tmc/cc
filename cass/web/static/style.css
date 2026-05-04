@@ -50,7 +50,6 @@ body {
   display: flex;
   flex-direction: column;
 }
-
 .app { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 body.graph-active { max-width: 100%; padding-left: 12px; padding-right: 12px; }
 body.graph-active .tabs { margin-bottom: 8px; }
@@ -723,6 +722,11 @@ mark.search-hl {
   border-left-color: var(--green);
   background: color-mix(in srgb, var(--green) 5%, transparent);
 }
+.detail-goal-card.blocked {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  border-left-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+}
 .detail-goal-head {
   display: flex;
   justify-content: space-between;
@@ -735,6 +739,7 @@ mark.search-hl {
 .detail-goal-status { color: var(--orange); font-weight: 700; }
 .detail-goal-card.complete .detail-goal-status,
 .detail-goal-card.completed .detail-goal-status { color: var(--green); }
+.detail-goal-card.blocked .detail-goal-status { color: var(--danger); }
 .detail-goal-time { color: var(--faint); }
 .detail-goal-objective {
   color: var(--fg);
@@ -814,6 +819,12 @@ mark.search-hl {
   color: var(--dim);
   border-top: 1px solid var(--border);
   padding-top: 5px;
+}
+.detail-goal-report.stale strong {
+  color: var(--danger);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
 }
 
 /* detail: skill cards */

@@ -380,9 +380,9 @@ func printHit(num int, h cass.Hit) {
 		if len(obj) > 100 {
 			obj = obj[:97] + "..."
 		}
-		status := goal.Status
+		status := goal.EffectiveStatus
 		if status == "" {
-			status = "active"
+			status = cass.GoalEffectiveStatus(goal)
 		}
 		fmt.Printf("    %s %s\n", statusStyle(status), obj)
 	}
@@ -575,9 +575,9 @@ func runGoals(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	}
 	for _, g := range goals {
 		when := relativeTime(g.EndedAt)
-		status := g.Status
+		status := g.EffectiveStatus
 		if status == "" {
-			status = "active"
+			status = cass.GoalEffectiveStatus(g.Goal)
 		}
 		obj := strings.Join(strings.Fields(g.Objective), " ")
 		if len(obj) > 90 {
@@ -596,7 +596,7 @@ func runGoals(ctx context.Context, svc *service.Service, args []string, jsonOut 
 			}
 			meta += formatTokens(g.TokensUsed) + " tok"
 		}
-		if n := goalGateCount(g.CompletionGates, "missing") + goalGateCount(g.CompletionGates, "blocked"); n > 0 {
+		if n := cass.GoalUnresolvedGateCount(g.Goal); n > 0 {
 			if meta != "" {
 				meta += "  "
 			}
@@ -614,16 +614,6 @@ func runGoals(ctx context.Context, svc *service.Service, args []string, jsonOut 
 		}
 	}
 	return nil
-}
-
-func goalGateCount(gates []cass.GoalGate, status string) int {
-	n := 0
-	for _, gate := range gates {
-		if gate.Status == status {
-			n++
-		}
-	}
-	return n
 }
 
 func runSkills(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {

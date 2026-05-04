@@ -195,6 +195,9 @@ func TestCodexGoals(t *testing.T) {
 	if g.Status != "complete" {
 		t.Fatalf("status = %q, want complete", g.Status)
 	}
+	if g.EffectiveStatus != "blocked" {
+		t.Fatalf("effective status = %q, want blocked", g.EffectiveStatus)
+	}
 	if g.TokensUsed != 99 || g.TimeUsedSeconds != 88 {
 		t.Fatalf("usage = tokens %d seconds %d", g.TokensUsed, g.TimeUsedSeconds)
 	}

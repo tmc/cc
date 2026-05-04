@@ -168,6 +168,7 @@ func (b *duckBackend) BatchIndex(ctx context.Context, sessions []cass.Session) e
 
 	now := time.Now().Unix()
 	for _, sess := range sessions {
+		sess.Goals = normalizeGoals(sess.Goals)
 		content := buildContentCapped(sess, b.maxFTSBytes)
 		statsJSON, _ := json.Marshal(sess.Stats)
 		goalsJSON, _ := json.Marshal(sess.Goals)
@@ -226,7 +227,7 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 	}
 	if req.Filters.GoalStatus != "" {
 		where = append(where, "goals_json LIKE ?")
-		args = append(args, `%"status":"`+req.Filters.GoalStatus+`"%`)
+		args = append(args, `%"effective_status":"`+req.Filters.GoalStatus+`"%`)
 	}
 	if req.Filters.Skill != "" {
 		where = append(where, "skills_json LIKE ?")
@@ -320,6 +321,7 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 		}
 		if goalsJSON != "" {
 			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
+			h.Goals = normalizeGoals(h.Goals)
 		}
 		if skillsJSON != "" {
 			_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)

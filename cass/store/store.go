@@ -343,6 +343,7 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 
 	now := time.Now().Unix()
 	for _, sess := range sessions {
+		sess.Goals = normalizeGoals(sess.Goals)
 		content := buildContent(sess)
 		statsJSON, _ := json.Marshal(sess.Stats)
 		goalsJSON, _ := json.Marshal(sess.Goals)
@@ -517,7 +518,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	}
 	if req.Filters.GoalStatus != "" {
 		where = append(where, "s.goals_json LIKE ?")
-		args = append(args, `%"status":"`+req.Filters.GoalStatus+`"%`)
+		args = append(args, `%"effective_status":"`+req.Filters.GoalStatus+`"%`)
 	}
 	if req.Filters.Skill != "" {
 		where = append(where, "s.skills_json LIKE ?")
@@ -608,6 +609,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		h.IsTeamLead = isTeamLead != 0
 		if goalsJSON != "" {
 			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
+			h.Goals = normalizeGoals(h.Goals)
 		}
 		if skillsJSON != "" {
 			_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
@@ -1008,7 +1010,7 @@ func (s *Store) Goals(ctx context.Context, status string, limit int) ([]cass.Goa
 	var args []any
 	if status != "" {
 		query += ` AND goals_json LIKE ?`
-		args = append(args, `%"status":"`+status+`"%`)
+		args = append(args, `%"effective_status":"`+status+`"%`)
 	}
 	query += ` ORDER BY ended_at DESC LIMIT ?`
 	args = append(args, limit)
@@ -1038,7 +1040,8 @@ func (s *Store) Goals(ctx context.Context, status string, limit int) ([]cass.Goa
 			ended = time.Unix(endedUnix, 0).Format(time.RFC3339)
 		}
 		for _, g := range goals {
-			if status != "" && g.Status != status {
+			g = cass.NormalizeGoal(g)
+			if status != "" && g.EffectiveStatus != status {
 				continue
 			}
 			hits = append(hits, cass.GoalHit{
@@ -1607,8 +1610,8 @@ func buildContent(sess cass.Session) string {
 			continue
 		}
 		b.WriteString("goal ")
-		if goal.Status != "" {
-			b.WriteString(goal.Status)
+		if status := cass.GoalEffectiveStatus(goal); status != "" {
+			b.WriteString(status)
 			b.WriteByte(' ')
 		}
 		b.WriteString(goal.Objective)
@@ -1655,14 +1658,25 @@ func buildContent(sess cass.Session) string {
 func goalCounts(goals []cass.Goal) (total, active, completed int) {
 	total = len(goals)
 	for _, g := range goals {
-		switch g.Status {
+		switch cass.GoalEffectiveStatus(g) {
 		case "complete", "completed":
 			completed++
-		case "active":
+		case "active", "blocked":
 			active++
 		}
 	}
 	return total, active, completed
+}
+
+func normalizeGoals(goals []cass.Goal) []cass.Goal {
+	if len(goals) == 0 {
+		return goals
+	}
+	out := make([]cass.Goal, len(goals))
+	for i, goal := range goals {
+		out[i] = cass.NormalizeGoal(goal)
+	}
+	return out
 }
 
 func skillCounts(skills []cass.SkillUse) (total, selected, loaded int) {

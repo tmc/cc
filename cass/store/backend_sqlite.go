@@ -117,6 +117,7 @@ func (b *sqliteBackend) BatchIndex(ctx context.Context, sessions []cass.Session)
 
 	now := time.Now().Unix()
 	for _, sess := range sessions {
+		sess.Goals = normalizeGoals(sess.Goals)
 		content := buildContentCapped(sess, b.maxFTSBytes)
 		statsJSON, _ := json.Marshal(sess.Stats)
 		goalsJSON, _ := json.Marshal(sess.Goals)
@@ -204,7 +205,7 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 	}
 	if req.Filters.GoalStatus != "" {
 		where = append(where, "s.goals_json LIKE ?")
-		args = append(args, `%"status":"`+req.Filters.GoalStatus+`"%`)
+		args = append(args, `%"effective_status":"`+req.Filters.GoalStatus+`"%`)
 	}
 	if req.Filters.Skill != "" {
 		where = append(where, "s.skills_json LIKE ?")
@@ -291,6 +292,7 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 		h.IsTeamLead = isTeamLead != 0
 		if goalsJSON != "" {
 			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
+			h.Goals = normalizeGoals(h.Goals)
 		}
 		if skillsJSON != "" {
 			_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
@@ -368,8 +370,8 @@ func buildContentCapped(sess cass.Session, maxBytes int) string {
 			continue
 		}
 		line := "goal "
-		if goal.Status != "" {
-			line += goal.Status + " "
+		if status := cass.GoalEffectiveStatus(goal); status != "" {
+			line += status + " "
 		}
 		line += goal.Objective + "\n"
 		if maxBytes > 0 && b.Len()+len(line) > maxBytes {

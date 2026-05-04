@@ -359,11 +359,14 @@ func TestGoalsRoundTrip(t *testing.T) {
 		t.Fatalf("hits = %d, want 1", len(result.Hits))
 	}
 	h := result.Hits[0]
-	if h.GoalCount != 1 || h.CompletedGoalCount != 1 {
-		t.Fatalf("goal counts = total %d complete %d", h.GoalCount, h.CompletedGoalCount)
+	if h.GoalCount != 1 || h.ActiveGoalCount != 1 || h.CompletedGoalCount != 0 {
+		t.Fatalf("goal counts = total %d active %d complete %d", h.GoalCount, h.ActiveGoalCount, h.CompletedGoalCount)
 	}
 	if len(h.Goals) != 1 || h.Goals[0].Objective != "ship goal support" {
 		t.Fatalf("hit goals = %#v", h.Goals)
+	}
+	if h.Goals[0].EffectiveStatus != "blocked" {
+		t.Fatalf("effective status = %q, want blocked", h.Goals[0].EffectiveStatus)
 	}
 	if len(h.Goals[0].CompletionGates) != 1 || h.Goals[0].CompletionGates[0].Name != "AC-valid focused Metal trace" {
 		t.Fatalf("hit goal gates = %#v", h.Goals[0].CompletionGates)
@@ -381,8 +384,16 @@ func TestGoalsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(goals) != 0 {
+		t.Fatalf("complete Goals = %d, want 0", len(goals))
+	}
+
+	goals, err = s.Goals(ctx, "blocked", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(goals) != 1 {
-		t.Fatalf("Goals = %d, want 1", len(goals))
+		t.Fatalf("blocked Goals = %d, want 1", len(goals))
 	}
 	if goals[0].SessionID != "goal-1" || goals[0].Objective != "ship goal support" {
 		t.Fatalf("goal hit = %#v", goals[0])

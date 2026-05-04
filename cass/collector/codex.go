@@ -254,7 +254,7 @@ func extractCodexGoals(entries []cc.Entry) []cass.Goal {
 			return
 		}
 		byObjective[g.Objective] = len(goals)
-		goals = append(goals, g)
+		goals = append(goals, cass.NormalizeGoal(g))
 	}
 
 	for _, e := range entries {
@@ -482,6 +482,7 @@ func mergeGoal(dst *cass.Goal, src cass.Goal) {
 		dst.CompletionBudgetReport = src.CompletionBudgetReport
 	}
 	mergeGoalGates(dst, src.CompletionGates)
+	*dst = cass.NormalizeGoal(*dst)
 }
 
 func mergeGoalGates(dst *cass.Goal, src []cass.GoalGate) {
