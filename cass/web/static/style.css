@@ -248,6 +248,19 @@ input::placeholder { color: var(--faint); }
 .hit-time { color: var(--faint); }
 .hit-it2 { color: var(--accent); }
 .hit-team { color: var(--magenta); font-size: 11px; }
+.hit-goals { color: var(--orange); }
+.hit-goal-badge {
+  font-size: 10px;
+  color: var(--orange);
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+  padding: 0 5px;
+  white-space: nowrap;
+}
+.hit-goal-badge.complete,
+.hit-goal-badge.completed {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+}
 
 /* token usage badge */
 .hit-tokens {
@@ -487,6 +500,7 @@ input::placeholder { color: var(--faint); }
 }
 .conv-entry.role-user { border-left-color: var(--cyan); background: transparent; }
 .conv-entry.role-assistant { border-left-color: var(--dim); }
+.conv-entry.role-developer { border-left-color: var(--orange); color: var(--dim); font-size: 11px; }
 .conv-entry.role-tool_use {
   border-left-color: var(--green);
   cursor: pointer;
@@ -578,6 +592,60 @@ mark.search-hl {
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 4px;
+}
+
+/* detail: goal cards */
+.detail-goals {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.detail-goal-card {
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+  border-left: 3px solid var(--orange);
+  padding: 7px 9px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--orange) 5%, transparent);
+}
+.detail-goal-card.complete,
+.detail-goal-card.completed {
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+  border-left-color: var(--green);
+  background: color-mix(in srgb, var(--green) 5%, transparent);
+}
+.detail-goal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+}
+.detail-goal-status { color: var(--orange); font-weight: 700; }
+.detail-goal-card.complete .detail-goal-status,
+.detail-goal-card.completed .detail-goal-status { color: var(--green); }
+.detail-goal-time { color: var(--faint); }
+.detail-goal-objective {
+  color: var(--fg);
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.detail-goal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--dim);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.detail-goal-report {
+  margin-top: 5px;
+  color: var(--dim);
+  border-top: 1px solid var(--border);
+  padding-top: 5px;
 }
 .tool-chip {
   font-size: 10px;

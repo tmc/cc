@@ -674,6 +674,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const [since, setSinceRaw] = useState(urlParams.since || '');
   const [sort, setSortRaw] = useState(urlParams.sort || '');
   const [team, setTeamRaw] = useState(urlParams.team || '');
+  const [goalStatus, setGoalStatusRaw] = useState(urlParams.goal_status || '');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -686,14 +687,15 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   function setSince(v) { setSinceRaw(v); }
   function setSort(v) { setSortRaw(v); }
   function setTeam(v) { setTeamRaw(v); }
+  function setGoalStatus(v) { setGoalStatusRaw(v); }
 
   // Push URL on state changes (debounced with the search).
   const urlRef = useRef(null);
   useEffect(() => {
     clearTimeout(urlRef.current);
-    urlRef.current = setTimeout(() => updateParams({ q: query, agent, workspace, since, sort, team }), 300);
+    urlRef.current = setTimeout(() => updateParams({ q: query, agent, workspace, since, sort, team, goal_status: goalStatus }), 300);
     return () => clearTimeout(urlRef.current);
-  }, [query, agent, workspace, since, sort, team]);
+  }, [query, agent, workspace, since, sort, team, goalStatus]);
 
   // Restore state from URL on browser navigation.
   useEffect(() => {
@@ -704,6 +706,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     setSinceRaw(urlParams.since || '');
     setSortRaw(urlParams.sort || '');
     setTeamRaw(urlParams.team || '');
+    setGoalStatusRaw(urlParams.goal_status || '');
   }, [navVersion]);
 
   const effectiveSort = sort || (query ? 'relevance' : 'recent');
@@ -711,20 +714,20 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const doSearch = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { q: query, agent, workspace, since, sort: sort || '', team, limit: '30' };
+      const params = { q: query, agent, workspace, since, sort: sort || '', team, goal_status: goalStatus, limit: '30' };
       const r = await api('search?' + qs(params));
       setResults(r);
     } catch (e) {
       console.error('search:', e);
     }
     setLoading(false);
-  }, [query, agent, workspace, since, sort, team]);
+  }, [query, agent, workspace, since, sort, team, goalStatus]);
 
   // Debounced live search.
   useEffect(() => {
     const id = setTimeout(doSearch, 250);
     return () => clearTimeout(id);
-  }, [query, agent, workspace, since, sort, team]);
+  }, [query, agent, workspace, since, sort, team, goalStatus]);
 
   // Auto-refresh on SSE.
   useEffect(() => {
@@ -782,6 +785,12 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
           onInput=${e => setWorkspace(e.target.value)} />
         <input class="filter-input" placeholder="team" value=${team}
           onInput=${e => setTeam(e.target.value)} style="width:100px" />
+        <span class="filter-chips">
+          <button class="filter-chip ${goalStatus === 'active' ? 'active' : ''}"
+            onClick=${() => setGoalStatus(goalStatus === 'active' ? '' : 'active')}>active goals</button>
+          <button class="filter-chip ${goalStatus === 'complete' ? 'active' : ''}"
+            onClick=${() => setGoalStatus(goalStatus === 'complete' ? '' : 'complete')}>complete goals</button>
+        </span>
         <span class="sort-group">
           ${sortModes.map(m => html`
             <button class="sort-pill ${effectiveSort === m.value ? 'active' : ''}"
@@ -833,6 +842,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
   if (h.it2_splits) it2.push(h.it2_splits + ' splits');
   if (h.it2_sends) it2.push(h.it2_sends + ' msgs');
   if (h.it2_screens) it2.push(h.it2_screens + ' reads');
+  const primaryGoal = h.goals && h.goals.length ? h.goals[h.goals.length - 1] : null;
 
   // Team badge: lead gets crown, member gets dot.
   const teamBadge = h.team_name ? html`
@@ -858,6 +868,12 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         <span class="hit-agent">[${h.agent}]</span>
         ${teamBadge}
         ${adHocBadge}
+        ${primaryGoal && html`
+          <span class="hit-goal-badge ${primaryGoal.status || 'active'}"
+            title=${primaryGoal.objective}>
+            ${primaryGoal.status || 'active'} goal
+          </span>
+        `}
         <span class="hit-title">${h.title || 'Untitled'}</span>
         ${h.sparkline && html`<span class="hit-sparkline">${h.sparkline}</span>`}
       </div>
@@ -875,6 +891,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         </span>`}
         ${stats.length > 0 && html`<span class="hit-stats">${stats.join(' | ')}</span>`}
         ${h.compactions > 0 && html`<span class="hit-compactions">${h.compactions} compaction${h.compactions > 1 ? 's' : ''}</span>`}
+        ${h.goal_count > 0 && html`<span class="hit-goals">${h.active_goal_count || 0} active / ${h.completed_goal_count || 0} complete</span>`}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
       </div>
       <${ToolMicroBar} breakdown=${h.tool_breakdown} onToolClick=${onToolClick} />
@@ -1566,6 +1583,36 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
     `;
   }
 
+  function renderGoalPanel() {
+    if (!hit?.goals || hit.goals.length === 0) return null;
+    return html`
+      <div class="detail-goals">
+        ${hit.goals.map((goal, i) => {
+          const status = goal.status || 'active';
+          const used = goal.tokens_used || 0;
+          const budget = goal.token_budget;
+          return html`
+            <div class="detail-goal-card ${status}" key=${i}>
+              <div class="detail-goal-head">
+                <span class="detail-goal-status">${status}</span>
+                ${goal.updated_at && html`<span class="detail-goal-time">${relTime(goal.updated_at)}</span>`}
+              </div>
+              <div class="detail-goal-objective">${goal.objective}</div>
+              <div class="detail-goal-meta">
+                ${goal.time_used_seconds > 0 && html`<span>${fmtDuration(goal.time_used_seconds)}</span>`}
+                ${used > 0 && html`<span>${fmtNum(used)} tok${budget ? ' / ' + fmtNum(budget) : ''}</span>`}
+                ${goal.thread_id && html`<span>${goal.thread_id.slice(0, 8)}</span>`}
+              </div>
+              ${goal.completion_budget_report && html`
+                <div class="detail-goal-report">${goal.completion_budget_report}</div>
+              `}
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
   return html`
     <div class="detail-panel ${hit ? 'open' : ''}" role="complementary" aria-label="Session detail">
       ${hit && html`
@@ -1587,7 +1634,9 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
             ${hit.duration_secs && html`<span>${fmtDuration(hit.duration_secs)}</span>`}
             ${(hit.input_tokens || hit.output_tokens) && html`<span>${fmtNum((hit.input_tokens||0)+(hit.output_tokens||0))} tok</span>`}
             ${hit.compactions > 0 && html`<span class="hit-compactions">${hit.compactions} compaction${hit.compactions > 1 ? 's' : ''}</span>`}
+            ${hit.goal_count > 0 && html`<span class="hit-goals">${hit.active_goal_count || 0} active goals / ${hit.completed_goal_count || 0} complete</span>`}
           </div>
+          ${renderGoalPanel()}
           ${hit.tool_breakdown && Object.keys(hit.tool_breakdown).length > 0 && html`
             <div class="detail-tool-breakdown">
               ${Object.entries(hit.tool_breakdown).sort((a,b) => b[1] - a[1]).map(([name, count]) => html`
@@ -3252,6 +3301,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('lines written', fmtNum(agg.lines_written))}
         ${card('total time', fmtDuration(agg.duration_secs))}
         ${card('subagent spawns', fmtNum(agg.subagent_spawns))}
+        ${card('goals', fmtNum(agg.goals || 0), (agg.active_goals || 0) + ' active · ' + (agg.completed_goals || 0) + ' complete')}
         ${card('it2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
           agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
         ${card('team ops', fmtNum(agg.team_inbox_reads + agg.team_inbox_sends + agg.team_task_ops + agg.team_spawns),
