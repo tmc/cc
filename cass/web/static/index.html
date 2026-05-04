@@ -98,6 +98,20 @@ function fmtNum(n) {
   return '' + n;
 }
 
+function goalGateSummary(gates) {
+  const summary = { total: 0, unresolved: 0, complete: 0, required: 0, missing: 0, blocked: 0 };
+  for (const gate of gates || []) {
+    const status = gate.status || 'required';
+    summary.total++;
+    if (status === 'complete') summary.complete++;
+    if (status === 'required') summary.required++;
+    if (status === 'missing') summary.missing++;
+    if (status === 'blocked') summary.blocked++;
+    if (status === 'missing' || status === 'blocked' || status === 'required') summary.unresolved++;
+  }
+  return summary;
+}
+
 // Format number with locale separators for hover titles (e.g. 1,234,567).
 function exactNum(n) {
   if (n == null || isNaN(n)) return '0';
@@ -799,7 +813,8 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   ];
 
   return html`
-    <div>
+    <div class="search-workspace ${selected ? 'has-detail' : ''}">
+      <section class="search-list-pane" aria-label="Sessions">
       <div class="search-bar">
         <input ref=${searchRef} class="search-input" type="text" placeholder="search sessions..."
           value=${query} onInput=${e => setQuery(e.target.value)} autofocus />
@@ -852,6 +867,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
         <div class="empty">no results</div>
       `}
 
+      </section>
       <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => { setSelected(null); setToolFilter(''); }}></div>
       <${SessionDetailPanel} hit=${selected} onClose=${() => { setSelected(null); setToolFilter(''); }} initialFilter=${toolFilter} />
     </div>
@@ -878,6 +894,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
   if (h.it2_sends) it2.push(h.it2_sends + ' msgs');
   if (h.it2_screens) it2.push(h.it2_screens + ' reads');
   const primaryGoal = h.goals && h.goals.length ? h.goals[h.goals.length - 1] : null;
+  const primaryGoalGates = goalGateSummary(primaryGoal?.completion_gates);
   const visibleSkills = (h.skills || []).filter(s => s.kind !== 'available');
   const primarySkill = visibleSkills.length ? visibleSkills[visibleSkills.length - 1] : (h.skills && h.skills.length ? h.skills[h.skills.length - 1] : null);
 
@@ -906,9 +923,9 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         ${teamBadge}
         ${adHocBadge}
         ${primaryGoal && html`
-          <span class="hit-goal-badge ${primaryGoal.status || 'active'}"
+          <span class="hit-goal-badge ${primaryGoal.status || 'active'} ${primaryGoalGates.unresolved > 0 ? 'blocked' : ''}"
             title=${primaryGoal.objective}>
-            ${primaryGoal.status || 'active'} goal
+            ${primaryGoalGates.unresolved > 0 ? primaryGoalGates.unresolved + ' gate' + (primaryGoalGates.unresolved === 1 ? '' : 's') : (primaryGoal.status || 'active') + ' goal'}
           </span>
         `}
         ${primarySkill && html`
@@ -1644,6 +1661,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
           const status = goal.status || 'active';
           const used = goal.tokens_used || 0;
           const budget = goal.token_budget;
+          const gates = goal.completion_gates || [];
+          const gateSummary = goalGateSummary(gates);
+          const unresolved = gates.filter(gate => ['required', 'missing', 'blocked'].includes(gate.status || 'required'));
+          const complete = gates.filter(gate => (gate.status || 'required') === 'complete');
           return html`
             <div class="detail-goal-card ${status}" key=${i}>
               <div class="detail-goal-head">
@@ -1656,13 +1677,32 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
                 ${used > 0 && html`<span>${fmtNum(used)} tok${budget ? ' / ' + fmtNum(budget) : ''}</span>`}
                 ${goal.thread_id && html`<span>${goal.thread_id.slice(0, 8)}</span>`}
               </div>
-              ${goal.completion_gates?.length > 0 && html`
+              ${gateSummary.total > 0 && html`
                 <div class="detail-goal-gates">
-                  ${goal.completion_gates.map(gate => html`
-                    <span class="detail-goal-gate ${gate.status || 'required'}" title=${gate.evidence || gate.source || ''}>
-                      <strong>${gate.status || 'required'}</strong>
-                      ${gate.name}
-                    </span>
+                  <div class="detail-goal-gates-head">
+                    <span>Completion gates</span>
+                    <strong class=${gateSummary.unresolved > 0 ? 'blocked' : 'complete'}>
+                      ${gateSummary.unresolved > 0
+                        ? gateSummary.unresolved + ' unresolved'
+                        : gateSummary.complete + ' complete'}
+                    </strong>
+                  </div>
+                  ${unresolved.map(gate => html`
+                    <div class="detail-goal-gate ${gate.status || 'required'}" title=${gate.evidence || gate.source || ''}>
+                      <span class="detail-goal-gate-status">${gate.status || 'required'}</span>
+                      <span class="detail-goal-gate-name">${gate.name}</span>
+                    </div>
+                  `)}
+                  ${complete.length > 0 && html`
+                    <details class="detail-goal-gate-complete">
+                      <summary>${complete.length} ready</summary>
+                      ${complete.map(gate => html`
+                        <div class="detail-goal-gate complete" title=${gate.evidence || gate.source || ''}>
+                          <span class="detail-goal-gate-status">complete</span>
+                          <span class="detail-goal-gate-name">${gate.name}</span>
+                        </div>
+                      `)}
+                    </details>
                   `)}
                 </div>
               `}
