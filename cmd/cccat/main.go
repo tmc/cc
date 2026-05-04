@@ -31,7 +31,7 @@ import (
 
 var (
 	typeFlag      = flag.String("type", "", "Filter by entry type (user, assistant, system, summary, progress)")
-	roleFlag      = flag.String("role", "", "Filter by message role (user, assistant)")
+	roleFlag      = flag.String("role", "", "Filter by message role (user, assistant, developer)")
 	toolFlag      = flag.String("tool", "", "Filter tool_use blocks by tool name")
 	textFlag      = flag.Bool("text", false, "Output only text content (no JSON)")
 	toolNamesFlag = flag.Bool("tool-names", false, "Output only tool names used")

@@ -175,6 +175,9 @@ func statsForFile(path string) (sessionStats, error) {
 
 		switch e.Message.Role {
 		case "user":
+			if e.Message.IsToolResultOnly() {
+				break
+			}
 			s.UserMessages++
 		case "assistant":
 			s.AsstMessages++

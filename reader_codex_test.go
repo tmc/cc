@@ -233,6 +233,111 @@ func TestReadFileCodexDesktopExecCommand(t *testing.T) {
 	}
 }
 
+func TestReadFileCodexGoalMode(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "session.jsonl")
+
+	writeJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-03T12:45:09Z",
+			"type":      "session_meta",
+			"payload": map[string]any{
+				"id":          "019deddc-b7dc-75a2-a393-52ded8ebe04a",
+				"cwd":         "/work/repo",
+				"originator":  "codex-tui",
+				"source":      "cli",
+				"cli_version": "0.128.0",
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-03T12:45:10Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "developer",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "Continue working toward the active thread goal.\n\n<untrusted_objective>\nship it\n</untrusted_objective>"},
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-03T12:45:11Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "what remains?"},
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-03T12:45:12Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":      "function_call",
+				"name":      "get_goal",
+				"call_id":   "call-goal",
+				"arguments": `{}`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-03T12:45:13Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "function_call_output",
+				"call_id": "call-goal",
+				"output":  `{"goal":{"status":"active"}}`,
+			},
+		},
+	)
+
+	entries, err := ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("len(entries) = %d, want 5", len(entries))
+	}
+
+	dev := entries[1]
+	if dev.Type != "system" || dev.Message == nil || dev.Message.Role != "developer" {
+		t.Fatalf("developer entry = type %q role %v, want system/developer", dev.Type, roleOf(dev.Message))
+	}
+	if !dev.IsMeta {
+		t.Fatalf("developer goal message should be meta")
+	}
+	if !strings.Contains(dev.Message.TextContent(), "ship it") {
+		t.Fatalf("developer goal text not preserved: %q", dev.Message.TextContent())
+	}
+
+	toolResult := entries[4]
+	if toolResult.Message == nil || !toolResult.Message.IsToolResultOnly() {
+		t.Fatalf("tool result should be tool-result-only: %#v", toolResult)
+	}
+
+	sum := Summarize(path, entries)
+	if sum.UserMessages != 1 {
+		t.Fatalf("summary user messages = %d, want 1", sum.UserMessages)
+	}
+	if sum.AsstMessages != 1 {
+		t.Fatalf("summary assistant messages = %d, want 1", sum.AsstMessages)
+	}
+	if sum.FirstPrompt != "what remains?" {
+		t.Fatalf("summary first prompt = %q, want what remains?", sum.FirstPrompt)
+	}
+	if sum.ToolUses != 1 {
+		t.Fatalf("summary tool uses = %d, want 1", sum.ToolUses)
+	}
+}
+
+func roleOf(m *Message) string {
+	if m == nil {
+		return ""
+	}
+	return m.Role
+}
+
 func TestFindSessionFilesIncludesCodexAndProjectFilterByCWD(t *testing.T) {
 	tmp := t.TempDir()
 	claudeHome := filepath.Join(tmp, ".claude")

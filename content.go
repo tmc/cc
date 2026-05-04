@@ -42,6 +42,20 @@ func (m *Message) ToolResults() []ContentBlock {
 	return results
 }
 
+// IsToolResultOnly reports whether all parsed content blocks are tool results.
+func (m *Message) IsToolResultOnly() bool {
+	blocks := m.ContentBlocks()
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type != "tool_result" {
+			return false
+		}
+	}
+	return true
+}
+
 // BashCommand returns the command field from a Bash tool_use block's Input.
 // Returns "" if the block is not a Bash tool_use or the input is unparseable.
 func (b ContentBlock) BashCommand() string {

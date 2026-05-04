@@ -147,7 +147,7 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 
 	switch payload.Type {
 	case "message":
-		if payload.Role != "user" && payload.Role != "assistant" {
+		if payload.Role != "user" && payload.Role != "assistant" && payload.Role != "developer" {
 			return Entry{}, false
 		}
 		blocks := codexTextBlocks(payload.Content)
@@ -155,8 +155,12 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 			return Entry{}, false
 		}
 		content, _ := json.Marshal(blocks)
+		entryType := payload.Role
+		if payload.Role == "developer" {
+			entryType = "system"
+		}
 		entry := Entry{
-			Type:      payload.Role,
+			Type:      entryType,
 			Timestamp: env.Timestamp,
 			Phase:     payload.Phase,
 			Message: &Message{
@@ -164,7 +168,7 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 				Content: content,
 			},
 		}
-		if payload.Role == "user" && isCodexSystemPreamble(blocks) {
+		if payload.Role == "developer" || payload.Role == "user" && isCodexSystemPreamble(blocks) {
 			entry.IsMeta = true
 		}
 		return entry, true
@@ -566,12 +570,12 @@ func ReadSubagents(path string) ([]Entry, error) {
 // GitContext fields are resolved from the latest CWD on the local
 // filesystem and may differ if the worktree has since moved or changed.
 type SessionSummary struct {
-	SessionID    string    `json:"session_id"`
-	File         string    `json:"file"`
-	Project      string    `json:"project"`
-	CWD          string    `json:"cwd,omitempty"`
-	DistinctCWDs []string  `json:"distinct_cwds,omitempty"`
-	GitBranch    string    `json:"git_branch,omitempty"`
+	SessionID    string   `json:"session_id"`
+	File         string   `json:"file"`
+	Project      string   `json:"project"`
+	CWD          string   `json:"cwd,omitempty"`
+	DistinctCWDs []string `json:"distinct_cwds,omitempty"`
+	GitBranch    string   `json:"git_branch,omitempty"`
 	GitContext
 	Version      string    `json:"version,omitempty"`
 	Slug         string    `json:"slug,omitempty"`
@@ -627,6 +631,9 @@ func Summarize(file string, entries []Entry) SessionSummary {
 		if e.Message != nil && !e.IsCompactSummary {
 			switch e.Message.Role {
 			case "user":
+				if e.Message.IsToolResultOnly() {
+					break
+				}
 				s.UserMessages++
 				if s.FirstPrompt == "" && !e.IsMeta {
 					s.FirstPrompt = ExtractText(e.Message.Content)

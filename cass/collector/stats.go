@@ -88,6 +88,9 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 
 		switch e.Message.Role {
 		case "user":
+			if e.Message.IsToolResultOnly() {
+				continue
+			}
 			s.Turns++
 			if e.PermissionMode == "plan" {
 				s.PlanModeTurns++
