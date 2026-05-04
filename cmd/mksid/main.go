@@ -133,4 +133,3 @@ func generateGitHash() string {
 
 	return hashStr
 }
-

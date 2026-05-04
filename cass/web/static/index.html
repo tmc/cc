@@ -1267,7 +1267,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
   const [entryCount, setEntryCount] = useState(0);
   const [expanded, setExpanded] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Tab state: 'conversation' or 'requests'
   const [activeTab, setActiveTab] = useState('conversation');
   const [apiRequests, setApiRequests] = useState([]);
@@ -1280,10 +1280,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
     : 0;
 
   useEffect(() => {
-    if (!hit) { 
-      setEntries([]); setEntryCount(0); setSearchQuery(''); 
+    if (!hit) {
+      setEntries([]); setEntryCount(0); setSearchQuery('');
       setActiveTab('conversation'); setApiRequests([]);
-      return; 
+      return;
     }
     setLoading(true);
     setStreaming(true);
@@ -1584,7 +1584,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
                 <span class="req-duration">${req.duration_ms}ms</span>
                 <span class="req-status ${req.status_code >= 400 ? 'error' : 'success'}">${req.status_code}</span>
               </div>
-              
+
               <div class="req-metrics">
                 <div class="req-metric">
                   <span class="label">Tokens (in/out/cr/cw)</span>
@@ -1751,7 +1751,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
               <span class="detail-search-count">${matchCount > 0 ? (matchCursor + 1) + '/' + matchCount : '0'}</span>
             `}
           </div>
-          
+
           <div class="detail-tabs">
             <button class="detail-tab ${activeTab === 'conversation' ? 'active' : ''}"
                     onClick=${() => setActiveTab('conversation')}>

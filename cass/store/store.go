@@ -175,7 +175,7 @@ func (s *Store) migrate() error {
 			user_hash TEXT NOT NULL DEFAULT '',
 			account_uuid TEXT NOT NULL DEFAULT '',
 			org_id TEXT NOT NULL DEFAULT '',
-			
+
 			context_breakdown_json TEXT NOT NULL DEFAULT '{}'
 		);
 

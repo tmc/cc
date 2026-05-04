@@ -377,4 +377,3 @@ func writeConfig(path string, values map[string]string) error {
 
 	return nil
 }
-
