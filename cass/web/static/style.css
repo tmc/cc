@@ -268,6 +268,14 @@ input::placeholder { color: var(--faint); }
 .hit-header { display: flex; gap: 8px; align-items: baseline; }
 .hit-num { color: var(--faint); min-width: 24px; text-align: right; font-size: 11px; }
 .hit-agent { color: var(--accent); font-size: 11px; }
+.hit-session-id {
+  color: var(--faint);
+  border: 1px solid var(--border);
+  padding: 0 5px;
+  font-size: 10px;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
 .hit-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .hit-sparkline { color: var(--faint); font-size: 11px; letter-spacing: 1px; flex-shrink: 0; }
 
@@ -915,10 +923,67 @@ mark.search-hl {
 /* detail: session ID row */
 .detail-session-id {
   display: flex;
-  align-items: center;
-  margin-top: 4px;
-  gap: 4px;
+  flex-direction: column;
+  align-items: stretch;
+  margin-top: 8px;
+  gap: 5px;
 }
+.detail-session-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.detail-session-label {
+  color: var(--faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.detail-session-copy {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.detail-session-copy:hover { color: var(--accent); }
+.detail-resume-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+}
+.detail-resume-command code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.detail-copy-button {
+  font: inherit;
+  font-size: 10px;
+  color: var(--dim);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 0 8px;
+  cursor: pointer;
+}
+.detail-copy-button:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ansi_up class-based colors */
 .ansi-black-fg { color: #333; }

@@ -54,6 +54,43 @@ function qs(params) {
   return p.toString();
 }
 
+function shellQuote(s) {
+  if (!s) return "''";
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(s)) return s;
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+function shortSessionID(id) {
+  return id && id.length > 8 ? id.slice(0, 8) : (id || '');
+}
+
+function resumeCommand(hit) {
+  if (!hit || !hit.agent) return '';
+  const prefix = hit.workspace ? 'cd ' + shellQuote(hit.workspace) + ' && ' : '';
+  if (hit.agent === 'codex-cli' || hit.agent === 'codex-app') {
+    return prefix + 'codex resume ' + hit.session_id;
+  }
+  if (hit.agent === 'gemini-cli') return prefix + 'gemini --resume';
+  return prefix + 'claude --resume';
+}
+
+async function copyText(text) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+}
+
 // --- Utilities ---
 
 function relTime(ts) {
@@ -545,6 +582,7 @@ function App() {
   }
 
   function updateParams(params) {
+    setUrlParams(params || {});
     pushURL(tab, params);
   }
 
@@ -722,8 +760,8 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const [skill, setSkillRaw] = useState(urlParams.skill || '');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [toolFilter, setToolFilter] = useState('');
+  const [selected, setSelected] = useState(urlParams.session_id ? { session_id: urlParams.session_id } : null);
+  const [toolFilter, setToolFilter] = useState(urlParams.detail_filter || '');
   const [selectedIdx, setSelectedIdx] = useState(-1);
 
   function setQuery(v) { setQueryRaw(v); }
@@ -744,9 +782,20 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const urlRef = useRef(null);
   useEffect(() => {
     clearTimeout(urlRef.current);
-    urlRef.current = setTimeout(() => updateParams({ q: query, agent, workspace, since, sort, team, goal_status: goalStatus, skill }), 300);
+    urlRef.current = setTimeout(() => updateParams({
+      q: query,
+      agent,
+      workspace,
+      since,
+      sort,
+      team,
+      goal_status: goalStatus,
+      skill,
+      session_id: selected?.session_id || '',
+      detail_filter: selected?.session_id ? toolFilter : '',
+    }), 300);
     return () => clearTimeout(urlRef.current);
-  }, [query, agent, workspace, since, sort, team, goalStatus, skill]);
+  }, [query, agent, workspace, since, sort, team, goalStatus, skill, selected?.session_id, toolFilter]);
 
   // Restore state from URL on browser navigation.
   useEffect(() => {
@@ -759,6 +808,8 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     setTeamRaw(urlParams.team || '');
     setGoalStatusRaw(urlParams.goal_status || '');
     setSkillRaw(urlParams.skill || '');
+    setToolFilter(urlParams.detail_filter || '');
+    setSelected(urlParams.session_id ? { session_id: urlParams.session_id } : null);
   }, [navVersion]);
 
   const effectiveSort = sort || (query ? 'relevance' : 'recent');
@@ -781,6 +832,14 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     return () => clearTimeout(id);
   }, [query, agent, workspace, since, sort, team, goalStatus, skill]);
 
+  useEffect(() => {
+    if (!selected?.session_id || !results?.hits) return;
+    const i = results.hits.findIndex(h => h.session_id === selected.session_id);
+    if (i < 0) return;
+    if (selected !== results.hits[i]) setSelected(results.hits[i]);
+    if (selectedIdx !== i) setSelectedIdx(i);
+  }, [results, selected?.session_id]);
+
   // Auto-refresh on SSE.
   useEffect(() => {
     const handler = () => doSearch();
@@ -796,7 +855,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
       if (!hits || hits.length === 0) return;
       if (e.key === 'j') { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, hits.length - 1)); }
       else if (e.key === 'k') { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
-      else if (e.key === 'Enter' && selectedIdx >= 0) { e.preventDefault(); setSelected(hits[selectedIdx]); }
+      else if (e.key === 'Enter' && selectedIdx >= 0) { e.preventDefault(); setSelected(hits[selectedIdx]); setToolFilter(''); }
       else if (e.key === 'Escape' && selected) { e.preventDefault(); setSelected(null); }
     }
     window.addEventListener('keydown', onKey);
@@ -933,6 +992,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
       <div class="hit-header">
         <span class="hit-num">${num}.</span>
         <span class="hit-agent">[${h.agent}]</span>
+        <span class="hit-session-id" title=${h.session_id}>${shortSessionID(h.session_id)}</span>
         ${teamBadge}
         ${adHocBadge}
         ${primaryGoal && html`
@@ -1308,6 +1368,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
   const detailToolTotal = hit?.tool_breakdown
     ? Object.values(hit.tool_breakdown).reduce((a, b) => a + b, 0)
     : 0;
+  const resumeCmd = resumeCommand(hit);
 
   useEffect(() => {
     if (!hit) {
@@ -1817,7 +1878,16 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
             </div>
           `}
           <div class="detail-session-id">
-            <span style="color:var(--faint);font-size:10px">${hit.session_id}</span>
+            <div class="detail-session-line">
+              <span class="detail-session-label">session</span>
+              <button class="detail-session-copy" onClick=${() => copyText(hit.session_id)} title="copy session id">${hit.session_id}</button>
+            </div>
+            ${resumeCmd && html`
+              <div class="detail-resume-command">
+                <code>${resumeCmd}</code>
+                <button class="detail-copy-button" onClick=${() => copyText(resumeCmd)}>copy</button>
+              </div>
+            `}
             ${hit.sparkline && html`<span class="hit-sparkline" style="margin-left:8px">${hit.sparkline}</span>`}
           </div>
           <div class="detail-search">
