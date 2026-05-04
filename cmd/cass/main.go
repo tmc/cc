@@ -40,6 +40,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "  index      index sessions from detected agents")
 		fmt.Fprintln(os.Stderr, "  search     search indexed sessions")
 		fmt.Fprintln(os.Stderr, "  resume     search and resume a session interactively")
+		fmt.Fprintln(os.Stderr, "  goals      list goal-mode objectives")
 		fmt.Fprintln(os.Stderr, "  links      show inter-session communication graph")
 		fmt.Fprintln(os.Stderr, "  map        show iTerm2 <-> Claude session ID mappings")
 		fmt.Fprintln(os.Stderr, "  stats      show index statistics")
@@ -79,6 +80,8 @@ func run() error {
 		return runSearch(ctx, svc, args[1:], *jsonOutput)
 	case "resume":
 		return runResume(ctx, svc, args[1:])
+	case "goals":
+		return runGoals(ctx, svc, args[1:], *jsonOutput)
 	case "links":
 		return runLinks(ctx, svc, args[1:], *jsonOutput)
 	case "map":
@@ -196,6 +199,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 	agent := fs.String("agent", "", "filter by agent slug")
 	workspace := fs.String("workspace", "", "filter by workspace path or project name")
 	gitCommonDir := fs.String("git-common-dir", "", "filter by resolved git common dir (stable across worktrees)")
+	goalStatus := fs.String("goal-status", "", "filter by goal status")
 	pwd := fs.Bool("pwd", false, "filter to current working directory")
 	since := fs.Duration("since", 0, "sessions within duration (e.g. 12h, 24h, 168h)")
 	after := fs.String("after", "", "sessions after date (RFC3339 or YYYY-MM-DD)")
@@ -227,6 +231,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 			Agent:        *agent,
 			Workspace:    ws,
 			GitCommonDir: *gitCommonDir,
+			GoalStatus:   *goalStatus,
 		},
 	}
 
@@ -363,6 +368,18 @@ func printHit(num int, h cass.Hit) {
 	// Line 2: snippet.
 	if h.Snippet != "" {
 		fmt.Printf("    %s\n", formatSnippet(h.Snippet))
+	}
+	if len(h.Goals) > 0 {
+		goal := h.Goals[len(h.Goals)-1]
+		obj := strings.Join(strings.Fields(goal.Objective), " ")
+		if len(obj) > 100 {
+			obj = obj[:97] + "..."
+		}
+		status := goal.Status
+		if status == "" {
+			status = "active"
+		}
+		fmt.Printf("    %s %s\n", statusStyle(status), obj)
 	}
 
 	// Line 3: project, time, duration, and stats.
@@ -507,6 +524,73 @@ func runStats(ctx context.Context, svc *service.Service, jsonOut bool) error {
 		}
 	}
 	return nil
+}
+
+func runGoals(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
+	fs := flag.NewFlagSet("goals", flag.ExitOnError)
+	status := fs.String("status", "", "filter by goal status")
+	limit := fs.Int("limit", 50, "max rows to return")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	goals, err := svc.Goals(ctx, *status, *limit)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(goals)
+	}
+	if len(goals) == 0 {
+		fmt.Println("no goals")
+		return nil
+	}
+	for _, g := range goals {
+		when := relativeTime(g.EndedAt)
+		status := g.Status
+		if status == "" {
+			status = "active"
+		}
+		obj := strings.Join(strings.Fields(g.Objective), " ")
+		if len(obj) > 90 {
+			obj = obj[:87] + "..."
+		}
+		meta := shortProject(g.Workspace)
+		if g.TimeUsedSeconds > 0 {
+			if meta != "" {
+				meta += "  "
+			}
+			meta += formatDuration(g.TimeUsedSeconds)
+		}
+		if g.TokensUsed > 0 {
+			if meta != "" {
+				meta += "  "
+			}
+			meta += formatTokens(g.TokensUsed) + " tok"
+		}
+		if when != "" {
+			if meta != "" {
+				meta += "  "
+			}
+			meta += when
+		}
+		fmt.Printf("%-10s  %-10s  %s\n", statusStyle(status), short(g.SessionID), obj)
+		if meta != "" {
+			fmt.Printf("                        %s\n", meta)
+		}
+	}
+	return nil
+}
+
+func statusStyle(status string) string {
+	switch status {
+	case "complete", "completed":
+		return labelStyle.Render("complete")
+	case "active":
+		return titleStyle.Render("active")
+	default:
+		return snippetStyle.Render(status)
+	}
 }
 
 func runSubagents(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {

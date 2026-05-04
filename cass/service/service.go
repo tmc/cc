@@ -215,6 +215,11 @@ func (s *Service) Links(ctx context.Context, sessionID string) ([]cass.SessionLi
 	return s.store.Links(ctx, sessionID)
 }
 
+// Goals returns goal-mode objectives joined with parent session metadata.
+func (s *Service) Goals(ctx context.Context, status string, limit int) ([]cass.GoalHit, error) {
+	return s.store.Goals(ctx, status, limit)
+}
+
 // Mappings returns iTerm2 <-> Claude session mappings.
 func (s *Service) Mappings(ctx context.Context, filter string) ([]store.SessionMapping, error) {
 	return s.store.Mappings(ctx, filter)

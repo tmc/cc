@@ -124,6 +124,74 @@ func TestCodexDetectAndScan(t *testing.T) {
 	}
 }
 
+func TestCodexGoals(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "goal.jsonl")
+	writeCollectorJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-03T12:45:09Z",
+			"type":      "session_meta",
+			"payload": map[string]any{
+				"id":         "goal-session",
+				"cwd":        "/work/goal",
+				"originator": "codex-tui",
+				"source":     "cli",
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-03T12:45:10Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "developer",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "Continue working toward the active thread goal.\n\n<untrusted_objective>\nship goal support\n</untrusted_objective>\n\nBudget:\n- Time spent pursuing goal: 12 seconds\n- Tokens used: 34\n- Token budget: none"},
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-03T12:45:11Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":      "function_call",
+				"name":      "update_goal",
+				"call_id":   "call-goal",
+				"arguments": `{"status":"complete"}`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-03T12:45:12Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "function_call_output",
+				"call_id": "call-goal",
+				"output":  `{"goal":{"threadId":"goal-session","objective":"ship goal support","status":"complete","tokensUsed":99,"timeUsedSeconds":88,"createdAt":1777812309,"updatedAt":1777812397},"completionBudgetReport":"Goal achieved. Report final budget usage to the user: time used: 88 seconds."}`,
+			},
+		},
+	)
+
+	sess, err := (&Codex{}).parseSession(path)
+	if err != nil {
+		t.Fatalf("parseSession: %v", err)
+	}
+	if len(sess.Goals) != 1 {
+		t.Fatalf("goals = %d, want 1: %#v", len(sess.Goals), sess.Goals)
+	}
+	g := sess.Goals[0]
+	if g.Objective != "ship goal support" {
+		t.Fatalf("objective = %q", g.Objective)
+	}
+	if g.Status != "complete" {
+		t.Fatalf("status = %q, want complete", g.Status)
+	}
+	if g.TokensUsed != 99 || g.TimeUsedSeconds != 88 {
+		t.Fatalf("usage = tokens %d seconds %d", g.TokensUsed, g.TimeUsedSeconds)
+	}
+	if g.ThreadID != "goal-session" {
+		t.Fatalf("thread id = %q", g.ThreadID)
+	}
+}
+
 func writeCollectorJSONL(t *testing.T, path string, rows ...map[string]any) {
 	t.Helper()
 	f, err := os.Create(path)

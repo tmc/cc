@@ -78,6 +78,10 @@ func (s *Store) migrate() error {
 			team_inbox_sends INTEGER NOT NULL DEFAULT 0,
 			team_task_ops INTEGER NOT NULL DEFAULT 0,
 			team_spawns INTEGER NOT NULL DEFAULT 0,
+			goal_count INTEGER NOT NULL DEFAULT 0,
+			active_goal_count INTEGER NOT NULL DEFAULT 0,
+			completed_goal_count INTEGER NOT NULL DEFAULT 0,
+			goals_json TEXT NOT NULL DEFAULT '[]',
 			sparkline TEXT NOT NULL DEFAULT '',
 			stats_json TEXT NOT NULL DEFAULT '{}'
 		);
@@ -271,6 +275,10 @@ func (s *Store) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN branch TEXT NOT NULL DEFAULT ''",
 		"CREATE INDEX IF NOT EXISTS idx_sessions_git_common_dir ON sessions(git_common_dir)",
 		"ALTER TABLE sessions ADD COLUMN subagent_run_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN goal_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN active_goal_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN completed_goal_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN goals_json TEXT NOT NULL DEFAULT '[]'",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -289,9 +297,10 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		INSERT OR REPLACE INTO sessions (id, agent, title, workspace, source_path, started_at, ended_at, content, indexed_at,
 			tool_calls, input_tokens, output_tokens, files_read, files_written, files_edited, lines_written,
 			turns, duration_secs, subagent_spawns, it2_splits, it2_sends, it2_screens, it2_buffers,
-			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns, sparkline, stats_json,
+			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns,
+			goal_count, active_goal_count, completed_goal_count, goals_json, sparkline, stats_json,
 			team_name, agent_name, is_team_lead, git_common_dir, branch, subagent_run_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare sessions: %w", err)
@@ -327,6 +336,8 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 	for _, sess := range sessions {
 		content := buildContent(sess)
 		statsJSON, _ := json.Marshal(sess.Stats)
+		goalsJSON, _ := json.Marshal(sess.Goals)
+		goalCount, activeGoalCount, completedGoalCount := goalCounts(sess.Goals)
 		_, err := sessStmt.ExecContext(ctx,
 			sess.ID,
 			sess.Agent,
@@ -355,6 +366,10 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			sess.Stats.TeamInboxSends,
 			sess.Stats.TeamTaskOps,
 			sess.Stats.TeamSpawns,
+			goalCount,
+			activeGoalCount,
+			completedGoalCount,
+			string(goalsJSON),
 			sess.Stats.Sparkline,
 			string(statsJSON),
 			sess.TeamName,
@@ -485,6 +500,10 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		where = append(where, "s.team_name = ?")
 		args = append(args, req.Filters.Team)
 	}
+	if req.Filters.GoalStatus != "" {
+		where = append(where, "s.goals_json LIKE ?")
+		args = append(args, `%"status":"`+req.Filters.GoalStatus+`"%`)
+	}
 
 	whereClause := ""
 	if len(where) > 0 {
@@ -518,7 +537,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	}
 
 	// Build query with BM25 ranking when doing FTS.
-	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.subagent_spawns, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch`
+	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.subagent_spawns, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch, s.goals_json, s.goal_count, s.active_goal_count, s.completed_goal_count`
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -552,12 +571,12 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	for rows.Next() {
 		var h cass.Hit
 		var startedUnix, endedUnix int64
-		var statsJSON string
+		var statsJSON, goalsJSON string
 		var isTeamLead int
 		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
 			&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
 			&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
-			&h.GitCommonDir, &h.Branch); err != nil {
+			&h.GitCommonDir, &h.Branch, &goalsJSON, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		if startedUnix > 0 {
@@ -567,6 +586,9 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 			h.EndedAt = time.Unix(endedUnix, 0).Format(time.RFC3339)
 		}
 		h.IsTeamLead = isTeamLead != 0
+		if goalsJSON != "" {
+			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
+		}
 		if statsJSON != "" {
 			var stats cass.SessionStats
 			if json.Unmarshal([]byte(statsJSON), &stats) == nil {
@@ -733,16 +755,20 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 			coalesce(sum(team_task_ops), 0),
 			coalesce(sum(team_spawns), 0),
 			count(DISTINCT agent),
-			count(DISTINCT workspace)
+			count(DISTINCT workspace),
+			coalesce(sum(goal_count), 0),
+			coalesce(sum(active_goal_count), 0),
+			coalesce(sum(completed_goal_count), 0)
 		FROM sessions `+where, args...)
 
 	var (
-		sessions, tools, inTok, outTok              int
-		fRead, fWritten, fEdited, lWritten          int
-		turns, dur, subSpawns                       int
-		it2Splits, it2Sends, it2Screens, it2Buffers int
-		teamInbox, teamSends, teamTasks, teamSpawns int
-		agents, workspaces                          int
+		sessions, tools, inTok, outTok                 int
+		fRead, fWritten, fEdited, lWritten             int
+		turns, dur, subSpawns                          int
+		it2Splits, it2Sends, it2Screens, it2Buffers    int
+		teamInbox, teamSends, teamTasks, teamSpawns    int
+		agents, workspaces                             int
+		goalCount, activeGoalCount, completedGoalCount int
 	)
 	if err := row.Scan(
 		&sessions, &tools, &inTok, &outTok,
@@ -751,6 +777,7 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 		&it2Splits, &it2Sends, &it2Screens, &it2Buffers,
 		&teamInbox, &teamSends, &teamTasks, &teamSpawns,
 		&agents, &workspaces,
+		&goalCount, &activeGoalCount, &completedGoalCount,
 	); err != nil {
 		return nil, fmt.Errorf("aggregate stats: %w", err)
 	}
@@ -832,6 +859,9 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 		"agents_breakdown": agentCounts,
 		"workspace_top":    wsCounts,
 		"sessions_per_day": daily,
+		"goals":            goalCount,
+		"active_goals":     activeGoalCount,
+		"completed_goals":  completedGoalCount,
 	}, nil
 }
 
@@ -906,6 +936,63 @@ func (s *Store) Links(ctx context.Context, sessionID string) ([]cass.SessionLink
 		links = append(links, l)
 	}
 	return links, rows.Err()
+}
+
+// Goals returns goal-mode objectives joined with parent session metadata.
+func (s *Store) Goals(ctx context.Context, status string, limit int) ([]cass.GoalHit, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	query := `SELECT id, agent, title, workspace, source_path, started_at, ended_at, goals_json FROM sessions WHERE goal_count > 0`
+	var args []any
+	if status != "" {
+		query += ` AND goals_json LIKE ?`
+		args = append(args, `%"status":"`+status+`"%`)
+	}
+	query += ` ORDER BY ended_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query goals: %w", err)
+	}
+	defer rows.Close()
+
+	var hits []cass.GoalHit
+	for rows.Next() {
+		var sessionID, agent, title, workspace, sourcePath, goalsJSON string
+		var startedUnix, endedUnix int64
+		if err := rows.Scan(&sessionID, &agent, &title, &workspace, &sourcePath, &startedUnix, &endedUnix, &goalsJSON); err != nil {
+			return nil, fmt.Errorf("scan goal session: %w", err)
+		}
+		var goals []cass.Goal
+		if err := json.Unmarshal([]byte(goalsJSON), &goals); err != nil {
+			continue
+		}
+		started, ended := "", ""
+		if startedUnix > 0 {
+			started = time.Unix(startedUnix, 0).Format(time.RFC3339)
+		}
+		if endedUnix > 0 {
+			ended = time.Unix(endedUnix, 0).Format(time.RFC3339)
+		}
+		for _, g := range goals {
+			if status != "" && g.Status != status {
+				continue
+			}
+			hits = append(hits, cass.GoalHit{
+				Goal:       g,
+				SessionID:  sessionID,
+				Agent:      agent,
+				Title:      title,
+				Workspace:  workspace,
+				SourcePath: sourcePath,
+				StartedAt:  started,
+				EndedAt:    ended,
+			})
+		}
+	}
+	return hits, rows.Err()
 }
 
 // SessionLabel returns a short label for a session identified by iTerm2 session ID prefix.
@@ -1390,6 +1477,18 @@ func (s *Store) TeamConfigs(ctx context.Context) ([]TeamConfig, error) {
 // buildContent concatenates all message content for full-text indexing.
 func buildContent(sess cass.Session) string {
 	var b strings.Builder
+	for _, goal := range sess.Goals {
+		if goal.Objective == "" {
+			continue
+		}
+		b.WriteString("goal ")
+		if goal.Status != "" {
+			b.WriteString(goal.Status)
+			b.WriteByte(' ')
+		}
+		b.WriteString(goal.Objective)
+		b.WriteByte('\n')
+	}
 	for _, msg := range sess.Messages {
 		if msg.Content == "" {
 			continue
@@ -1398,4 +1497,17 @@ func buildContent(sess cass.Session) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+func goalCounts(goals []cass.Goal) (total, active, completed int) {
+	total = len(goals)
+	for _, g := range goals {
+		switch g.Status {
+		case "complete", "completed":
+			completed++
+		case "active":
+			active++
+		}
+	}
+	return total, active, completed
 }

@@ -319,6 +319,62 @@ func TestUpsert(t *testing.T) {
 	}
 }
 
+func TestGoalsRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sess := cass.Session{
+		ID:        "goal-1",
+		Agent:     "codex-cli",
+		Title:     "Goal session",
+		Workspace: "/home/user/project",
+		StartedAt: time.Unix(100, 0),
+		EndedAt:   time.Unix(200, 0),
+		Messages: []cass.Message{
+			{Role: "user", Content: "ordinary prompt"},
+		},
+		Goals: []cass.Goal{
+			{
+				ThreadID:        "goal-1",
+				Objective:       "ship goal support",
+				Status:          "complete",
+				TokensUsed:      99,
+				TimeUsedSeconds: 88,
+				UpdatedAt:       time.Unix(190, 0),
+			},
+		},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.Search(ctx, cass.SearchRequest{Query: "goal support", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(result.Hits))
+	}
+	h := result.Hits[0]
+	if h.GoalCount != 1 || h.CompletedGoalCount != 1 {
+		t.Fatalf("goal counts = total %d complete %d", h.GoalCount, h.CompletedGoalCount)
+	}
+	if len(h.Goals) != 1 || h.Goals[0].Objective != "ship goal support" {
+		t.Fatalf("hit goals = %#v", h.Goals)
+	}
+
+	goals, err := s.Goals(ctx, "complete", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(goals) != 1 {
+		t.Fatalf("Goals = %d, want 1", len(goals))
+	}
+	if goals[0].SessionID != "goal-1" || goals[0].Objective != "ship goal support" {
+		t.Fatalf("goal hit = %#v", goals[0])
+	}
+}
+
 // TestBatchIndexSubagentRuns verifies that SubagentRun records persist
 // alongside their parent session, and that re-indexing the same session
 // with a different set of runs replaces them rather than duplicating.

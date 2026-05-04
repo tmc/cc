@@ -2,10 +2,14 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
@@ -150,6 +154,7 @@ func (c *Codex) parseSession(path string) (cass.Session, error) {
 
 	links := ExtractLinks(entries)
 	stats := ExtractStats(entries)
+	goals := extractCodexGoals(entries)
 
 	meta := map[string]any{}
 	if sum.Version != "" {
@@ -184,6 +189,7 @@ func (c *Codex) parseSession(path string) (cass.Session, error) {
 		StartedAt:  sum.FirstTime,
 		EndedAt:    sum.LastTime,
 		Messages:   messages,
+		Goals:      goals,
 		Stats:      stats,
 		Metadata:   meta,
 	}, nil
@@ -225,4 +231,144 @@ func codexOriginSource(entries []cc.Entry) (originator, source string) {
 		}
 	}
 	return originator, source
+}
+
+var goalObjectiveRe = regexp.MustCompile(`(?s)<untrusted_objective>\s*(.*?)\s*</untrusted_objective>`)
+
+func extractCodexGoals(entries []cc.Entry) []cass.Goal {
+	byObjective := map[string]int{}
+	var goals []cass.Goal
+
+	upsert := func(g cass.Goal) {
+		g.Objective = strings.TrimSpace(g.Objective)
+		if g.Objective == "" {
+			return
+		}
+		if g.Status == "" {
+			g.Status = "active"
+		}
+		if i, ok := byObjective[g.Objective]; ok {
+			mergeGoal(&goals[i], g)
+			return
+		}
+		byObjective[g.Objective] = len(goals)
+		goals = append(goals, g)
+	}
+
+	for _, e := range entries {
+		if e.Message != nil && e.Message.Role == "developer" {
+			text := e.Message.TextContent()
+			if m := goalObjectiveRe.FindStringSubmatch(text); len(m) == 2 {
+				g := cass.Goal{
+					Objective:      m[1],
+					Status:         "active",
+					LastObservedAt: e.Timestamp,
+				}
+				if n, ok := parseGoalIntLine(text, "Tokens used"); ok {
+					g.TokensUsed = n
+				}
+				if n, ok := parseGoalIntLine(text, "Time spent pursuing goal"); ok {
+					g.TimeUsedSeconds = n
+				}
+				if n, ok := parseGoalIntLine(text, "Token budget"); ok {
+					g.TokenBudget = &n
+				}
+				upsert(g)
+			}
+		}
+		if e.ToolUseResult != nil && e.ToolUseResult.Stdout != "" {
+			if g, ok := parseCodexGoalToolOutput(e.ToolUseResult.Stdout); ok {
+				if g.LastObservedAt.IsZero() {
+					g.LastObservedAt = e.Timestamp
+				}
+				upsert(g)
+			}
+		}
+	}
+	return goals
+}
+
+func parseGoalIntLine(text, key string) (int, bool) {
+	prefix := "- " + key + ":"
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		v := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		fields := strings.Fields(v)
+		if len(fields) == 0 || fields[0] == "none" {
+			return 0, false
+		}
+		n, err := strconv.Atoi(fields[0])
+		return n, err == nil
+	}
+	return 0, false
+}
+
+func parseCodexGoalToolOutput(text string) (cass.Goal, bool) {
+	var out struct {
+		Goal struct {
+			ThreadID        string `json:"threadId"`
+			Objective       string `json:"objective"`
+			Status          string `json:"status"`
+			TokensUsed      int    `json:"tokensUsed"`
+			TimeUsedSeconds int    `json:"timeUsedSeconds"`
+			CreatedAt       int64  `json:"createdAt"`
+			UpdatedAt       int64  `json:"updatedAt"`
+		} `json:"goal"`
+		CompletionBudgetReport string `json:"completionBudgetReport"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &out); err != nil {
+		return cass.Goal{}, false
+	}
+	if out.Goal.Objective == "" {
+		return cass.Goal{}, false
+	}
+	g := cass.Goal{
+		ThreadID:               out.Goal.ThreadID,
+		Objective:              out.Goal.Objective,
+		Status:                 out.Goal.Status,
+		TokensUsed:             out.Goal.TokensUsed,
+		TimeUsedSeconds:        out.Goal.TimeUsedSeconds,
+		CompletionBudgetReport: out.CompletionBudgetReport,
+	}
+	if out.Goal.CreatedAt > 0 {
+		g.CreatedAt = time.Unix(out.Goal.CreatedAt, 0)
+	}
+	if out.Goal.UpdatedAt > 0 {
+		g.UpdatedAt = time.Unix(out.Goal.UpdatedAt, 0)
+		g.LastObservedAt = g.UpdatedAt
+	}
+	return g, true
+}
+
+func mergeGoal(dst *cass.Goal, src cass.Goal) {
+	if src.ThreadID != "" {
+		dst.ThreadID = src.ThreadID
+	}
+	if src.Status != "" {
+		dst.Status = src.Status
+	}
+	if src.TokenBudget != nil {
+		dst.TokenBudget = src.TokenBudget
+	}
+	if src.TokensUsed != 0 {
+		dst.TokensUsed = src.TokensUsed
+	}
+	if src.TimeUsedSeconds != 0 {
+		dst.TimeUsedSeconds = src.TimeUsedSeconds
+	}
+	if !src.CreatedAt.IsZero() {
+		dst.CreatedAt = src.CreatedAt
+	}
+	if !src.UpdatedAt.IsZero() {
+		dst.UpdatedAt = src.UpdatedAt
+	}
+	if !src.LastObservedAt.IsZero() && (dst.LastObservedAt.IsZero() || src.LastObservedAt.After(dst.LastObservedAt)) {
+		dst.LastObservedAt = src.LastObservedAt
+	}
+	if src.CompletionBudgetReport != "" {
+		dst.CompletionBudgetReport = src.CompletionBudgetReport
+	}
 }

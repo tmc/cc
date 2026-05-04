@@ -22,12 +22,12 @@ var staticFS embed.FS
 
 // Config configures the web server.
 type Config struct {
-	Service    *service.Service
-	Addr       string // Listen address, default ":8080".
-	DevMode    bool   // Serve static files from disk for development.
+	Service      *service.Service
+	Addr         string // Listen address, default ":8080".
+	DevMode      bool   // Serve static files from disk for development.
 	DevStaticDir string // Override dev static directory path.
-	Verbose    bool   // Log requests with timing info.
-	Logger     *slog.Logger
+	Verbose      bool   // Log requests with timing info.
+	Logger       *slog.Logger
 }
 
 // Server serves the CASS web UI and API.
@@ -72,6 +72,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/links", s.handleLinks)
+	mux.HandleFunc("GET /api/goals", s.handleGoals)
 	mux.HandleFunc("GET /api/mappings", s.handleMappings)
 	mux.HandleFunc("GET /api/labels", s.handleLabels)
 	mux.HandleFunc("POST /api/index", s.handleIndex)

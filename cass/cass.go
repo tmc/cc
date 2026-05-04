@@ -17,6 +17,7 @@ type Session struct {
 	StartedAt    time.Time      `json:"started_at"`
 	EndedAt      time.Time      `json:"ended_at"`
 	Messages     []Message      `json:"messages"`
+	Goals        []Goal         `json:"goals,omitempty"`
 	Stats        SessionStats   `json:"stats"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
 
@@ -32,6 +33,32 @@ type Session struct {
 	Subagents []SubagentRun `json:"subagents,omitempty"`
 }
 
+// Goal is one goal-mode objective observed in a session.
+type Goal struct {
+	ThreadID               string    `json:"thread_id,omitempty"`
+	Objective              string    `json:"objective"`
+	Status                 string    `json:"status,omitempty"`
+	TokenBudget            *int      `json:"token_budget,omitempty"`
+	TokensUsed             int       `json:"tokens_used,omitempty"`
+	TimeUsedSeconds        int       `json:"time_used_seconds,omitempty"`
+	CreatedAt              time.Time `json:"created_at,omitempty"`
+	UpdatedAt              time.Time `json:"updated_at,omitempty"`
+	LastObservedAt         time.Time `json:"last_observed_at,omitempty"`
+	CompletionBudgetReport string    `json:"completion_budget_report,omitempty"`
+}
+
+// GoalHit is a goal joined with its parent session.
+type GoalHit struct {
+	Goal
+	SessionID  string `json:"session_id"`
+	Agent      string `json:"agent"`
+	Title      string `json:"title"`
+	Workspace  string `json:"workspace,omitempty"`
+	SourcePath string `json:"source_path,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
+	EndedAt    string `json:"ended_at,omitempty"`
+}
+
 // SubagentRun is one Task subagent invocation. Subagent JSONLs share the
 // parent's Claude sessionId, so a SubagentRun is a sibling node to Session,
 // not a child Session.
@@ -42,20 +69,20 @@ type Session struct {
 // missing (lost on crash, very old logs), Status is "unknown" and the
 // usage fields stay zero.
 type SubagentRun struct {
-	AgentID         string    `json:"agent_id"`           // From agent-<agentId>.jsonl filename.
-	ParentSessionID string    `json:"parent_session_id"`  // cass.Session.ID (sha256-derived).
-	ParentClaudeSID string    `json:"parent_claude_sid"`  // Claude sessionId.
+	AgentID         string    `json:"agent_id"`          // From agent-<agentId>.jsonl filename.
+	ParentSessionID string    `json:"parent_session_id"` // cass.Session.ID (sha256-derived).
+	ParentClaudeSID string    `json:"parent_claude_sid"` // Claude sessionId.
 	Workspace       string    `json:"workspace,omitempty"`
 	GitCommonDir    string    `json:"git_common_dir,omitempty"`
-	AgentType       string    `json:"agent_type,omitempty"`   // From meta.json (e.g. "general-purpose").
-	Description     string    `json:"description,omitempty"`  // From meta.json.
-	Model           string    `json:"model,omitempty"`        // From subagent JSONL assistant entries.
-	EnqueuedAt      time.Time `json:"enqueued_at"`            // Notification posted to queue.
-	DequeuedAt      time.Time `json:"dequeued_at"`            // Parent consumed notification.
-	StartedAt       time.Time `json:"started_at"`             // First entry in subagent JSONL.
-	EndedAt         time.Time `json:"ended_at"`               // Last entry in subagent JSONL.
-	Status          string    `json:"status,omitempty"`       // completed | error | unknown.
-	ToolUseID       string    `json:"tool_use_id,omitempty"`  // Parent tool_use that spawned this run.
+	AgentType       string    `json:"agent_type,omitempty"`  // From meta.json (e.g. "general-purpose").
+	Description     string    `json:"description,omitempty"` // From meta.json.
+	Model           string    `json:"model,omitempty"`       // From subagent JSONL assistant entries.
+	EnqueuedAt      time.Time `json:"enqueued_at"`           // Notification posted to queue.
+	DequeuedAt      time.Time `json:"dequeued_at"`           // Parent consumed notification.
+	StartedAt       time.Time `json:"started_at"`            // First entry in subagent JSONL.
+	EndedAt         time.Time `json:"ended_at"`              // Last entry in subagent JSONL.
+	Status          string    `json:"status,omitempty"`      // completed | error | unknown.
+	ToolUseID       string    `json:"tool_use_id,omitempty"` // Parent tool_use that spawned this run.
 	OutputFile      string    `json:"output_file,omitempty"`
 	WorktreePath    string    `json:"worktree_path,omitempty"`
 	WorktreeBranch  string    `json:"worktree_branch,omitempty"`
@@ -63,8 +90,8 @@ type SubagentRun struct {
 	ToolUses        int       `json:"tool_uses,omitempty"`
 	DurationMs      int64     `json:"duration_ms,omitempty"`
 	EntryCount      int       `json:"entry_count,omitempty"`
-	SourcePath      string    `json:"source_path,omitempty"`  // Subagent JSONL absolute path.
-	MetaPath        string    `json:"meta_path,omitempty"`    // meta.json sidecar path (may be empty).
+	SourcePath      string    `json:"source_path,omitempty"`   // Subagent JSONL absolute path.
+	MetaPath        string    `json:"meta_path,omitempty"`     // meta.json sidecar path (may be empty).
 	IsCompaction    bool      `json:"is_compaction,omitempty"` // True for agent-acompact-*.
 }
 
@@ -155,6 +182,7 @@ type Filters struct {
 	Workspace    string    // Filter by workspace path.
 	GitCommonDir string    // Filter by resolved git common dir (stable across worktrees).
 	Team         string    // Filter by agent team name.
+	GoalStatus   string    // Filter by goal status.
 	After        time.Time // Sessions started after this time.
 	Before       time.Time // Sessions started before this time.
 }
@@ -180,21 +208,21 @@ type Hit struct {
 	EndedAt      string  `json:"ended_at,omitempty"`
 
 	// Stats summary (populated when available).
-	ToolCalls    int `json:"tool_calls,omitempty"`
-	Turns        int `json:"turns,omitempty"`
-	InputTokens  int `json:"input_tokens,omitempty"`
-	OutputTokens int `json:"output_tokens,omitempty"`
-	CacheReads               int `json:"cache_reads,omitempty"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	FilesEdited  int `json:"files_edited,omitempty"`
-	LinesWritten int `json:"lines_written,omitempty"`
-	DurationSecs int    `json:"duration_secs,omitempty"`
-	Sparkline    string `json:"sparkline,omitempty"`
-	Compactions  int    `json:"compactions,omitempty"`
-	SubagentSpawns int `json:"subagent_spawns,omitempty"`
-	IT2Sends       int `json:"it2_sends,omitempty"`
-	IT2Screens     int `json:"it2_screens,omitempty"`
-	IT2Splits      int `json:"it2_splits,omitempty"`
+	ToolCalls                int    `json:"tool_calls,omitempty"`
+	Turns                    int    `json:"turns,omitempty"`
+	InputTokens              int    `json:"input_tokens,omitempty"`
+	OutputTokens             int    `json:"output_tokens,omitempty"`
+	CacheReads               int    `json:"cache_reads,omitempty"`
+	CacheCreationInputTokens int    `json:"cache_creation_input_tokens,omitempty"`
+	FilesEdited              int    `json:"files_edited,omitempty"`
+	LinesWritten             int    `json:"lines_written,omitempty"`
+	DurationSecs             int    `json:"duration_secs,omitempty"`
+	Sparkline                string `json:"sparkline,omitempty"`
+	Compactions              int    `json:"compactions,omitempty"`
+	SubagentSpawns           int    `json:"subagent_spawns,omitempty"`
+	IT2Sends                 int    `json:"it2_sends,omitempty"`
+	IT2Screens               int    `json:"it2_screens,omitempty"`
+	IT2Splits                int    `json:"it2_splits,omitempty"`
 
 	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"`
 
@@ -202,6 +230,12 @@ type Hit struct {
 	TeamName   string `json:"team_name,omitempty"`
 	AgentName  string `json:"agent_name,omitempty"`
 	IsTeamLead bool   `json:"is_team_lead,omitempty"`
+
+	// Goal-mode context.
+	Goals              []Goal `json:"goals,omitempty"`
+	GoalCount          int    `json:"goal_count,omitempty"`
+	ActiveGoalCount    int    `json:"active_goal_count,omitempty"`
+	CompletedGoalCount int    `json:"completed_goal_count,omitempty"`
 }
 
 // SessionLink represents an interaction between two sessions.
@@ -210,19 +244,19 @@ type Hit struct {
 //   - Observations: get-screen, get-buffer (source reading target's state)
 //   - Team: team-spawn, team-message (native Claude Code agent teams)
 type SessionLink struct {
-	SourceSession string `json:"source_session"`          // iTerm2 session ID or agent name.
-	TargetSession string `json:"target_session"`          // iTerm2 session ID or agent name.
-	Kind          string `json:"kind"`                    // "message", "observation", or "team".
-	Action        string `json:"action"`                  // "send-text", "team-spawn", "team-message", etc.
-	Text          string `json:"text,omitempty"`          // Content excerpt.
+	SourceSession string `json:"source_session"` // iTerm2 session ID or agent name.
+	TargetSession string `json:"target_session"` // iTerm2 session ID or agent name.
+	Kind          string `json:"kind"`           // "message", "observation", or "team".
+	Action        string `json:"action"`         // "send-text", "team-spawn", "team-message", etc.
+	Text          string `json:"text,omitempty"` // Content excerpt.
 	Timestamp     string `json:"timestamp,omitempty"`
-	TeamName      string `json:"team_name,omitempty"`     // Team name for team links.
+	TeamName      string `json:"team_name,omitempty"` // Team name for team links.
 }
 
 // SessionStats holds extracted metrics for a session.
 type SessionStats struct {
 	// Tool usage.
-	ToolCalls    int            `json:"tool_calls"`
+	ToolCalls     int            `json:"tool_calls"`
 	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"` // Tool name -> count.
 
 	// Token usage.
@@ -247,11 +281,11 @@ type SessionStats struct {
 	LinesWritten int `json:"lines_written"` // Approximate lines from Write/Edit.
 
 	// Session metrics.
-	Turns          int `json:"turns"`            // User message count.
-	PlanModeTurns  int `json:"plan_mode_turns"`  // User turns with permissionMode=plan.
+	Turns          int `json:"turns"`           // User message count.
+	PlanModeTurns  int `json:"plan_mode_turns"` // User turns with permissionMode=plan.
 	DurationSecs   int `json:"duration_secs"`
 	SubagentSpawns int `json:"subagent_spawns"`
-	Compactions    int `json:"compactions"`      // Context compaction count.
+	Compactions    int `json:"compactions"` // Context compaction count.
 
 	// it2 interactions.
 	IT2Splits  int `json:"it2_splits"`
@@ -262,8 +296,8 @@ type SessionStats struct {
 	IT2Watches int `json:"it2_watches"` // watch.
 
 	// Team interactions (claude teams infrastructure).
-	TeamInboxReads     int `json:"team_inbox_reads"`      // Inbox message reads.
-	TeamInboxSends     int `json:"team_inbox_sends"`      // Inbox message sends.
+	TeamInboxReads     int `json:"team_inbox_reads"`       // Inbox message reads.
+	TeamInboxSends     int `json:"team_inbox_sends"`       // Inbox message sends.
 	TeamTaskOps        int `json:"team_task_ops"`          // Task create/update/list.
 	TeamSpawns         int `json:"team_spawns"`            // Agent spawns via ccspawn.
 	TeamMembersSpawned int `json:"team_members_spawned"`   // Members spawned via Task with team_name.
@@ -283,17 +317,17 @@ type GraphData struct {
 
 // GraphNode represents a session in the communication graph.
 type GraphNode struct {
-	ID           string `json:"id"`         // iTerm2 session ID (short prefix).
+	ID           string `json:"id"` // iTerm2 session ID (short prefix).
 	Workspace    string `json:"workspace"`
 	GitCommonDir string `json:"git_common_dir,omitempty"`
 	Title        string `json:"title"`
-	StartedAt int64  `json:"started_at,omitempty"`
-	ToolCalls int    `json:"tool_calls,omitempty"`
-	Turns     int    `json:"turns,omitempty"`
-	Tokens    int    `json:"tokens,omitempty"` // input + output.
-	IsActive  bool   `json:"is_active"`
-	TeamName  string `json:"team_name,omitempty"`
-	AgentName string `json:"agent_name,omitempty"`
+	StartedAt    int64  `json:"started_at,omitempty"`
+	ToolCalls    int    `json:"tool_calls,omitempty"`
+	Turns        int    `json:"turns,omitempty"`
+	Tokens       int    `json:"tokens,omitempty"` // input + output.
+	IsActive     bool   `json:"is_active"`
+	TeamName     string `json:"team_name,omitempty"`
+	AgentName    string `json:"agent_name,omitempty"`
 }
 
 // TimeRange is the min/max timestamp range for graph data.
@@ -367,7 +401,7 @@ type APIRequest struct {
 
 	// iTerm2 session linkage (populated from artifact dir path).
 	IT2SessionID string `json:"it2_session_id,omitempty"` // UUID from ~/.it2/sessions/<uuid>/
-	ClientPID    int    `json:"client_pid,omitempty"`      // PID from proxy-traffic.<pid>.jsonl
+	ClientPID    int    `json:"client_pid,omitempty"`     // PID from proxy-traffic.<pid>.jsonl
 
 	// Identity fields extracted from metadata.user_id and response headers.
 	// metadata.user_id format: "user_<hash>_account_<uuid>_session_<uuid>"
@@ -394,7 +428,7 @@ type RateLimitSnapshot struct {
 	Reset7d       int64   `json:"reset_7d"`
 
 	// Per-model sub-buckets (present for Sonnet, Opus; absent for Haiku).
-	ModelBucket      string  `json:"model_bucket,omitempty"`      // e.g. "7d_sonnet".
+	ModelBucket      string  `json:"model_bucket,omitempty"` // e.g. "7d_sonnet".
 	ModelUtilization float64 `json:"model_utilization,omitempty"`
 	ModelReset       int64   `json:"model_reset,omitempty"`
 

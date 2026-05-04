@@ -22,9 +22,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	req := cass.SearchRequest{
 		Query: q.Get("q"),
 		Filters: cass.Filters{
-			Agent:     q.Get("agent"),
-			Workspace: q.Get("workspace"),
-			Team:      q.Get("team"),
+			Agent:      q.Get("agent"),
+			Workspace:  q.Get("workspace"),
+			Team:       q.Get("team"),
+			GoalStatus: q.Get("goal_status"),
 		},
 	}
 
@@ -139,6 +140,22 @@ func (s *Server) handleLinks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, links)
+}
+
+func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := 100
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	goals, err := s.svc.Goals(r.Context(), q.Get("status"), limit)
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, goals)
 }
 
 func (s *Server) handleMappings(w http.ResponseWriter, r *http.Request) {

@@ -98,7 +98,11 @@ func (b *duckBackend) migrate() error {
 			stats_json VARCHAR NOT NULL DEFAULT '{}',
 			team_name VARCHAR NOT NULL DEFAULT '',
 			agent_name VARCHAR NOT NULL DEFAULT '',
-			is_team_lead BOOLEAN NOT NULL DEFAULT false
+			is_team_lead BOOLEAN NOT NULL DEFAULT false,
+			goal_count INTEGER NOT NULL DEFAULT 0,
+			active_goal_count INTEGER NOT NULL DEFAULT 0,
+			completed_goal_count INTEGER NOT NULL DEFAULT 0,
+			goals_json VARCHAR NOT NULL DEFAULT '[]'
 		);
 	`
 	if _, err := b.db.Exec(schema); err != nil {
@@ -137,14 +141,19 @@ func (b *duckBackend) BatchIndex(ctx context.Context, sessions []cass.Session) e
 			started_at, ended_at, content, indexed_at,
 			tool_calls, input_tokens, output_tokens,
 			files_edited, lines_written, turns, duration_secs,
-			sparkline, stats_json, team_name, agent_name, is_team_lead
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			sparkline, stats_json, team_name, agent_name, is_team_lead,
+			goal_count, active_goal_count, completed_goal_count, goals_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			agent=excluded.agent, title=excluded.title,
 			workspace=excluded.workspace, content=excluded.content,
 			indexed_at=excluded.indexed_at,
 			input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
-			stats_json=excluded.stats_json
+			stats_json=excluded.stats_json,
+			goal_count=excluded.goal_count,
+			active_goal_count=excluded.active_goal_count,
+			completed_goal_count=excluded.completed_goal_count,
+			goals_json=excluded.goals_json
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare: %w", err)
@@ -155,6 +164,8 @@ func (b *duckBackend) BatchIndex(ctx context.Context, sessions []cass.Session) e
 	for _, sess := range sessions {
 		content := buildContentCapped(sess, b.maxFTSBytes)
 		statsJSON, _ := json.Marshal(sess.Stats)
+		goalsJSON, _ := json.Marshal(sess.Goals)
+		goalCount, activeGoalCount, completedGoalCount := goalCounts(sess.Goals)
 		if _, err := stmt.ExecContext(ctx,
 			sess.ID, sess.Agent, sess.Title, sess.Workspace, sess.SourcePath,
 			sess.StartedAt.Unix(), sess.EndedAt.Unix(), content, now,
@@ -162,6 +173,7 @@ func (b *duckBackend) BatchIndex(ctx context.Context, sessions []cass.Session) e
 			sess.Stats.FilesEdited, sess.Stats.LinesWritten, sess.Stats.Turns, sess.Stats.DurationSecs,
 			sess.Stats.Sparkline, string(statsJSON),
 			sess.TeamName, sess.AgentName, sess.IsTeamLead,
+			goalCount, activeGoalCount, completedGoalCount, string(goalsJSON),
 		); err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
 		}
@@ -203,6 +215,10 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 		where = append(where, "team_name = ?")
 		args = append(args, req.Filters.Team)
 	}
+	if req.Filters.GoalStatus != "" {
+		where = append(where, "goals_json LIKE ?")
+		args = append(args, `%"status":"`+req.Filters.GoalStatus+`"%`)
+	}
 
 	whereClause := ""
 	if len(where) > 0 {
@@ -241,7 +257,8 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 			workspace, source_path, started_at, ended_at,
 			tool_calls, turns, input_tokens, output_tokens,
 			files_edited, lines_written, duration_secs,
-			sparkline, stats_json, team_name, agent_name, is_team_lead
+			sparkline, stats_json, team_name, agent_name, is_team_lead,
+			goals_json, goal_count, active_goal_count, completed_goal_count
 		FROM sessions
 		%s %s LIMIT ? OFFSET ?`,
 		whereClause, orderClause)
@@ -260,7 +277,7 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 	for rows.Next() {
 		var h cass.Hit
 		var startedUnix, endedUnix int64
-		var statsJSON string
+		var statsJSON, goalsJSON string
 		var isTeamLead bool
 		if err := rows.Scan(
 			&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score,
@@ -268,6 +285,7 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 			&h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens,
 			&h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
 			&h.Sparkline, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
+			&goalsJSON, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
@@ -284,6 +302,9 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 				h.ToolBreakdown = stats.ToolBreakdown
 				h.Compactions = stats.Compactions
 			}
+		}
+		if goalsJSON != "" {
+			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
 		}
 		hits = append(hits, h)
 	}
