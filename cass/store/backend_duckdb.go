@@ -63,9 +63,6 @@ func openDuckDB(cfg BackendConfig) (Backend, error) {
 	}
 
 	b := &duckBackend{db: db, maxFTSBytes: cfg.MaxFTSBytes}
-	if b.maxFTSBytes == 0 {
-		b.maxFTSBytes = maxFTSContentBytes
-	}
 	if err := b.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("duckdb migrate: %w", err)
