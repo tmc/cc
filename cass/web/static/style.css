@@ -217,6 +217,7 @@ input::placeholder { color: var(--faint); }
 
 .hit:first-child { border-top: 1px solid var(--border); }
 .hit:hover { background: var(--hover); margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
+.hit.tool-hovering { z-index: 50; }
 .hit.selected { background: var(--hover); border-left: 3px solid var(--accent); padding-left: 8px; margin-left: -8px; }
 
 .hit-header { display: flex; gap: 8px; align-items: baseline; }
@@ -300,25 +301,28 @@ input::placeholder { color: var(--faint); }
   bottom: 0;
   left: 0;
   right: 0;
+  min-height: 18px;
 }
 .tool-bar {
   height: 18px;
   display: flex;
   overflow: hidden;
-  border-radius: 0 0 2px 2px;
+  border-radius: 0 0 3px 3px;
   gap: 1px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
 }
 .tool-bar-seg {
   height: 100%;
   position: relative;
   overflow: hidden;
-  transition: filter 0.15s ease;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+  min-width: 2px;
 }
 .tool-bar-seg:first-child { border-radius: 0 0 0 2px; }
 .tool-bar-seg:last-child { border-radius: 0 0 2px 0; }
-.tool-bar-container:hover .tool-bar-seg { filter: brightness(1.2); }
+.tool-bar-container:hover .tool-bar-seg { filter: brightness(1.16); }
 .tool-bar-container.clickable .tool-bar-seg { cursor: pointer; }
-.tool-bar-container.clickable .tool-bar-seg:hover { filter: brightness(1.4); }
+.tool-bar-container.clickable .tool-bar-seg:hover { filter: brightness(1.38); opacity: 0.95; }
 .tool-bar-label {
   font-size: 9px;
   line-height: 18px;
@@ -331,39 +335,80 @@ input::placeholder { color: var(--faint); }
   font-weight: 600;
   mix-blend-mode: difference;
 }
-/* Rich hover flyout for tool bar — compact, follows cursor */
+/* Rich hover flyout for tool bar. JS clamps it inside the viewport. */
 .tool-bar-flyout {
   display: none;
   position: fixed;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 6px 8px;
-  z-index: 100;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  background: color-mix(in srgb, var(--bg) 96%, black);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 6px;
+  padding: 7px 9px;
+  z-index: 1000;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
   font-size: 11px;
-  width: max-content;
-  max-width: 220px;
+  width: 260px;
+  max-width: min(260px, calc(100vw - 16px));
   pointer-events: none;
+  color: var(--fg);
 }
 .tool-bar-flyout.visible { display: block; }
+.tool-bar-flyout-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  color: var(--faint);
+}
+.tool-bar-flyout-head strong {
+  color: var(--fg);
+  font-size: 13px;
+  letter-spacing: 0;
+}
+.tool-bar-flyout-top {
+  color: var(--dim);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 5px;
+  margin-bottom: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .tool-bar-flyout-row {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 1px 0;
-  line-height: 1.4;
+  gap: 7px;
+  padding: 3px 0;
+  line-height: 1.25;
 }
 .tool-bar-flyout-swatch {
-  width: 6px;
-  height: 6px;
-  border-radius: 1px;
+  width: 8px;
+  height: 18px;
+  border-radius: 2px;
   flex-shrink: 0;
 }
 .tool-bar-flyout-name {
   color: var(--fg);
+  font-weight: 500;
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tool-bar-flyout-name span,
+.tool-bar-flyout-name small {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tool-bar-flyout-name small {
+  color: var(--faint);
+  font-weight: 400;
+  font-size: 10px;
+  margin-top: 1px;
 }
 .tool-bar-flyout-count {
   color: var(--dim);
@@ -720,10 +765,28 @@ mark.search-hl {
   font-variant-numeric: tabular-nums;
   transition: background 0.15s ease, border-color 0.15s ease;
   cursor: default;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
 }
+.tool-chip strong { color: var(--fg); font-size: 11px; }
 .tool-chip:hover {
   background: var(--hover);
   border-color: var(--faint);
+}
+.detail-tool-breakdown-head {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  margin-bottom: 2px;
+}
+.detail-tool-breakdown-head strong {
+  color: var(--fg);
+  letter-spacing: 0;
 }
 
 /* detail: session ID row */

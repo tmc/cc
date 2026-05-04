@@ -425,20 +425,41 @@ function ToolMicroBar({ breakdown, position, onToolClick }) {
   const sorted = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
   const isInline = position === 'inline';
   const flyoutRef = useRef(null);
+  const topTools = sorted.slice(0, 3).map(([name, count]) => `${name} ${count}`).join(' · ');
+  const pct = count => (count / total * 100).toFixed(count / total >= 0.095 ? 0 : 1) + '%';
 
   function onEnter(e) {
     if (flyoutRef.current) {
+      flyoutRef.current.closest('.hit')?.classList.add('tool-hovering');
       flyoutRef.current.classList.add('visible');
       moveFlyout(e);
     }
   }
   function onLeave() {
-    if (flyoutRef.current) flyoutRef.current.classList.remove('visible');
+    if (flyoutRef.current) {
+      flyoutRef.current.classList.remove('visible');
+      flyoutRef.current.closest('.hit')?.classList.remove('tool-hovering');
+    }
   }
   function moveFlyout(e) {
     if (!flyoutRef.current) return;
-    flyoutRef.current.style.left = (e.clientX + 12) + 'px';
-    flyoutRef.current.style.top = (e.clientY + 8) + 'px';
+    const gap = 12;
+    const pad = 8;
+    const rect = flyoutRef.current.getBoundingClientRect();
+    const width = rect.width || 260;
+    const height = rect.height || Math.min(360, 96 + sorted.length * 34);
+    let left = e.clientX + gap;
+    let top = e.clientY + gap;
+    if (left + width + pad > window.innerWidth) {
+      left = e.clientX - width - gap;
+    }
+    if (top + height + pad > window.innerHeight) {
+      top = e.clientY - height - gap;
+    }
+    const parent = flyoutRef.current.offsetParent;
+    const parentRect = parent ? parent.getBoundingClientRect() : { left: 0, top: 0 };
+    flyoutRef.current.style.left = (Math.max(pad, left) - parentRect.left) + 'px';
+    flyoutRef.current.style.top = (Math.max(pad, top) - parentRect.top) + 'px';
   }
   function onSegClick(e, name) {
     e.stopPropagation();
@@ -452,21 +473,30 @@ function ToolMicroBar({ breakdown, position, onToolClick }) {
         ${sorted.map(([name, count]) => html`
           <div class="tool-bar-seg" key=${name}
                style="width:${(count/total*100).toFixed(1)}%;background:${TOOL_COLORS[name]||'var(--faint)'}"
+               title=${`${name}: ${count} calls (${pct(count)})`}
                onClick=${onToolClick ? (e) => onSegClick(e, name) : undefined}>
             ${count/total >= 0.10 ? html`<span class="tool-bar-label">${name} ${count}</span>` : null}
           </div>
         `)}
       </div>
       <div class="tool-bar-flyout" ref=${flyoutRef}>
+        <div class="tool-bar-flyout-head">
+          <span>Tool calls</span>
+          <strong>${total}</strong>
+        </div>
+        ${topTools && html`<div class="tool-bar-flyout-top">${topTools}</div>`}
         ${sorted.map(([name, count]) => html`
           <div class="tool-bar-flyout-row" key=${name}>
             <span class="tool-bar-flyout-swatch" style="background:${TOOL_COLORS[name]||'var(--faint)'}"></span>
-            <span class="tool-bar-flyout-name">${name}</span>
+            <span class="tool-bar-flyout-name">
+              <span>${name}</span>
+              <small>${TOOL_DESCRIPTIONS[name] || 'tool calls'}</small>
+            </span>
             <span class="tool-bar-flyout-count">${count}</span>
-            <span class="tool-bar-flyout-pct">${(count/total*100).toFixed(0)}%</span>
+            <span class="tool-bar-flyout-pct">${pct(count)}</span>
           </div>
         `)}
-        <div class="tool-bar-flyout-total">${total} calls · ${sorted.length} types</div>
+        <div class="tool-bar-flyout-total">${sorted.length} tool type${sorted.length === 1 ? '' : 's'}</div>
       </div>
     </div>
   `;
@@ -1245,6 +1275,9 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
 
   const bodyRef = useRef(null);
   const searchRef = useRef(null);
+  const detailToolTotal = hit?.tool_breakdown
+    ? Object.values(hit.tool_breakdown).reduce((a, b) => a + b, 0)
+    : 0;
 
   useEffect(() => {
     if (!hit) { 
@@ -1686,8 +1719,17 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
           ${renderSkillPanel()}
           ${hit.tool_breakdown && Object.keys(hit.tool_breakdown).length > 0 && html`
             <div class="detail-tool-breakdown">
+              <div class="detail-tool-breakdown-head">
+                <span>Tool calls</span>
+                <strong>${detailToolTotal}</strong>
+              </div>
               ${Object.entries(hit.tool_breakdown).sort((a,b) => b[1] - a[1]).map(([name, count]) => html`
-                <span class="tool-chip" key=${name} style="border-left: 2px solid ${TOOL_COLORS[name]||'var(--faint)'}" title="${TOOL_DESCRIPTIONS[name] || name}">${name} ${count}</span>
+                <span class="tool-chip" key=${name}
+                  style="border-left: 2px solid ${TOOL_COLORS[name]||'var(--faint)'}"
+                  title="${TOOL_DESCRIPTIONS[name] || name}: ${count} calls (${detailToolTotal ? (count/detailToolTotal*100).toFixed(0) : 0}%)">
+                  <span>${name}</span>
+                  <strong>${count}</strong>
+                </span>
               `)}
             </div>
           `}
