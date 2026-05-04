@@ -735,6 +735,11 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   function setGoalStatus(v) { setGoalStatusRaw(v); }
   function setSkill(v) { setSkillRaw(v); }
 
+  useEffect(() => {
+    document.body.classList.toggle('detail-open', !!selected);
+    return () => document.body.classList.remove('detail-open');
+  }, [selected]);
+
   // Push URL on state changes (debounced with the search).
   const urlRef = useRef(null);
   useEffect(() => {
@@ -1429,6 +1434,17 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
     setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
   }
 
+  function onDetailWheel(e) {
+    e.stopPropagation();
+    if (e.target.closest('.detail-body')) {
+      return;
+    }
+    if (bodyRef.current) {
+      e.preventDefault();
+      bodyRef.current.scrollTop += e.deltaY;
+    }
+  }
+
   // Search: always show all entries, track which ones match.
   const { visibleEntries, matchIndices } = useMemo(() => {
     const all = entries.map((e, i) => ({ entry: e, idx: i }));
@@ -1759,7 +1775,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
   }
 
   return html`
-    <div class="detail-panel ${hit ? 'open' : ''}" role="complementary" aria-label="Session detail">
+    <div class="detail-panel ${hit ? 'open' : ''}" role="complementary" aria-label="Session detail" onWheel=${onDetailWheel}>
       ${hit && html`
         <div class="detail-header">
           <div class="detail-header-top">
