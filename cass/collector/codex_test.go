@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tmc/cc/cass"
 )
@@ -210,13 +211,71 @@ func TestCodexGoals(t *testing.T) {
 	if !hasGoalGate(g, "harness syntax preflight passed", "complete") {
 		t.Fatalf("ready gate not parsed: %#v", g.CompletionGates)
 	}
-	if !hasGoalGate(g, "Still blocked on external evidence.", "blocked") {
-		t.Fatalf("blocked gate not parsed: %#v", g.CompletionGates)
+}
+
+func TestCodexGoalPromptGatesIgnoreAuditChecklist(t *testing.T) {
+	at := time.Unix(100, 0)
+	text := `Continue working toward the active thread goal.
+
+<untrusted_objective>
+ship it
+</untrusted_objective>
+
+Budget:
+- Time spent pursuing goal: 12 seconds
+- Tokens used: 34
+
+Before deciding that the goal is achieved, perform a completion audit against the actual current state:
+- Restate the objective as concrete deliverables or success criteria.
+- Build a prompt-to-artifact checklist that maps every explicit requirement to evidence.
+
+Completion gates:
+- AC-valid focused Metal trace
+- 35B 3-run Go/Python TPS >= 1.00x
+
+If the goal has not been achieved and cannot continue productively, explain the blocker.`
+
+	gates := parseGoalPromptGates(text, at)
+	if len(gates) != 2 {
+		t.Fatalf("gates = %d, want 2: %#v", len(gates), gates)
+	}
+	if gates[0].Name != "AC-valid focused Metal trace" || gates[0].Status != "required" {
+		t.Fatalf("gate[0] = %#v", gates[0])
+	}
+	if gates[1].Name != "35B 3-run Go/Python TPS >= 1.00x" || gates[1].Status != "required" {
+		t.Fatalf("gate[1] = %#v", gates[1])
+	}
+}
+
+func TestCodexAssistantBlockedGatesCoalesceBlockedPrecondition(t *testing.T) {
+	at := time.Unix(100, 0)
+	text := `Still blocked on external prerequisite.
+
+Missing completion gates:
+- AC-valid focused Metal trace
+- 35B 3-run Go/Python TPS >= 1.00x
+
+Ready evidence/prep:
+- Harness syntax preflight passed.`
+
+	gates := parseAssistantGoalGates(text, at)
+	if !hasGate(gates, "Blocked precondition", "blocked") {
+		t.Fatalf("blocked gate missing: %#v", gates)
+	}
+	if !hasGate(gates, "AC-valid focused Metal trace", "missing") {
+		t.Fatalf("missing gate not parsed: %#v", gates)
+	}
+	if !hasGate(gates, "Harness syntax preflight passed.", "complete") {
+		t.Fatalf("complete gate not parsed: %#v", gates)
 	}
 }
 
 func hasGoalGate(g cass.Goal, name, status string) bool {
-	for _, gate := range g.CompletionGates {
+	return hasGate(g.CompletionGates, name, status)
+}
+
+func hasGate(gates []cass.GoalGate, name, status string) bool {
+	for _, gate := range gates {
 		if gate.Name == name && gate.Status == status {
 			return true
 		}

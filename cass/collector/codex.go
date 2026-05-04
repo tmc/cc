@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -242,7 +243,7 @@ func extractCodexGoals(entries []cc.Entry) []cass.Goal {
 	var goals []cass.Goal
 
 	upsert := func(g cass.Goal) {
-		g.Objective = strings.TrimSpace(g.Objective)
+		g.Objective = strings.TrimSpace(html.UnescapeString(g.Objective))
 		if g.Objective == "" {
 			return
 		}
@@ -321,8 +322,23 @@ func parseGoalIntLine(text, key string) (int, bool) {
 
 func parseGoalPromptGates(text string, at time.Time) []cass.GoalGate {
 	var gates []cass.GoalGate
+	inGates := false
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
+		lower := strings.ToLower(line)
+		switch {
+		case strings.HasPrefix(lower, "completion gates:"),
+			strings.HasPrefix(lower, "completion gate:"),
+			strings.HasPrefix(lower, "required completion gates:"):
+			inGates = true
+			continue
+		case inGates && isSectionBreak(line):
+			inGates = false
+			continue
+		}
+		if !inGates {
+			continue
+		}
 		if !strings.HasPrefix(line, "- ") {
 			continue
 		}
@@ -362,10 +378,15 @@ func parseAssistantGoalGates(text string, at time.Time) []cass.GoalGate {
 		case strings.HasPrefix(lower, "completion status: not achieved"),
 			strings.Contains(lower, "still blocked"),
 			strings.Contains(lower, "blocked on"):
+			name, evidence := blockedGoalGate(trimmed)
+			if name == "" {
+				continue
+			}
 			gates = appendGoalGate(gates, cass.GoalGate{
-				Name:       trimmed,
+				Name:       name,
 				Status:     "blocked",
 				Source:     "assistant",
+				Evidence:   evidence,
 				ObservedAt: at,
 			})
 			continue
@@ -391,7 +412,7 @@ func isSectionBreak(line string) bool {
 }
 
 func appendGoalGate(gates []cass.GoalGate, gate cass.GoalGate) []cass.GoalGate {
-	gate.Name = strings.TrimSpace(gate.Name)
+	gate.Name = strings.TrimSpace(html.UnescapeString(gate.Name))
 	if gate.Name == "" {
 		return gates
 	}
@@ -414,6 +435,18 @@ func appendGoalGate(gates []cass.GoalGate, gate cass.GoalGate) []cass.GoalGate {
 		return gates
 	}
 	return append(gates, gate)
+}
+
+func blockedGoalGate(line string) (name, evidence string) {
+	lower := strings.ToLower(line)
+	switch {
+	case strings.HasPrefix(lower, "completion status: not achieved"):
+		return "Completion status not achieved", line
+	case strings.Contains(lower, "still blocked"),
+		strings.Contains(lower, "blocked on"):
+		return "Blocked precondition", line
+	}
+	return "", ""
 }
 
 func parseCodexGoalToolOutput(text string) (cass.Goal, bool) {
