@@ -155,6 +155,7 @@ func (c *Codex) parseSession(path string) (cass.Session, error) {
 	links := ExtractLinks(entries)
 	stats := ExtractStats(entries)
 	goals := extractCodexGoals(entries)
+	skills := ExtractSkills(entries, agent)
 
 	meta := map[string]any{}
 	if sum.Version != "" {
@@ -190,6 +191,7 @@ func (c *Codex) parseSession(path string) (cass.Session, error) {
 		EndedAt:    sum.LastTime,
 		Messages:   messages,
 		Goals:      goals,
+		Skills:     skills,
 		Stats:      stats,
 		Metadata:   meta,
 	}, nil

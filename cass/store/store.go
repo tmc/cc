@@ -82,6 +82,10 @@ func (s *Store) migrate() error {
 			active_goal_count INTEGER NOT NULL DEFAULT 0,
 			completed_goal_count INTEGER NOT NULL DEFAULT 0,
 			goals_json TEXT NOT NULL DEFAULT '[]',
+			skill_count INTEGER NOT NULL DEFAULT 0,
+			selected_skill_count INTEGER NOT NULL DEFAULT 0,
+			loaded_skill_count INTEGER NOT NULL DEFAULT 0,
+			skills_json TEXT NOT NULL DEFAULT '[]',
 			sparkline TEXT NOT NULL DEFAULT '',
 			stats_json TEXT NOT NULL DEFAULT '{}'
 		);
@@ -279,6 +283,10 @@ func (s *Store) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN active_goal_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN completed_goal_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN goals_json TEXT NOT NULL DEFAULT '[]'",
+		"ALTER TABLE sessions ADD COLUMN skill_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN selected_skill_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN loaded_skill_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -298,9 +306,10 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			tool_calls, input_tokens, output_tokens, files_read, files_written, files_edited, lines_written,
 			turns, duration_secs, subagent_spawns, it2_splits, it2_sends, it2_screens, it2_buffers,
 			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns,
-			goal_count, active_goal_count, completed_goal_count, goals_json, sparkline, stats_json,
+			goal_count, active_goal_count, completed_goal_count, goals_json,
+			skill_count, selected_skill_count, loaded_skill_count, skills_json, sparkline, stats_json,
 			team_name, agent_name, is_team_lead, git_common_dir, branch, subagent_run_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare sessions: %w", err)
@@ -337,7 +346,9 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		content := buildContent(sess)
 		statsJSON, _ := json.Marshal(sess.Stats)
 		goalsJSON, _ := json.Marshal(sess.Goals)
+		skillsJSON, _ := json.Marshal(sess.Skills)
 		goalCount, activeGoalCount, completedGoalCount := goalCounts(sess.Goals)
+		skillCount, selectedSkillCount, loadedSkillCount := skillCounts(sess.Skills)
 		_, err := sessStmt.ExecContext(ctx,
 			sess.ID,
 			sess.Agent,
@@ -370,6 +381,10 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			activeGoalCount,
 			completedGoalCount,
 			string(goalsJSON),
+			skillCount,
+			selectedSkillCount,
+			loadedSkillCount,
+			string(skillsJSON),
 			sess.Stats.Sparkline,
 			string(statsJSON),
 			sess.TeamName,
@@ -504,6 +519,10 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		where = append(where, "s.goals_json LIKE ?")
 		args = append(args, `%"status":"`+req.Filters.GoalStatus+`"%`)
 	}
+	if req.Filters.Skill != "" {
+		where = append(where, "s.skills_json LIKE ?")
+		args = append(args, "%"+req.Filters.Skill+"%")
+	}
 
 	whereClause := ""
 	if len(where) > 0 {
@@ -537,7 +556,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	}
 
 	// Build query with BM25 ranking when doing FTS.
-	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.subagent_spawns, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch, s.goals_json, s.goal_count, s.active_goal_count, s.completed_goal_count`
+	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.subagent_spawns, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch, s.goals_json, s.goal_count, s.active_goal_count, s.completed_goal_count, s.skills_json, s.skill_count, s.selected_skill_count, s.loaded_skill_count`
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -571,12 +590,13 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	for rows.Next() {
 		var h cass.Hit
 		var startedUnix, endedUnix int64
-		var statsJSON, goalsJSON string
+		var statsJSON, goalsJSON, skillsJSON string
 		var isTeamLead int
 		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
 			&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
 			&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
-			&h.GitCommonDir, &h.Branch, &goalsJSON, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount); err != nil {
+			&h.GitCommonDir, &h.Branch, &goalsJSON, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount,
+			&skillsJSON, &h.SkillCount, &h.SelectedSkillCount, &h.LoadedSkillCount); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 		if startedUnix > 0 {
@@ -588,6 +608,9 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 		h.IsTeamLead = isTeamLead != 0
 		if goalsJSON != "" {
 			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
+		}
+		if skillsJSON != "" {
+			_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
 		}
 		if statsJSON != "" {
 			var stats cass.SessionStats
@@ -758,17 +781,21 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 			count(DISTINCT workspace),
 			coalesce(sum(goal_count), 0),
 			coalesce(sum(active_goal_count), 0),
-			coalesce(sum(completed_goal_count), 0)
+			coalesce(sum(completed_goal_count), 0),
+			coalesce(sum(skill_count), 0),
+			coalesce(sum(selected_skill_count), 0),
+			coalesce(sum(loaded_skill_count), 0)
 		FROM sessions `+where, args...)
 
 	var (
-		sessions, tools, inTok, outTok                 int
-		fRead, fWritten, fEdited, lWritten             int
-		turns, dur, subSpawns                          int
-		it2Splits, it2Sends, it2Screens, it2Buffers    int
-		teamInbox, teamSends, teamTasks, teamSpawns    int
-		agents, workspaces                             int
-		goalCount, activeGoalCount, completedGoalCount int
+		sessions, tools, inTok, outTok                   int
+		fRead, fWritten, fEdited, lWritten               int
+		turns, dur, subSpawns                            int
+		it2Splits, it2Sends, it2Screens, it2Buffers      int
+		teamInbox, teamSends, teamTasks, teamSpawns      int
+		agents, workspaces                               int
+		goalCount, activeGoalCount, completedGoalCount   int
+		skillCount, selectedSkillCount, loadedSkillCount int
 	)
 	if err := row.Scan(
 		&sessions, &tools, &inTok, &outTok,
@@ -778,6 +805,7 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 		&teamInbox, &teamSends, &teamTasks, &teamSpawns,
 		&agents, &workspaces,
 		&goalCount, &activeGoalCount, &completedGoalCount,
+		&skillCount, &selectedSkillCount, &loadedSkillCount,
 	); err != nil {
 		return nil, fmt.Errorf("aggregate stats: %w", err)
 	}
@@ -812,6 +840,35 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 		var c int
 		wsRows.Scan(&w, &c)
 		wsCounts[w] = c
+	}
+
+	// Top skills by session signal count.
+	skillRows, err := s.db.QueryContext(ctx, `
+		SELECT skills_json FROM sessions `+where+` AND skill_count > 0`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer skillRows.Close()
+	topSkills := map[string]int{}
+	for skillRows.Next() {
+		var skillsJSON string
+		if err := skillRows.Scan(&skillsJSON); err != nil {
+			return nil, err
+		}
+		var skills []cass.SkillUse
+		if json.Unmarshal([]byte(skillsJSON), &skills) != nil {
+			continue
+		}
+		for _, sk := range skills {
+			if sk.Name == "" {
+				continue
+			}
+			n := sk.Count
+			if n == 0 {
+				n = 1
+			}
+			topSkills[sk.Name] += n
+		}
 	}
 
 	// Sessions per day (last 30 days).
@@ -858,10 +915,14 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 		"team_spawns":      teamSpawns,
 		"agents_breakdown": agentCounts,
 		"workspace_top":    wsCounts,
+		"top_skills":       topSkills,
 		"sessions_per_day": daily,
 		"goals":            goalCount,
 		"active_goals":     activeGoalCount,
 		"completed_goals":  completedGoalCount,
+		"skills":           skillCount,
+		"selected_skills":  selectedSkillCount,
+		"loaded_skills":    loadedSkillCount,
 	}, nil
 }
 
@@ -982,6 +1043,70 @@ func (s *Store) Goals(ctx context.Context, status string, limit int) ([]cass.Goa
 			}
 			hits = append(hits, cass.GoalHit{
 				Goal:       g,
+				SessionID:  sessionID,
+				Agent:      agent,
+				Title:      title,
+				Workspace:  workspace,
+				SourcePath: sourcePath,
+				StartedAt:  started,
+				EndedAt:    ended,
+			})
+		}
+	}
+	return hits, rows.Err()
+}
+
+// Skills returns skill usage records joined with parent session metadata.
+func (s *Store) Skills(ctx context.Context, skill string, kind string, limit int) ([]cass.SkillHit, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	query := `SELECT id, agent, title, workspace, source_path, started_at, ended_at, skills_json FROM sessions WHERE skill_count > 0`
+	var args []any
+	if skill != "" {
+		query += ` AND skills_json LIKE ?`
+		args = append(args, "%"+skill+"%")
+	}
+	if kind != "" {
+		query += ` AND skills_json LIKE ?`
+		args = append(args, `%"kind":"`+kind+`"%`)
+	}
+	query += ` ORDER BY ended_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query skills: %w", err)
+	}
+	defer rows.Close()
+
+	var hits []cass.SkillHit
+	for rows.Next() {
+		var sessionID, agent, title, workspace, sourcePath, skillsJSON string
+		var startedUnix, endedUnix int64
+		if err := rows.Scan(&sessionID, &agent, &title, &workspace, &sourcePath, &startedUnix, &endedUnix, &skillsJSON); err != nil {
+			return nil, fmt.Errorf("scan skill session: %w", err)
+		}
+		var skills []cass.SkillUse
+		if err := json.Unmarshal([]byte(skillsJSON), &skills); err != nil {
+			continue
+		}
+		started, ended := "", ""
+		if startedUnix > 0 {
+			started = time.Unix(startedUnix, 0).Format(time.RFC3339)
+		}
+		if endedUnix > 0 {
+			ended = time.Unix(endedUnix, 0).Format(time.RFC3339)
+		}
+		for _, sk := range skills {
+			if skill != "" && !strings.Contains(sk.Name, skill) && !strings.Contains(sk.Path, skill) {
+				continue
+			}
+			if kind != "" && sk.Kind != kind {
+				continue
+			}
+			hits = append(hits, cass.SkillHit{
+				SkillUse:   sk,
 				SessionID:  sessionID,
 				Agent:      agent,
 				Title:      title,
@@ -1489,6 +1614,22 @@ func buildContent(sess cass.Session) string {
 		b.WriteString(goal.Objective)
 		b.WriteByte('\n')
 	}
+	for _, skill := range sess.Skills {
+		if skill.Name == "" {
+			continue
+		}
+		b.WriteString("skill ")
+		if skill.Kind != "" {
+			b.WriteString(skill.Kind)
+			b.WriteByte(' ')
+		}
+		b.WriteString(skill.Name)
+		if skill.Path != "" {
+			b.WriteByte(' ')
+			b.WriteString(skill.Path)
+		}
+		b.WriteByte('\n')
+	}
 	for _, msg := range sess.Messages {
 		if msg.Content == "" {
 			continue
@@ -1510,4 +1651,17 @@ func goalCounts(goals []cass.Goal) (total, active, completed int) {
 		}
 	}
 	return total, active, completed
+}
+
+func skillCounts(skills []cass.SkillUse) (total, selected, loaded int) {
+	total = len(skills)
+	for _, s := range skills {
+		switch s.Kind {
+		case "selected":
+			selected++
+		case "loaded", "expanded":
+			loaded++
+		}
+	}
+	return total, selected, loaded
 }

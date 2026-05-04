@@ -2,10 +2,14 @@ package har
 
 import (
 	"encoding/json"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/tmc/cc/cass"
 )
+
+var harSkillNameRe = regexp.MustCompile(`(?m)^- ([A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?): .*\(file: [^)]+/SKILL\.md\)|^## Skill:\s*([A-Za-z0-9_.:-]+)|<skill(?:\s+name=["']?([A-Za-z0-9_.:-]+)["']?)?`)
 
 // ParseContextBreakdown extracts per-tool and per-system-block attribution
 // from a raw Messages API request body JSON string.
@@ -51,6 +55,7 @@ func parseToolBreakdown(bd *cass.ContextBreakdown, raw json.RawMessage) {
 
 	bd.ToolBytes = make(map[string]int, len(tools))
 	bd.MCPServerBytes = make(map[string]int)
+	skillNames := map[string]bool{}
 
 	for _, t := range tools {
 		var entry cass.ToolEntry
@@ -67,10 +72,12 @@ func parseToolBreakdown(bd *cass.ContextBreakdown, raw json.RawMessage) {
 			bd.MCPServerBytes[server] += bytes
 		case isSkillTool(entry.Name):
 			bd.SkillToolBytes += bytes
+			skillNames[entry.Name] = true
 		default:
 			bd.BuiltinToolBytes += bytes
 		}
 	}
+	appendSkillNames(bd, skillNames)
 }
 
 // parseSystemBreakdown classifies each system block by content kind.
@@ -90,6 +97,7 @@ func parseSystemBreakdown(bd *cass.ContextBreakdown, raw json.RawMessage) {
 	}
 
 	bd.SystemBlockBytes = make(map[string]int, 4)
+	skillNames := map[string]bool{}
 
 	for _, b := range blocks {
 		var block struct {
@@ -103,7 +111,13 @@ func parseSystemBreakdown(bd *cass.ContextBreakdown, raw json.RawMessage) {
 
 		kind := classifySystemBlock(block.Type, block.Text)
 		bd.SystemBlockBytes[kind] += len(b)
+		if kind == "skill" || strings.Contains(block.Text, "### Available skills") {
+			for _, name := range skillNamesFromText(block.Text) {
+				skillNames[name] = true
+			}
+		}
 	}
+	appendSkillNames(bd, skillNames)
 }
 
 // classifySystemBlock determines the semantic kind of a system block.
@@ -153,4 +167,33 @@ func isSkillTool(name string) bool {
 	// They tend to be kebab-case or have recognizable skill-like names.
 	// For now: anything not builtin and not mcp__ is treated as a skill or unknown tool.
 	return !cass.BuiltinTools[name] && !strings.HasPrefix(name, "mcp__")
+}
+
+func skillNamesFromText(text string) []string {
+	var names []string
+	for _, m := range harSkillNameRe.FindAllStringSubmatch(text, -1) {
+		for i := 1; i < len(m); i++ {
+			if m[i] != "" {
+				names = append(names, m[i])
+				break
+			}
+		}
+	}
+	return names
+}
+
+func appendSkillNames(bd *cass.ContextBreakdown, names map[string]bool) {
+	if len(names) == 0 {
+		return
+	}
+	seen := map[string]bool{}
+	for _, name := range bd.SkillNames {
+		seen[name] = true
+	}
+	for name := range names {
+		if !seen[name] {
+			bd.SkillNames = append(bd.SkillNames, name)
+		}
+	}
+	sort.Strings(bd.SkillNames)
 }

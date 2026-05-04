@@ -86,6 +86,10 @@ func (b *sqliteBackend) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN active_goal_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN completed_goal_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN goals_json TEXT NOT NULL DEFAULT '[]'",
+		"ALTER TABLE sessions ADD COLUMN skill_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN selected_skill_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN loaded_skill_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'",
 	} {
 		b.db.Exec(col)
 	}
@@ -116,7 +120,9 @@ func (b *sqliteBackend) BatchIndex(ctx context.Context, sessions []cass.Session)
 		content := buildContentCapped(sess, b.maxFTSBytes)
 		statsJSON, _ := json.Marshal(sess.Stats)
 		goalsJSON, _ := json.Marshal(sess.Goals)
+		skillsJSON, _ := json.Marshal(sess.Skills)
 		goalCount, activeGoalCount, completedGoalCount := goalCounts(sess.Goals)
+		skillCount, selectedSkillCount, loadedSkillCount := skillCounts(sess.Skills)
 		if _, err := stmt.ExecContext(ctx,
 			sess.ID, sess.Agent, sess.Title, sess.Workspace, sess.SourcePath,
 			sess.StartedAt.Unix(), sess.EndedAt.Unix(), content, now,
@@ -128,6 +134,7 @@ func (b *sqliteBackend) BatchIndex(ctx context.Context, sessions []cass.Session)
 			sess.Stats.TeamInboxReads, sess.Stats.TeamInboxSends,
 			sess.Stats.TeamTaskOps, sess.Stats.TeamSpawns,
 			goalCount, activeGoalCount, completedGoalCount, string(goalsJSON),
+			skillCount, selectedSkillCount, loadedSkillCount, string(skillsJSON),
 			sess.Stats.Sparkline, string(statsJSON),
 			sess.TeamName, sess.AgentName, sess.IsTeamLead,
 			sess.GitCommonDir, sess.Branch,
@@ -199,6 +206,10 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 		where = append(where, "s.goals_json LIKE ?")
 		args = append(args, `%"status":"`+req.Filters.GoalStatus+`"%`)
 	}
+	if req.Filters.Skill != "" {
+		where = append(where, "s.skills_json LIKE ?")
+		args = append(args, "%"+req.Filters.Skill+"%")
+	}
 
 	whereClause := ""
 	if len(where) > 0 {
@@ -229,7 +240,7 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 		orderClause = "ORDER BY s.ended_at DESC"
 	}
 
-	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch, s.goals_json, s.goal_count, s.active_goal_count, s.completed_goal_count`
+	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch, s.goals_json, s.goal_count, s.active_goal_count, s.completed_goal_count, s.skills_json, s.skill_count, s.selected_skill_count, s.loaded_skill_count`
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -257,7 +268,7 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 	for rows.Next() {
 		var h cass.Hit
 		var startedUnix, endedUnix int64
-		var statsJSON, goalsJSON string
+		var statsJSON, goalsJSON, skillsJSON string
 		var isTeamLead int
 		if err := rows.Scan(
 			&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score,
@@ -267,6 +278,7 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 			&h.Sparkline, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits,
 			&statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
 			&h.GitCommonDir, &h.Branch, &goalsJSON, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount,
+			&skillsJSON, &h.SkillCount, &h.SelectedSkillCount, &h.LoadedSkillCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
@@ -279,6 +291,9 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 		h.IsTeamLead = isTeamLead != 0
 		if goalsJSON != "" {
 			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
+		}
+		if skillsJSON != "" {
+			_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
 		}
 		if statsJSON != "" {
 			var stats cass.SessionStats
@@ -490,9 +505,10 @@ const insertSessionSQL = `
 		lines_written, turns, duration_secs, subagent_spawns, it2_splits, it2_sends,
 		it2_screens, it2_buffers, team_inbox_reads, team_inbox_sends, team_task_ops,
 		team_spawns, goal_count, active_goal_count, completed_goal_count, goals_json,
+		skill_count, selected_skill_count, loaded_skill_count, skills_json,
 		sparkline, stats_json, team_name, agent_name, is_team_lead,
 		git_common_dir, branch, subagent_run_count
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 // insertSubagentRunSQL inserts a single subagent run row.

@@ -18,6 +18,7 @@ type Session struct {
 	EndedAt      time.Time      `json:"ended_at"`
 	Messages     []Message      `json:"messages"`
 	Goals        []Goal         `json:"goals,omitempty"`
+	Skills       []SkillUse     `json:"skills,omitempty"`
 	Stats        SessionStats   `json:"stats"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
 
@@ -50,6 +51,33 @@ type Goal struct {
 // GoalHit is a goal joined with its parent session.
 type GoalHit struct {
 	Goal
+	SessionID  string `json:"session_id"`
+	Agent      string `json:"agent"`
+	Title      string `json:"title"`
+	Workspace  string `json:"workspace,omitempty"`
+	SourcePath string `json:"source_path,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
+	EndedAt    string `json:"ended_at,omitempty"`
+}
+
+// SkillUse is one skill signal observed in a session.
+//
+// Kind classifies the signal: available, selected, loaded, expanded, or tool.
+// Evidence is short text explaining why the skill was recorded.
+type SkillUse struct {
+	Name      string    `json:"name"`
+	Path      string    `json:"path,omitempty"`
+	Source    string    `json:"source,omitempty"`
+	Kind      string    `json:"kind,omitempty"`
+	Count     int       `json:"count,omitempty"`
+	FirstSeen time.Time `json:"first_seen,omitempty"`
+	LastSeen  time.Time `json:"last_seen,omitempty"`
+	Evidence  []string  `json:"evidence,omitempty"`
+}
+
+// SkillHit is a skill joined with its parent session.
+type SkillHit struct {
+	SkillUse
 	SessionID  string `json:"session_id"`
 	Agent      string `json:"agent"`
 	Title      string `json:"title"`
@@ -183,6 +211,7 @@ type Filters struct {
 	GitCommonDir string    // Filter by resolved git common dir (stable across worktrees).
 	Team         string    // Filter by agent team name.
 	GoalStatus   string    // Filter by goal status.
+	Skill        string    // Filter by skill name or path substring.
 	After        time.Time // Sessions started after this time.
 	Before       time.Time // Sessions started before this time.
 }
@@ -236,6 +265,12 @@ type Hit struct {
 	GoalCount          int    `json:"goal_count,omitempty"`
 	ActiveGoalCount    int    `json:"active_goal_count,omitempty"`
 	CompletedGoalCount int    `json:"completed_goal_count,omitempty"`
+
+	// Skill context.
+	Skills             []SkillUse `json:"skills,omitempty"`
+	SkillCount         int        `json:"skill_count,omitempty"`
+	SelectedSkillCount int        `json:"selected_skill_count,omitempty"`
+	LoadedSkillCount   int        `json:"loaded_skill_count,omitempty"`
 }
 
 // SessionLink represents an interaction between two sessions.
@@ -460,9 +495,10 @@ type ContextBreakdown struct {
 	ToolBytes map[string]int `json:"tool_bytes,omitempty"`
 
 	// Tool category summaries (populated by ParseContextBreakdown).
-	BuiltinToolBytes int `json:"builtin_tool_bytes,omitempty"` // Claude Code built-ins.
-	MCPToolBytes     int `json:"mcp_tool_bytes,omitempty"`     // All mcp__* tools combined.
-	SkillToolBytes   int `json:"skill_tool_bytes,omitempty"`   // Skill-injected tools.
+	BuiltinToolBytes int      `json:"builtin_tool_bytes,omitempty"` // Claude Code built-ins.
+	MCPToolBytes     int      `json:"mcp_tool_bytes,omitempty"`     // All mcp__* tools combined.
+	SkillToolBytes   int      `json:"skill_tool_bytes,omitempty"`   // Skill-injected tools.
+	SkillNames       []string `json:"skill_names,omitempty"`        // Skill names observed in request context.
 
 	// Per-MCP-server breakdown.
 	// Key: server name extracted from mcp__<server>__<tool> (e.g. "posthog").

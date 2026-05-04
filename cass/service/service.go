@@ -220,6 +220,11 @@ func (s *Service) Goals(ctx context.Context, status string, limit int) ([]cass.G
 	return s.store.Goals(ctx, status, limit)
 }
 
+// Skills returns skill usage records joined with parent session metadata.
+func (s *Service) Skills(ctx context.Context, skill string, kind string, limit int) ([]cass.SkillHit, error) {
+	return s.store.Skills(ctx, skill, kind, limit)
+}
+
 // Mappings returns iTerm2 <-> Claude session mappings.
 func (s *Service) Mappings(ctx context.Context, filter string) ([]store.SessionMapping, error) {
 	return s.store.Mappings(ctx, filter)

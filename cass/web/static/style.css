@@ -249,12 +249,24 @@ input::placeholder { color: var(--faint); }
 .hit-it2 { color: var(--accent); }
 .hit-team { color: var(--magenta); font-size: 11px; }
 .hit-goals { color: var(--orange); }
+.hit-skills { color: var(--cyan); }
 .hit-goal-badge {
   font-size: 10px;
   color: var(--orange);
   border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
   padding: 0 5px;
   white-space: nowrap;
+}
+.hit-skill-badge {
+  font-size: 10px;
+  color: var(--cyan);
+  border: 1px solid color-mix(in srgb, var(--cyan) 45%, transparent);
+  padding: 0 5px;
+  white-space: nowrap;
+}
+.hit-skill-badge.selected {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
 }
 .hit-goal-badge.complete,
 .hit-goal-badge.completed {
@@ -350,13 +362,14 @@ input::placeholder { color: var(--faint); }
 }
 .tool-bar-flyout-name {
   color: var(--fg);
-  font-weight: 500;
   flex: 1;
+  white-space: nowrap;
 }
 .tool-bar-flyout-count {
   color: var(--dim);
   font-variant-numeric: tabular-nums;
   text-align: right;
+  min-width: 28px;
 }
 .tool-bar-flyout-pct {
   color: var(--faint);
@@ -642,6 +655,56 @@ mark.search-hl {
   font-variant-numeric: tabular-nums;
 }
 .detail-goal-report {
+  margin-top: 5px;
+  color: var(--dim);
+  border-top: 1px solid var(--border);
+  padding-top: 5px;
+}
+
+/* detail: skill cards */
+.detail-skills {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.detail-skill-card {
+  border: 1px solid color-mix(in srgb, var(--cyan) 45%, transparent);
+  border-left: 3px solid var(--cyan);
+  padding: 7px 9px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--cyan) 5%, transparent);
+}
+.detail-skill-card.selected {
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+  border-left-color: var(--green);
+  background: color-mix(in srgb, var(--green) 5%, transparent);
+}
+.detail-skill-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.detail-skill-name { color: var(--fg); font-weight: 700; }
+.detail-skill-kind {
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+}
+.detail-skill-path {
+  color: var(--dim);
+  word-break: break-all;
+}
+.detail-skill-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--dim);
+  margin-top: 4px;
+}
+.detail-skill-evidence {
   margin-top: 5px;
   color: var(--dim);
   border-top: 1px solid var(--border);

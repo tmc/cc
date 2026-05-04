@@ -375,6 +375,85 @@ func TestGoalsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSkillsRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	sess := cass.Session{
+		ID:        "skill-session",
+		Agent:     "claude-code",
+		Title:     "Use notebook skill",
+		Workspace: "/tmp/project",
+		StartedAt: now.Add(-time.Hour),
+		EndedAt:   now,
+		Messages:  []cass.Message{{Role: "user", Content: "use the notebook skill"}},
+		Skills: []cass.SkillUse{
+			{
+				Name:      "notebooklm-assisted-prompting",
+				Path:      "/Users/tmc/go/src/github.com/tmc/skills/skills/notebooklm-assisted-prompting/SKILL.md",
+				Source:    "claude-code",
+				Kind:      "loaded",
+				Count:     1,
+				FirstSeen: now.Add(-30 * time.Minute),
+				LastSeen:  now.Add(-30 * time.Minute),
+				Evidence:  []string{"Read tool loaded SKILL.md"},
+			},
+			{
+				Name:      "nlm",
+				Source:    "claude-code",
+				Kind:      "selected",
+				Count:     1,
+				FirstSeen: now.Add(-20 * time.Minute),
+				LastSeen:  now.Add(-20 * time.Minute),
+				Evidence:  []string{"Skill tool invocation"},
+			},
+		},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.Search(ctx, cass.SearchRequest{
+		Query:   "skill",
+		Limit:   10,
+		Filters: cass.Filters{Skill: "nlm"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalCount != 1 {
+		t.Fatalf("TotalCount = %d, want 1", result.TotalCount)
+	}
+	h := result.Hits[0]
+	if h.SkillCount != 2 || h.SelectedSkillCount != 1 || h.LoadedSkillCount != 1 {
+		t.Fatalf("skill counts = %d/%d/%d, want 2/1/1", h.SkillCount, h.SelectedSkillCount, h.LoadedSkillCount)
+	}
+	if len(h.Skills) != 2 {
+		t.Fatalf("len(hit.Skills) = %d, want 2", len(h.Skills))
+	}
+
+	skills, err := s.Skills(ctx, "nlm", "selected", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 || skills[0].Name != "nlm" || skills[0].SessionID != "skill-session" {
+		t.Fatalf("Skills = %+v, want selected nlm hit", skills)
+	}
+
+	agg, err := s.AggregateStats(ctx, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agg["skills"].(int) != 2 || agg["selected_skills"].(int) != 1 || agg["loaded_skills"].(int) != 1 {
+		t.Fatalf("aggregate skill counts = %#v", agg)
+	}
+	top := agg["top_skills"].(map[string]int)
+	if top["nlm"] != 1 || top["notebooklm-assisted-prompting"] != 1 {
+		t.Fatalf("top skills = %#v", top)
+	}
+}
+
 // TestBatchIndexSubagentRuns verifies that SubagentRun records persist
 // alongside their parent session, and that re-indexing the same session
 // with a different set of runs replaces them rather than duplicating.

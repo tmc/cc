@@ -26,6 +26,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			Workspace:  q.Get("workspace"),
 			Team:       q.Get("team"),
 			GoalStatus: q.Get("goal_status"),
+			Skill:      q.Get("skill"),
 		},
 	}
 
@@ -156,6 +157,22 @@ func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, goals)
+}
+
+func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := 100
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	skills, err := s.svc.Skills(r.Context(), q.Get("skill"), q.Get("kind"), limit)
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, skills)
 }
 
 func (s *Server) handleMappings(w http.ResponseWriter, r *http.Request) {

@@ -166,6 +166,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 	// Extract inter-session communication links and stats.
 	links := ExtractLinks(entries)
 	stats := ExtractStats(entries)
+	skills := ExtractSkills(entries, "claude-code")
 
 	// Extract team links (native Claude Code agent teams).
 	teamLinks := ExtractTeamLinks(entries)
@@ -206,6 +207,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 		StartedAt:    sum.FirstTime,
 		EndedAt:      sum.LastTime,
 		Messages:     messages,
+		Skills:       skills,
 		Stats:        stats,
 		Metadata:     meta,
 		TeamName:     teamName,

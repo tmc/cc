@@ -41,6 +41,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "  search     search indexed sessions")
 		fmt.Fprintln(os.Stderr, "  resume     search and resume a session interactively")
 		fmt.Fprintln(os.Stderr, "  goals      list goal-mode objectives")
+		fmt.Fprintln(os.Stderr, "  skills     list skill usage")
 		fmt.Fprintln(os.Stderr, "  links      show inter-session communication graph")
 		fmt.Fprintln(os.Stderr, "  map        show iTerm2 <-> Claude session ID mappings")
 		fmt.Fprintln(os.Stderr, "  stats      show index statistics")
@@ -82,6 +83,8 @@ func run() error {
 		return runResume(ctx, svc, args[1:])
 	case "goals":
 		return runGoals(ctx, svc, args[1:], *jsonOutput)
+	case "skills":
+		return runSkills(ctx, svc, args[1:], *jsonOutput)
 	case "links":
 		return runLinks(ctx, svc, args[1:], *jsonOutput)
 	case "map":
@@ -200,6 +203,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 	workspace := fs.String("workspace", "", "filter by workspace path or project name")
 	gitCommonDir := fs.String("git-common-dir", "", "filter by resolved git common dir (stable across worktrees)")
 	goalStatus := fs.String("goal-status", "", "filter by goal status")
+	skill := fs.String("skill", "", "filter by skill name or path substring")
 	pwd := fs.Bool("pwd", false, "filter to current working directory")
 	since := fs.Duration("since", 0, "sessions within duration (e.g. 12h, 24h, 168h)")
 	after := fs.String("after", "", "sessions after date (RFC3339 or YYYY-MM-DD)")
@@ -232,6 +236,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 			Workspace:    ws,
 			GitCommonDir: *gitCommonDir,
 			GoalStatus:   *goalStatus,
+			Skill:        *skill,
 		},
 	}
 
@@ -380,6 +385,29 @@ func printHit(num int, h cass.Hit) {
 			status = "active"
 		}
 		fmt.Printf("    %s %s\n", statusStyle(status), obj)
+	}
+	if len(h.Skills) > 0 {
+		var names []string
+		for _, sk := range h.Skills {
+			if sk.Kind == "available" {
+				continue
+			}
+			names = append(names, sk.Name)
+			if len(names) == 4 {
+				break
+			}
+		}
+		if len(names) == 0 {
+			for _, sk := range h.Skills {
+				names = append(names, sk.Name)
+				if len(names) == 4 {
+					break
+				}
+			}
+		}
+		if len(names) > 0 {
+			fmt.Printf("    %s %s\n", statusStyle("skill"), strings.Join(names, ", "))
+		}
 	}
 
 	// Line 3: project, time, duration, and stats.
@@ -582,12 +610,76 @@ func runGoals(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	return nil
 }
 
+func runSkills(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
+	fs := flag.NewFlagSet("skills", flag.ExitOnError)
+	skill := fs.String("skill", "", "filter by skill name or path substring")
+	kind := fs.String("kind", "", "filter by signal kind")
+	limit := fs.Int("limit", 50, "max rows to return")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 && *skill == "" {
+		*skill = fs.Arg(0)
+	}
+
+	skills, err := svc.Skills(ctx, *skill, *kind, *limit)
+	if err != nil {
+		return err
+	}
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(skills)
+	}
+	if len(skills) == 0 {
+		fmt.Println("no skills")
+		return nil
+	}
+	for _, sk := range skills {
+		when := relativeTime(sk.EndedAt)
+		name := sk.Name
+		if sk.Path != "" {
+			name += "  " + sk.Path
+		}
+		meta := shortProject(sk.Workspace)
+		if sk.Count > 1 {
+			if meta != "" {
+				meta += "  "
+			}
+			meta += fmt.Sprintf("%d signals", sk.Count)
+		}
+		if len(sk.Evidence) > 0 {
+			if meta != "" {
+				meta += "  "
+			}
+			meta += strings.Join(sk.Evidence, "; ")
+		}
+		if when != "" {
+			if meta != "" {
+				meta += "  "
+			}
+			meta += when
+		}
+		fmt.Printf("%-10s  %-10s  %s\n", statusStyle(sk.Kind), short(sk.SessionID), name)
+		if meta != "" {
+			fmt.Printf("                        %s\n", meta)
+		}
+	}
+	return nil
+}
+
 func statusStyle(status string) string {
 	switch status {
 	case "complete", "completed":
 		return labelStyle.Render("complete")
 	case "active":
 		return titleStyle.Render("active")
+	case "selected":
+		return titleStyle.Render("selected")
+	case "loaded", "expanded":
+		return labelStyle.Render(status)
+	case "available":
+		return snippetStyle.Render("available")
+	case "skill":
+		return labelStyle.Render("skill")
 	default:
 		return snippetStyle.Render(status)
 	}
@@ -1062,6 +1154,7 @@ func runRequests(ctx context.Context, svc *service.Service, args []string, jsonO
 	var totIn, totOut, totCacheCreate, totCacheRead int
 	modelCounts := make(map[string]int)
 	purposeCounts := make(map[string]int)
+	skillCounts := make(map[string]int)
 	var builtinBytes, mcpBytes, skillBytes, systemBytes, convBytes int
 
 	for _, r := range requests {
@@ -1077,6 +1170,9 @@ func runRequests(ctx context.Context, svc *service.Service, args []string, jsonO
 			skillBytes += r.Breakdown.SkillToolBytes
 			systemBytes += r.Breakdown.SystemPromptBytes
 			convBytes += r.Breakdown.ConversationBytes
+			for _, name := range r.Breakdown.SkillNames {
+				skillCounts[name]++
+			}
 		}
 	}
 
@@ -1133,6 +1229,17 @@ func runRequests(ctx context.Context, svc *service.Service, args []string, jsonO
 	fmt.Printf("\n%s\n", headerStyle.Render("By purpose"))
 	for p, n := range purposeCounts {
 		fmt.Printf("  %-12s %d requests\n", labelStyle.Render(p), n)
+	}
+	if len(skillCounts) > 0 {
+		fmt.Printf("\n%s\n", headerStyle.Render("By skill"))
+		var rows []agentTypeCount
+		for k, v := range skillCounts {
+			rows = append(rows, agentTypeCount{k, v})
+		}
+		sortByCountDesc(rows)
+		for _, r := range rows {
+			fmt.Printf("  %-28s %d requests\n", labelStyle.Render(r.k), r.v)
+		}
 	}
 
 	// Context composition (only if breakdown data was parsed).

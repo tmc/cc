@@ -73,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/links", s.handleLinks)
 	mux.HandleFunc("GET /api/goals", s.handleGoals)
+	mux.HandleFunc("GET /api/skills", s.handleSkills)
 	mux.HandleFunc("GET /api/mappings", s.handleMappings)
 	mux.HandleFunc("GET /api/labels", s.handleLabels)
 	mux.HandleFunc("POST /api/index", s.handleIndex)
