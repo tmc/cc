@@ -762,6 +762,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(urlParams.session_id ? { session_id: urlParams.session_id } : null);
   const [toolFilter, setToolFilter] = useState(urlParams.detail_filter || '');
+  const [detailTab, setDetailTab] = useState(urlParams.detail_tab || 'conversation');
   const [selectedIdx, setSelectedIdx] = useState(-1);
 
   function setQuery(v) { setQueryRaw(v); }
@@ -793,9 +794,10 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
       skill,
       session_id: selected?.session_id || '',
       detail_filter: selected?.session_id ? toolFilter : '',
+      detail_tab: selected?.session_id && detailTab !== 'conversation' ? detailTab : '',
     }), 300);
     return () => clearTimeout(urlRef.current);
-  }, [query, agent, workspace, since, sort, team, goalStatus, skill, selected?.session_id, toolFilter]);
+  }, [query, agent, workspace, since, sort, team, goalStatus, skill, selected?.session_id, toolFilter, detailTab]);
 
   // Restore state from URL on browser navigation.
   useEffect(() => {
@@ -809,6 +811,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     setGoalStatusRaw(urlParams.goal_status || '');
     setSkillRaw(urlParams.skill || '');
     setToolFilter(urlParams.detail_filter || '');
+    setDetailTab(urlParams.detail_tab || 'conversation');
     setSelected(urlParams.session_id ? { session_id: urlParams.session_id } : null);
   }, [navVersion]);
 
@@ -864,7 +867,12 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
       if (!hits || hits.length === 0) return;
       if (e.key === 'j') { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, hits.length - 1)); }
       else if (e.key === 'k') { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
-      else if (e.key === 'Enter' && selectedIdx >= 0) { e.preventDefault(); setSelected(hits[selectedIdx]); setToolFilter(''); }
+      else if (e.key === 'Enter' && selectedIdx >= 0) {
+        e.preventDefault();
+        setSelected(hits[selectedIdx]);
+        setToolFilter('');
+        setDetailTab('conversation');
+      }
       else if (e.key === 'Escape' && selected) { e.preventDefault(); setSelected(null); }
     }
     window.addEventListener('keydown', onKey);
@@ -930,9 +938,9 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
             <${HitItem} key=${h.session_id} hit=${h} num=${i + 1}
               isSelected=${selected?.session_id === h.session_id}
               isFocused=${i === selectedIdx}
-              onClick=${() => { setSelected(h); setSelectedIdx(i); setToolFilter(''); }}
+              onClick=${() => { setSelected(h); setSelectedIdx(i); setToolFilter(''); setDetailTab('conversation'); }}
               onTeamClick=${onNavigate ? (name) => onNavigate('teams', { name }) : null}
-              onToolClick=${(toolName) => { setSelected(h); setSelectedIdx(i); setToolFilter(toolName); }} />
+              onToolClick=${(toolName) => { setSelected(h); setSelectedIdx(i); setToolFilter(toolName); setDetailTab('conversation'); }} />
           `)}
         </ul>
       `}
@@ -941,8 +949,14 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
       `}
 
       </section>
-      <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => { setSelected(null); setToolFilter(''); }}></div>
-      <${SessionDetailPanel} hit=${selected} onClose=${() => { setSelected(null); setToolFilter(''); }} initialFilter=${toolFilter} />
+      <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => { setSelected(null); setToolFilter(''); setDetailTab('conversation'); }}></div>
+      <${SessionDetailPanel}
+        hit=${selected}
+        onClose=${() => { setSelected(null); setToolFilter(''); setDetailTab('conversation'); }}
+        initialFilter=${toolFilter}
+        initialTab=${detailTab}
+        onFilterChange=${setToolFilter}
+        onTabChange=${setDetailTab} />
     </div>
   `;
 }
@@ -1359,7 +1373,7 @@ function AgentsTab({ agentData }) {
   `;
 }
 
-function SessionDetailPanel({ hit, onClose, initialFilter }) {
+function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterChange, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -1368,7 +1382,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Tab state: 'conversation' or 'requests'
-  const [activeTab, setActiveTab] = useState('conversation');
+  const [activeTabRaw, setActiveTabRaw] = useState(initialTab || 'conversation');
   const [apiRequests, setApiRequests] = useState([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
 
@@ -1378,11 +1392,22 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
     ? Object.values(hit.tool_breakdown).reduce((a, b) => a + b, 0)
     : 0;
   const resumeCmd = resumeCommand(hit);
+  const activeTab = activeTabRaw;
+
+  function setActiveTab(tab) {
+    setActiveTabRaw(tab);
+    onTabChange && onTabChange(tab);
+  }
+
+  function setDetailSearch(v) {
+    setSearchQuery(v);
+    onFilterChange && onFilterChange(v);
+  }
 
   useEffect(() => {
     if (!hit) {
       setEntries([]); setEntryCount(0); setSearchQuery('');
-      setActiveTab('conversation'); setApiRequests([]);
+      setActiveTabRaw('conversation'); setApiRequests([]);
       return;
     }
     setLoading(true);
@@ -1390,7 +1415,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
     setEntries([]);
     setEntryCount(0);
     setExpanded({});
-    setSearchQuery('');
+    setDetailSearch(initialFilter || '');
+    setActiveTabRaw(initialTab || 'conversation');
 
     const controller = new AbortController();
 
@@ -1462,6 +1488,16 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
       setActiveTab('conversation');
     }
   }, [initialFilter, hit?.session_id]);
+
+  useEffect(() => {
+    if (!initialFilter) {
+      setSearchQuery('');
+    }
+  }, [initialFilter, hit?.session_id]);
+
+  useEffect(() => {
+    setActiveTabRaw(initialTab || 'conversation');
+  }, [initialTab, hit?.session_id]);
 
   // Fetch API requests when the tab is switched, or proactively.
   useEffect(() => {
@@ -1903,9 +1939,9 @@ function SessionDetailPanel({ hit, onClose, initialFilter }) {
             <input ref=${searchRef} class="detail-search-input" type="text"
               placeholder="search in session... (Enter/Shift+Enter to navigate)"
               value=${searchQuery}
-              onInput=${e => setSearchQuery(e.target.value)}
+              onInput=${e => setDetailSearch(e.target.value)}
               onKeyDown=${e => {
-                if (e.key === 'Escape') { setSearchQuery(''); e.target.blur(); }
+                if (e.key === 'Escape') { setDetailSearch(''); e.target.blur(); }
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); nextMatch(); }
                 if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); prevMatch(); }
               }} />
