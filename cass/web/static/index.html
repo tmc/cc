@@ -46,6 +46,16 @@ async function api(path, opts) {
   }
 }
 
+function errorMessage(err, fallback) {
+  if (!err || !err.message) return fallback;
+  try {
+    const body = JSON.parse(err.message);
+    return body.error || fallback;
+  } catch {
+    return err.message || fallback;
+  }
+}
+
 function qs(params) {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -853,7 +863,19 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     let cancelled = false;
     api('session/' + selected.session_id + '/meta')
       .then(h => { if (!cancelled) setSelected(h); })
-      .catch(e => console.error('session meta:', e));
+      .catch(e => {
+        if (cancelled) return;
+        const message = errorMessage(e, 'session unavailable');
+        setSelected(prev => {
+          if (!prev || prev.session_id !== selected.session_id) return prev;
+          return {
+            ...prev,
+            agent: 'unknown',
+            title: 'Session unavailable',
+            meta_error: message,
+          };
+        });
+      });
     return () => { cancelled = true; };
   }, [selected?.session_id, selected?.agent]);
 
@@ -1385,6 +1407,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const [entryCount, setEntryCount] = useState(0);
   const [expanded, setExpanded] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
+  const [detailError, setDetailError] = useState('');
 
   // Tab state: 'conversation' or 'requests'
   const [activeTabRaw, setActiveTabRaw] = useState(normalizeDetailTab(initialTab));
@@ -1413,16 +1436,22 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   useEffect(() => {
     if (!hit) {
       setEntries([]); setEntryCount(0); setSearchQuery('');
-      setActiveTabRaw('conversation'); setApiRequests([]);
+      setActiveTabRaw('conversation'); setApiRequests([]); setDetailError('');
       return;
     }
     setLoading(true);
     setStreaming(true);
     setEntries([]);
     setEntryCount(0);
+    setDetailError(hit.meta_error || '');
     setExpanded({});
     setDetailSearch(initialFilter || '');
     setActiveTabRaw(normalizeDetailTab(initialTab));
+    if (hit.meta_error) {
+      setLoading(false);
+      setStreaming(false);
+      return;
+    }
 
     const controller = new AbortController();
 
@@ -1481,7 +1510,9 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       api('session/' + hit.session_id).then(e => {
         setEntries(Array.isArray(e) ? e : []);
         setEntryCount(Array.isArray(e) ? e.length : 0);
-      }).catch(() => {}).finally(() => { setLoading(false); setStreaming(false); });
+      }).catch(e => {
+        setDetailError(errorMessage(e, 'session unavailable'));
+      }).finally(() => { setLoading(false); setStreaming(false); });
     });
 
     return () => controller.abort();
@@ -2001,8 +2032,9 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
         `}
         <div class="detail-body" ref=${bodyRef}>
           ${activeTab === 'conversation' ? html`
+            ${detailError && html`<div class="detail-error">${detailError}</div>`}
             ${loading && entries.length === 0 && html`<div class="loading">loading session...</div>`}
-            <div class="conversation">${renderConversation()}</div>
+            ${!detailError && html`<div class="conversation">${renderConversation()}</div>`}
           ` : activeTab === 'agents' ? html`
             <${AgentsTab} agentData=${agentData} />
           ` : renderRequestsTab()}
