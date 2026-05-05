@@ -18,6 +18,12 @@ type Store struct {
 	db *sql.DB
 }
 
+const hitStatsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goals_json, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count`
+
+type hitScanner interface {
+	Scan(dest ...any) error
+}
+
 // New opens or creates a SQLite store at the given path.
 func New(dbPath string) (*Store, error) {
 	db, err := sql.Open("sqlite", dbPath)
@@ -557,7 +563,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	}
 
 	// Build query with BM25 ranking when doing FTS.
-	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.subagent_spawns, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch, s.goals_json, s.goal_count, s.active_goal_count, s.completed_goal_count, s.skills_json, s.skill_count, s.selected_skill_count, s.loaded_skill_count`
+	statsCols := ", s." + strings.ReplaceAll(hitStatsCols, ", ", ", s.")
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -589,41 +595,9 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 
 	var hits []cass.Hit
 	for rows.Next() {
-		var h cass.Hit
-		var startedUnix, endedUnix int64
-		var statsJSON, goalsJSON, skillsJSON string
-		var isTeamLead int
-		if err := rows.Scan(&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
-			&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
-			&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
-			&h.GitCommonDir, &h.Branch, &goalsJSON, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount,
-			&skillsJSON, &h.SkillCount, &h.SelectedSkillCount, &h.LoadedSkillCount); err != nil {
+		h, err := scanHit(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
-		}
-		if startedUnix > 0 {
-			h.StartedAt = time.Unix(startedUnix, 0).Format(time.RFC3339)
-		}
-		if endedUnix > 0 {
-			h.EndedAt = time.Unix(endedUnix, 0).Format(time.RFC3339)
-		}
-		h.IsTeamLead = isTeamLead != 0
-		if goalsJSON != "" {
-			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
-			h.Goals = normalizeGoals(h.Goals)
-		}
-		if skillsJSON != "" {
-			_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
-		}
-		if statsJSON != "" {
-			var stats cass.SessionStats
-			if json.Unmarshal([]byte(statsJSON), &stats) == nil {
-				if len(stats.ToolBreakdown) > 0 {
-					h.ToolBreakdown = stats.ToolBreakdown
-				}
-				h.Compactions = stats.Compactions
-				h.CacheReads = stats.CacheReads
-				h.CacheCreationInputTokens = stats.CacheCreationInputTokens
-			}
 		}
 		hits = append(hits, h)
 	}
@@ -739,14 +713,16 @@ func (s *Store) GetSourcePath(ctx context.Context, id string) (string, error) {
 
 // Session returns indexed metadata for a single session.
 func (s *Store) Session(ctx context.Context, id string) (cass.Hit, error) {
-	const statsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goals_json, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count`
-	query := `SELECT id, agent, title, substr(content, 1, 200) as snip, 0.0 as score, workspace, source_path, started_at, ` + statsCols + ` FROM sessions WHERE id = ?`
+	query := `SELECT id, agent, title, substr(content, 1, 200) as snip, 0.0 as score, workspace, source_path, started_at, ` + hitStatsCols + ` FROM sessions WHERE id = ?`
+	return scanHit(s.db.QueryRowContext(ctx, query, id))
+}
 
+func scanHit(row hitScanner) (cass.Hit, error) {
 	var h cass.Hit
 	var startedUnix, endedUnix int64
 	var statsJSON, goalsJSON, skillsJSON string
 	var isTeamLead int
-	if err := s.db.QueryRowContext(ctx, query, id).Scan(
+	if err := row.Scan(
 		&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
 		&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
 		&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
