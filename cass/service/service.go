@@ -109,6 +109,7 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 	var (
 		total int
 		mu    sync.Mutex
+		write sync.Mutex
 		wg    sync.WaitGroup
 	)
 
@@ -146,9 +147,11 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 			for sess := range ch {
 				batch = append(batch, sess)
 				if len(batch) >= 100 {
+					write.Lock()
 					if err := s.store.BatchIndex(ctx, batch); err != nil {
 						s.log.Error("batch index", "agent", col.Name(), "err", err)
 					}
+					write.Unlock()
 					mu.Lock()
 					total += len(batch)
 					mu.Unlock()
@@ -158,9 +161,11 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 
 			// Flush remaining.
 			if len(batch) > 0 {
+				write.Lock()
 				if err := s.store.BatchIndex(ctx, batch); err != nil {
 					s.log.Error("batch index", "agent", col.Name(), "err", err)
 				}
+				write.Unlock()
 				mu.Lock()
 				total += len(batch)
 				mu.Unlock()
