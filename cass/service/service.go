@@ -250,6 +250,58 @@ func (s *Service) Graph(ctx context.Context, since time.Time) (*cass.GraphData, 
 	return s.store.GraphData(ctx, since)
 }
 
+// IndexRoots indexes explicit session roots without running agent detection.
+// It is for targeted imports and checks that should not walk all session history.
+func (s *Service) IndexRoots(ctx context.Context, paths []string) (int, error) {
+	type pathGroup struct {
+		collector cass.Collector
+		paths     []string
+	}
+
+	groups := map[string]*pathGroup{}
+	for _, path := range paths {
+		col := collectorForPath(path)
+		if col.Name() == "claude-code" {
+			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				path = filepath.Dir(path)
+			}
+		}
+		name := col.Name()
+		g := groups[name]
+		if g == nil {
+			g = &pathGroup{collector: col}
+			groups[name] = g
+		}
+		g.paths = append(g.paths, path)
+	}
+
+	total := 0
+	for _, g := range groups {
+		ch := make(chan cass.Session, 64)
+		var scanErr error
+		go func(col cass.Collector, paths []string) {
+			scanErr = col.Scan(ctx, cass.ScanConfig{Paths: paths}, ch)
+		}(g.collector, g.paths)
+
+		var batch []cass.Session
+		for sess := range ch {
+			batch = append(batch, sess)
+		}
+		if scanErr != nil {
+			return 0, fmt.Errorf("scan %s: %w", g.collector.Name(), scanErr)
+		}
+		if len(batch) == 0 {
+			continue
+		}
+		if err := s.store.BatchIndex(ctx, batch); err != nil {
+			return 0, fmt.Errorf("index %s: %w", g.collector.Name(), err)
+		}
+		total += len(batch)
+	}
+
+	return total, nil
+}
+
 // IndexPaths re-indexes session files by their parent directories.
 // Used by the file watcher for incremental updates without a full scan.
 func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, error) {

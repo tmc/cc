@@ -33,6 +33,7 @@
 //
 //	cass detect
 //	cass index
+//	cass index ~/.codex/sessions/2026/05/03/session.jsonl
 //
 // Search the index, optionally filtered by workspace or git worktree:
 //

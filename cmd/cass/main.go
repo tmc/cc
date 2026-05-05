@@ -139,7 +139,16 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	noArtifactDirs := fs.Bool("no-artifact-dirs", false, "disable artifact dir scanning")
 	fs.Parse(args)
 
-	count, err := svc.Index(ctx, *force, fs.Args()...)
+	var (
+		count    int
+		err      error
+		targeted = fs.NArg() > 0
+	)
+	if targeted {
+		count, err = svc.IndexRoots(ctx, fs.Args())
+	} else {
+		count, err = svc.Index(ctx, *force)
+	}
 	if err != nil {
 		return err
 	}
@@ -161,7 +170,7 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	}
 
 	artifactCount := 0
-	if *artifactDirs && !*noArtifactDirs {
+	if !targeted && *artifactDirs && !*noArtifactDirs {
 		artifactCount, err = svc.IndexArtifactDirs(ctx, "")
 		if err != nil {
 			// Non-fatal: artifact dirs may not exist yet.
@@ -170,7 +179,10 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	}
 
 	// Non-fatal: team configs may not exist.
-	teamConfigCount, _ := svc.IndexTeamConfigs(ctx, "")
+	teamConfigCount := 0
+	if !targeted {
+		teamConfigCount, _ = svc.IndexTeamConfigs(ctx, "")
+	}
 
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
