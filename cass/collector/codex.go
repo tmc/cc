@@ -376,8 +376,10 @@ func parseAssistantGoalGates(text string, at time.Time) []cass.GoalGate {
 			status = "complete"
 			continue
 		case strings.HasPrefix(lower, "completion status: not achieved"),
-			strings.Contains(lower, "still blocked"),
-			strings.Contains(lower, "blocked on"):
+			strings.HasPrefix(lower, "still blocked"),
+			strings.HasPrefix(lower, "blocked on"),
+			strings.HasPrefix(lower, "objective is still not achievable"),
+			strings.HasPrefix(lower, "goal is still not achievable"):
 			name, evidence := blockedGoalGate(trimmed)
 			if name == "" {
 				continue
@@ -442,8 +444,10 @@ func blockedGoalGate(line string) (name, evidence string) {
 	switch {
 	case strings.HasPrefix(lower, "completion status: not achieved"):
 		return "Completion status not achieved", line
-	case strings.Contains(lower, "still blocked"),
-		strings.Contains(lower, "blocked on"):
+	case strings.HasPrefix(lower, "still blocked"),
+		strings.HasPrefix(lower, "blocked on"),
+		strings.HasPrefix(lower, "objective is still not achievable"),
+		strings.HasPrefix(lower, "goal is still not achievable"):
 		return "Blocked precondition", line
 	}
 	return "", ""

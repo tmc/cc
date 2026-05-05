@@ -270,6 +270,16 @@ Ready evidence/prep:
 	}
 }
 
+func TestCodexAssistantBlockedGatesIgnoreUnrelatedProse(t *testing.T) {
+	at := time.Unix(100, 0)
+	text := `it2 session send-text 7424A891 '<collab-msg>Commit attempt is still blocked by missing ANTHROPIC_API_KEY, but the benchmark artifact is ready.</collab-msg>'`
+
+	gates := parseAssistantGoalGates(text, at)
+	if len(gates) != 0 {
+		t.Fatalf("gates = %#v, want none", gates)
+	}
+}
+
 func hasGoalGate(g cass.Goal, name, status string) bool {
 	return hasGate(g.CompletionGates, name, status)
 }
