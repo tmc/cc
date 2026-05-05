@@ -737,6 +737,50 @@ func (s *Store) GetSourcePath(ctx context.Context, id string) (string, error) {
 	return path, err
 }
 
+// Session returns indexed metadata for a single session.
+func (s *Store) Session(ctx context.Context, id string) (cass.Hit, error) {
+	const statsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goals_json, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count`
+	query := `SELECT id, agent, title, substr(content, 1, 200) as snip, 0.0 as score, workspace, source_path, started_at, ` + statsCols + ` FROM sessions WHERE id = ?`
+
+	var h cass.Hit
+	var startedUnix, endedUnix int64
+	var statsJSON, goalsJSON, skillsJSON string
+	var isTeamLead int
+	if err := s.db.QueryRowContext(ctx, query, id).Scan(
+		&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
+		&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
+		&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
+		&h.GitCommonDir, &h.Branch, &goalsJSON, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount,
+		&skillsJSON, &h.SkillCount, &h.SelectedSkillCount, &h.LoadedSkillCount,
+	); err != nil {
+		return cass.Hit{}, err
+	}
+	if startedUnix > 0 {
+		h.StartedAt = time.Unix(startedUnix, 0).Format(time.RFC3339)
+	}
+	if endedUnix > 0 {
+		h.EndedAt = time.Unix(endedUnix, 0).Format(time.RFC3339)
+	}
+	h.IsTeamLead = isTeamLead != 0
+	if goalsJSON != "" {
+		_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
+		h.Goals = normalizeGoals(h.Goals)
+	}
+	if skillsJSON != "" {
+		_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
+	}
+	if statsJSON != "" {
+		var stats cass.SessionStats
+		if json.Unmarshal([]byte(statsJSON), &stats) == nil {
+			h.ToolBreakdown = stats.ToolBreakdown
+			h.Compactions = stats.Compactions
+			h.CacheReads = stats.CacheReads
+			h.CacheCreationInputTokens = stats.CacheCreationInputTokens
+		}
+	}
+	return h, nil
+}
+
 // SessionCount returns the number of indexed sessions.
 func (s *Store) SessionCount(ctx context.Context) (int, error) {
 	var count int

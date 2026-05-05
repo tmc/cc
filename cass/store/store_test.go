@@ -400,6 +400,50 @@ func TestGoalsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionReturnsIndexedMetadata(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess := cass.Session{
+		ID:         "meta-1",
+		Agent:      "codex-cli",
+		Title:      "Meta session",
+		Workspace:  "/work/meta",
+		SourcePath: "/tmp/meta.jsonl",
+		StartedAt:  time.Unix(100, 0),
+		EndedAt:    time.Unix(200, 0),
+		Messages: []cass.Message{
+			{Role: "user", Content: "show metadata"},
+		},
+		Goals: []cass.Goal{{
+			Objective: "finish metadata",
+			Status:    "complete",
+			CompletionGates: []cass.GoalGate{
+				{Name: "real gate", Status: "missing"},
+			},
+		}},
+		Stats: cass.SessionStats{
+			ToolCalls:     3,
+			ToolBreakdown: map[string]int{"exec": 2, "read": 1},
+		},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+	h, err := s.Session(ctx, "meta-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.SessionID != "meta-1" || h.Agent != "codex-cli" || h.Workspace != "/work/meta" {
+		t.Fatalf("hit metadata = %#v", h)
+	}
+	if len(h.Goals) != 1 || h.Goals[0].EffectiveStatus != "blocked" {
+		t.Fatalf("hit goals = %#v", h.Goals)
+	}
+	if h.ToolBreakdown["exec"] != 2 {
+		t.Fatalf("tool breakdown = %#v", h.ToolBreakdown)
+	}
+}
+
 func TestSkillsRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -192,6 +192,11 @@ func (s *Service) GetSourcePath(ctx context.Context, id string) (string, error) 
 	return s.store.GetSourcePath(ctx, id)
 }
 
+// Session returns indexed metadata for a session.
+func (s *Service) Session(ctx context.Context, id string) (cass.Hit, error) {
+	return s.store.Session(ctx, id)
+}
+
 // Stats returns basic index statistics.
 func (s *Service) Stats(ctx context.Context) (map[string]any, error) {
 	count, err := s.store.SessionCount(ctx)

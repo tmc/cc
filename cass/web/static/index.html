@@ -840,6 +840,15 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     if (selectedIdx !== i) setSelectedIdx(i);
   }, [results, selected?.session_id]);
 
+  useEffect(() => {
+    if (!selected?.session_id || selected.agent) return;
+    let cancelled = false;
+    api('session/' + selected.session_id + '/meta')
+      .then(h => { if (!cancelled) setSelected(h); })
+      .catch(e => console.error('session meta:', e));
+    return () => { cancelled = true; };
+  }, [selected?.session_id, selected?.agent]);
+
   // Auto-refresh on SSE.
   useEffect(() => {
     const handler = () => doSearch();

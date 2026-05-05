@@ -238,6 +238,20 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, result)
 }
 
+func (s *Server) handleSessionMeta(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, fmt.Errorf("missing session id"), http.StatusBadRequest)
+		return
+	}
+	hit, err := s.svc.Session(r.Context(), id)
+	if err != nil {
+		writeError(w, fmt.Errorf("session not found: %s", id), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, hit)
+}
+
 // handleSessionStream streams a session's JSONL entries as SSE events.
 // This enables real-time rendering via xterm.js in the browser.
 func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
