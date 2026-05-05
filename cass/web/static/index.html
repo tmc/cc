@@ -64,6 +64,10 @@ function shortSessionID(id) {
   return id && id.length > 8 ? id.slice(0, 8) : (id || '');
 }
 
+function normalizeDetailTab(tab) {
+  return tab === 'agents' || tab === 'requests' ? tab : 'conversation';
+}
+
 function resumeCommand(hit) {
   if (!hit || !hit.agent) return '';
   const prefix = hit.workspace ? 'cd ' + shellQuote(hit.workspace) + ' && ' : '';
@@ -762,7 +766,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(urlParams.session_id ? { session_id: urlParams.session_id } : null);
   const [toolFilter, setToolFilter] = useState(urlParams.detail_filter || '');
-  const [detailTab, setDetailTab] = useState(urlParams.detail_tab || 'conversation');
+  const [detailTab, setDetailTabRaw] = useState(normalizeDetailTab(urlParams.detail_tab));
   const [selectedIdx, setSelectedIdx] = useState(-1);
 
   function setQuery(v) { setQueryRaw(v); }
@@ -773,6 +777,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   function setTeam(v) { setTeamRaw(v); }
   function setGoalStatus(v) { setGoalStatusRaw(v); }
   function setSkill(v) { setSkillRaw(v); }
+  function setDetailTab(v) { setDetailTabRaw(normalizeDetailTab(v)); }
 
   useEffect(() => {
     document.body.classList.toggle('detail-open', !!selected);
@@ -811,7 +816,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     setGoalStatusRaw(urlParams.goal_status || '');
     setSkillRaw(urlParams.skill || '');
     setToolFilter(urlParams.detail_filter || '');
-    setDetailTab(urlParams.detail_tab || 'conversation');
+    setDetailTab(urlParams.detail_tab);
     setSelected(urlParams.session_id ? { session_id: urlParams.session_id } : null);
   }, [navVersion]);
 
@@ -1382,7 +1387,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const [searchQuery, setSearchQuery] = useState('');
 
   // Tab state: 'conversation' or 'requests'
-  const [activeTabRaw, setActiveTabRaw] = useState(initialTab || 'conversation');
+  const [activeTabRaw, setActiveTabRaw] = useState(normalizeDetailTab(initialTab));
   const [apiRequests, setApiRequests] = useState([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
 
@@ -1395,8 +1400,9 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const activeTab = activeTabRaw;
 
   function setActiveTab(tab) {
-    setActiveTabRaw(tab);
-    onTabChange && onTabChange(tab);
+    const normalized = normalizeDetailTab(tab);
+    setActiveTabRaw(normalized);
+    onTabChange && onTabChange(normalized);
   }
 
   function setDetailSearch(v) {
@@ -1416,7 +1422,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     setEntryCount(0);
     setExpanded({});
     setDetailSearch(initialFilter || '');
-    setActiveTabRaw(initialTab || 'conversation');
+    setActiveTabRaw(normalizeDetailTab(initialTab));
 
     const controller = new AbortController();
 
@@ -1496,7 +1502,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   }, [initialFilter, hit?.session_id]);
 
   useEffect(() => {
-    setActiveTabRaw(initialTab || 'conversation');
+    setActiveTabRaw(normalizeDetailTab(initialTab));
   }, [initialTab, hit?.session_id]);
 
   // Fetch API requests when the tab is switched, or proactively.
