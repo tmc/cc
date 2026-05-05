@@ -176,7 +176,7 @@ func TestCodexGoals(t *testing.T) {
 				"type": "message",
 				"role": "assistant",
 				"content": []map[string]any{
-					{"type": "output_text", "text": "Still blocked on external evidence.\n\nMissing completion gates:\n- AC-valid focused Metal trace\n- 35B 3-run TPS result\n- 27B and 4B regression checks\n\nReady evidence/prep:\n- harness syntax preflight passed"},
+					{"type": "output_text", "text": "Still blocked on external evidence.\n\nMissing completion gates:\n- focused trace capture\n- 3-run benchmark result\n- regression checks\n\nReady evidence/prep:\n- harness syntax preflight passed"},
 				},
 			},
 		},
@@ -205,8 +205,8 @@ func TestCodexGoals(t *testing.T) {
 	if g.ThreadID != "goal-session" {
 		t.Fatalf("thread id = %q", g.ThreadID)
 	}
-	if !hasGoalGate(g, "AC-valid focused Metal trace", "missing") {
-		t.Fatalf("missing AC gate not parsed: %#v", g.CompletionGates)
+	if !hasGoalGate(g, "focused trace capture", "missing") {
+		t.Fatalf("missing gate not parsed: %#v", g.CompletionGates)
 	}
 	if !hasGoalGate(g, "harness syntax preflight passed", "complete") {
 		t.Fatalf("ready gate not parsed: %#v", g.CompletionGates)
@@ -230,8 +230,8 @@ Before deciding that the goal is achieved, perform a completion audit against th
 - Build a prompt-to-artifact checklist that maps every explicit requirement to evidence.
 
 Completion gates:
-- AC-valid focused Metal trace
-- 35B 3-run Go/Python TPS >= 1.00x
+- focused trace capture
+- benchmark parity result
 
 If the goal has not been achieved and cannot continue productively, explain the blocker.`
 
@@ -239,10 +239,10 @@ If the goal has not been achieved and cannot continue productively, explain the 
 	if len(gates) != 2 {
 		t.Fatalf("gates = %d, want 2: %#v", len(gates), gates)
 	}
-	if gates[0].Name != "AC-valid focused Metal trace" || gates[0].Status != "required" {
+	if gates[0].Name != "focused trace capture" || gates[0].Status != "required" {
 		t.Fatalf("gate[0] = %#v", gates[0])
 	}
-	if gates[1].Name != "35B 3-run Go/Python TPS >= 1.00x" || gates[1].Status != "required" {
+	if gates[1].Name != "benchmark parity result" || gates[1].Status != "required" {
 		t.Fatalf("gate[1] = %#v", gates[1])
 	}
 }
@@ -252,8 +252,8 @@ func TestCodexAssistantBlockedGatesCoalesceBlockedPrecondition(t *testing.T) {
 	text := `Still blocked on external prerequisite.
 
 Missing completion gates:
-- AC-valid focused Metal trace
-- 35B 3-run Go/Python TPS >= 1.00x
+- focused trace capture
+- benchmark parity result
 
 Ready evidence/prep:
 - Harness syntax preflight passed.`
@@ -262,7 +262,7 @@ Ready evidence/prep:
 	if !hasGate(gates, "Blocked precondition", "blocked") {
 		t.Fatalf("blocked gate missing: %#v", gates)
 	}
-	if !hasGate(gates, "AC-valid focused Metal trace", "missing") {
+	if !hasGate(gates, "focused trace capture", "missing") {
 		t.Fatalf("missing gate not parsed: %#v", gates)
 	}
 	if !hasGate(gates, "Harness syntax preflight passed.", "complete") {
@@ -335,7 +335,7 @@ func TestCodexGoalCompletionGatesMultipleObjectives(t *testing.T) {
 				"type": "message",
 				"role": "assistant",
 				"content": []map[string]any{
-					{"type": "output_text", "text": "Objective is still not achievable in the current state because the required AC-gated evidence is missing.\n\nMissing completion gates:\n- AC-valid focused Metal trace\n- 35B 3-run Go/Python TPS >= 1.00x\n- 27B >= 1.10x and 4B >= 1.05x regression checks\n\nNo update_goal: the objective is not complete."},
+					{"type": "output_text", "text": "Objective is still not achievable in the current state because required external evidence is missing.\n\nMissing completion gates:\n- focused trace capture\n- benchmark parity result\n- regression checks\n\nNo update_goal: the objective is not complete."},
 				},
 			},
 		},
@@ -348,10 +348,10 @@ func TestCodexGoalCompletionGatesMultipleObjectives(t *testing.T) {
 	if len(sess.Goals) != 2 {
 		t.Fatalf("goals = %d, want 2: %#v", len(sess.Goals), sess.Goals)
 	}
-	if hasGoalGate(sess.Goals[0], "AC-valid focused Metal trace", "missing") {
+	if hasGoalGate(sess.Goals[0], "focused trace capture", "missing") {
 		t.Fatalf("missing gate attached to old objective: %#v", sess.Goals[0].CompletionGates)
 	}
-	if !hasGoalGate(sess.Goals[1], "AC-valid focused Metal trace", "missing") {
+	if !hasGoalGate(sess.Goals[1], "focused trace capture", "missing") {
 		t.Fatalf("missing gate not attached to active objective: %#v", sess.Goals[1].CompletionGates)
 	}
 }
