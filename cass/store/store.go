@@ -496,7 +496,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 	// FTS5 match clause.
 	if req.Query != "" {
 		where = append(where, "session_fts MATCH ?")
-		args = append(args, req.Query)
+		args = append(args, ftsQuery(req.Query))
 	}
 	if req.Filters.Agent != "" {
 		where = append(where, agentFilter("s.agent"))

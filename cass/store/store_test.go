@@ -56,7 +56,7 @@ func TestBatchIndexAndSearch(t *testing.T) {
 			EndedAt:   time.Now(),
 			Messages: []cass.Message{
 				{Role: "user", Content: "write a migration to add users table"},
-				{Role: "assistant", Content: "here's the SQL migration"},
+				{Role: "assistant", Content: "here's the SQL migration for github.com/tmc/gocp"},
 			},
 		},
 	}
@@ -108,6 +108,12 @@ func TestBatchIndexAndSearch(t *testing.T) {
 			wantCount: 1,
 			wantFirst: "s2",
 		},
+		{
+			name:      "search punctuation",
+			req:       cass.SearchRequest{Query: "github.com/tmc/gocp", Limit: 10},
+			wantCount: 1,
+			wantFirst: "s3",
+		},
 	}
 
 	for _, tt := range tests {
@@ -123,6 +129,37 @@ func TestBatchIndexAndSearch(t *testing.T) {
 				t.Errorf("first hit %q, want %q", result.Hits[0].SessionID, tt.wantFirst)
 			}
 		})
+	}
+}
+
+func TestStandaloneBackendSearchPunctuation(t *testing.T) {
+	s, err := NewWithConfig(BackendConfig{Kind: BackendSQLite, Path: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	ctx := context.Background()
+	if err := s.BatchIndex(ctx, []cass.Session{{
+		ID:        "path-1",
+		Agent:     "codex-cli",
+		Title:     "Path search",
+		Workspace: "/home/user/gocp",
+		StartedAt: time.Unix(100, 0),
+		EndedAt:   time.Unix(200, 0),
+		Messages: []cass.Message{
+			{Role: "user", Content: "look at github.com/tmc/gocp before editing"},
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.Search(ctx, cass.SearchRequest{Query: "github.com/tmc/gocp", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalCount != 1 || len(result.Hits) != 1 || result.Hits[0].SessionID != "path-1" {
+		t.Fatalf("Search = %+v, want path-1", result)
 	}
 }
 
