@@ -19,6 +19,7 @@ var (
 	sinceFlag  = flag.String("since", "7d", "Search sessions modified within duration")
 	oneFlag    = flag.Bool("1", false, "Show only the most recent match")
 	clipFlag   = flag.Bool("clip", true, "Use clipboard as search query (pbpaste)")
+	pathsFlag  = flag.Bool("paths", false, "Print raw session file paths instead of resume commands")
 )
 
 func main() {
@@ -90,6 +91,10 @@ func run() error {
 		bin, args := resumeInvocation(r.entry)
 		if *launchFlag {
 			return launchAgent(bin, args, r.target)
+		}
+		if *pathsFlag {
+			fmt.Println(r.entry.FullPath)
+			continue
 		}
 		fmt.Println(renderResumeCommand(r.target, bin, args))
 	}

@@ -15,6 +15,7 @@
 //	-since dur   Only consider sessions modified within this duration (default 7d).
 //	-1           Print only the single most recent match.
 //	-clip        Use the clipboard contents as the query when no args given (default true).
+//	-paths       Print raw session file paths instead of resume commands.
 //
 // # Examples
 //
