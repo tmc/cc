@@ -4,7 +4,7 @@ Formal specification of entities, relationships, and data flows in the
 Claude Code usage tracking system. Derived from empirical analysis of
 JSONL session files, Proxyman HAR captures, and Claude Code source code.
 
-Version: 4 (2026-02-19)
+Version: 5 (2026-05-12)
 
 ## Notation
 
@@ -219,6 +219,76 @@ The fork's first new entry has `parentUuid` pointing to a UUID that
 exists in **both** files (the copied history). This is the only
 structural link back to the source.
 
+### V12: Job
+
+A daemon-supervised Claude Code run stored at
+`~/.claude/jobs/<shortId>/`. A job wraps a single Session: `shortId` is
+the first 8 chars of the session UUID. The daemon writes a snapshot of
+state to `state.json` and an append-only `timeline.jsonl` of state
+transitions.
+
+    ID:         shortId (8-hex prefix of sessionId)
+    Source:     ~/.claude/jobs/<shortId>/state.json
+    Storage:    state.json (snapshot) + timeline.jsonl (transitions)
+    Lifecycle:  created when daemon launches a job; survives session reuse
+
+Key state fields:
+
+    sessionId       authoritative FK to V1.Session
+    resumeSessionId session being resumed (often == sessionId)
+    intent          user-provided prompt that triggered the job
+    state           lifecycle marker ("running", "done", ...)
+    tempo           cadence hint ("idle", ...)
+    template        backend template ("claude")
+    backend         executor ("daemon")
+    cliVersion      Claude Code version at job creation
+    cwd, originCwd  working dir at execution / original launch
+    linkScanPath    JSONL the daemon scans for inter-session links
+    linkScanOffset  byte offset of last scan (resumable)
+    output.result   summary string written by the daemon at completion
+
+Empty job directories occur transiently (job created but no state
+written yet) and are skipped by collectors.
+
+### V12b: GoalStatus (attachment)
+
+Native Claude Code goals are emitted as Entry rows of `type:"attachment"`
+with `attachment.type:"goal_status"`. The first emission for a goal sets
+`sentinel:true`; subsequent emissions update `met` and may include a
+`reason` string explaining the verdict. Goals are keyed by `condition`
+text within a session.
+
+    Source:     Entry.Attachment when Attachment.Type == "goal_status"
+    Fields:     condition (string), met (bool), reason (string), sentinel (bool)
+    Collapse:   group by condition; status=completed iff any emission has met=true
+
+Cass extracts these into V1.Session.goals_json so they share the existing
+goal_count / active_goal_count / completed_goal_count surface and FTS
+indexing path with goals derived from prose-style goal blocks.
+
+### V13: AgentDef
+
+A user-defined agent template stored at `~/.claude/agents/<name>.json`.
+Definitions under `~/.claude/agents/.disabled/` are inactive but still
+indexed. Distinct from V3 SubagentSession: AgentDef is the *template*;
+SubagentSession is one runtime invocation. The two are not yet linked
+authoritatively (no shared ID); a heuristic edge by name is possible.
+
+    ID:         name (e.g. "sitrep-agent")
+    Source:     ~/.claude/agents/[.disabled/]<name>.json
+    Disabled:   path contains ".disabled/" segment
+
+Key fields:
+
+    description       one-line summary
+    triggers          {keywords[], patterns[]} that route requests
+    capabilities[]    free-form descriptions of what the agent does
+    tools[]           expected Tool surface (Bash, Read, Grep, ...)
+    outputFormats[]   "terminal", "json", "markdown", "audio"
+    workflow[]        ordered steps the agent runs
+    command           shell invocation that implements the agent
+    flags             map of CLI flags the command accepts
+
 ---
 
 ## 3. Edge Types
@@ -418,6 +488,33 @@ Stored in `session_mapping` table as (iterm_session, claude_session) pairs.
     Cardinality: N:1 (many forks of one original)
     Confidence:  authoritative
     Breaks:      only discoverable by UUID overlap analysis across files
+
+### E18: Job —[wraps]→ Session
+
+    Join:        Job.sessionId == Session.ID
+    Cardinality: N:1 (a session may be wrapped by multiple jobs over time,
+                 e.g. successive --resume runs under the daemon)
+    Confidence:  authoritative
+    Breaks:      sessionId missing from state.json (early-life or corrupted
+                 job directories); session not yet indexed by cass
+
+### E19: Job —[resumes]→ Session
+
+    Join:        Job.resumeSessionId == Session.ID
+    Cardinality: N:1
+    Confidence:  authoritative
+    Breaks:      degenerate when resumeSessionId == sessionId (the common
+                 case for fresh jobs); only meaningful when the values differ
+
+### E20: SubagentSession —[instance_of]→ AgentDef (heuristic)
+
+    Join:        SubagentSession.AgentType == AgentDef.Name (lossy)
+    Cardinality: N:1
+    Confidence:  heuristic
+    Breaks:      agent types referenced by sessions but not present on disk
+                 (deleted, renamed, or shipped with the CLI rather than the
+                 user's ~/.claude/agents); types resolved via team config
+                 instead of standalone agent definitions
 
 ---
 

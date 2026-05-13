@@ -531,6 +531,45 @@ func (s *Service) SubagentRunsSummary(ctx context.Context) (store.SubagentRunSum
 	return s.store.SubagentRunsSummary(ctx)
 }
 
+// IndexJobs scans ~/.claude/jobs/<shortId>/state.json and upserts each job.
+// Pass an empty root to use the default location. Returns the count indexed.
+func (s *Service) IndexJobs(ctx context.Context, root string) (int, error) {
+	jobs, err := collector.ScanJobs(root)
+	if err != nil {
+		return 0, fmt.Errorf("scan jobs: %w", err)
+	}
+	for _, j := range jobs {
+		if err := s.store.SaveJob(ctx, j); err != nil {
+			s.log.Warn("save job", "short_id", j.ShortID, "err", err)
+		}
+	}
+	return len(jobs), nil
+}
+
+// Jobs returns all indexed jobs.
+func (s *Service) Jobs(ctx context.Context) ([]store.Job, error) {
+	return s.store.Jobs(ctx)
+}
+
+// IndexAgentDefs walks ~/.claude/agents and upserts each definition.
+func (s *Service) IndexAgentDefs(ctx context.Context, root string) (int, error) {
+	defs, err := collector.ScanAgentDefs(root)
+	if err != nil {
+		return 0, fmt.Errorf("scan agent defs: %w", err)
+	}
+	for _, a := range defs {
+		if err := s.store.SaveAgentDef(ctx, a); err != nil {
+			s.log.Warn("save agent def", "name", a.Name, "err", err)
+		}
+	}
+	return len(defs), nil
+}
+
+// AgentDefs returns all indexed agent definitions.
+func (s *Service) AgentDefs(ctx context.Context) ([]store.AgentDef, error) {
+	return s.store.AgentDefs(ctx)
+}
+
 // Close releases resources.
 func (s *Service) Close() error {
 	return s.store.Close()

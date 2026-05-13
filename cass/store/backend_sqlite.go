@@ -74,7 +74,7 @@ func (b *sqliteBackend) migrate() error {
 			tokenize="%s"
 		);`, b.tokenizer)
 
-	schema := sessionsSchema + ftsCreate + triggersSchema
+	schema := sessionsSchema + jobsAgentsSchema + ftsCreate + triggersSchema
 	if _, err := b.db.Exec(schema); err != nil {
 		return err
 	}

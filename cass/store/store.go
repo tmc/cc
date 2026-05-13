@@ -236,6 +236,8 @@ func (s *Store) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_subagent_runs_model ON subagent_runs(model);
 		CREATE INDEX IF NOT EXISTS idx_subagent_runs_agent_type ON subagent_runs(agent_type);
 
+	` + jobsAgentsSchema + `
+
 		CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
 			title,
 			content,

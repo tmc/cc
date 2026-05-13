@@ -180,8 +180,12 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 
 	// Non-fatal: team configs may not exist.
 	teamConfigCount := 0
+	jobCount := 0
+	agentDefCount := 0
 	if !targeted {
 		teamConfigCount, _ = svc.IndexTeamConfigs(ctx, "")
+		jobCount, _ = svc.IndexJobs(ctx, "")
+		agentDefCount, _ = svc.IndexAgentDefs(ctx, "")
 	}
 
 	if jsonOut {
@@ -191,6 +195,8 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 			"sessionv2_requests": sessionV2Count,
 			"artifact_requests":  artifactCount,
 			"team_configs":       teamConfigCount,
+			"jobs":               jobCount,
+			"agent_defs":         agentDefCount,
 		})
 	}
 	fmt.Printf("indexed %d sessions\n", count)
@@ -205,6 +211,12 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	}
 	if teamConfigCount > 0 {
 		fmt.Printf("indexed %d team configs\n", teamConfigCount)
+	}
+	if jobCount > 0 {
+		fmt.Printf("indexed %d jobs\n", jobCount)
+	}
+	if agentDefCount > 0 {
+		fmt.Printf("indexed %d agent defs\n", agentDefCount)
 	}
 	return nil
 }
