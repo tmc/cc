@@ -122,6 +122,19 @@ func resolveMatch(m cc.IndexEntry) resolvedMatch {
 	}
 	if r.summary.GitCommonDir != "" && dirExists(r.summary.GitCommonDir) {
 		r.target = r.summary.GitCommonDir
+		return r
+	}
+	// Nothing recorded still exists on disk. The default ProjectPath comes
+	// from naively decoding the encoded session directory name, where '-'
+	// is ambiguous (literal '-' vs path separator). If that decoded path
+	// also doesn't exist, prefer the session's recorded cwd verbatim — at
+	// least it matches what was actually written.
+	if !dirExists(r.target) {
+		if r.summary.CWD != "" {
+			r.target = r.summary.CWD
+		} else if len(r.summary.DistinctCWDs) > 0 {
+			r.target = r.summary.DistinctCWDs[len(r.summary.DistinctCWDs)-1]
+		}
 	}
 	return r
 }
@@ -307,11 +320,44 @@ func resumeInvocation(m cc.IndexEntry) (string, []string) {
 }
 
 func renderResumeCommand(projectPath, bin string, args []string) string {
-	cmd := strings.TrimSpace(strings.Join(append([]string{bin}, args...), " "))
+	parts := append([]string{bin}, args...)
+	for i, p := range parts {
+		parts[i] = shellQuote(p)
+	}
+	cmd := strings.TrimSpace(strings.Join(parts, " "))
 	if projectPath == "" {
 		return cmd
 	}
-	return fmt.Sprintf("cd %s; %s", projectPath, cmd)
+	return fmt.Sprintf("cd %s; %s", shellQuote(projectPath), cmd)
+}
+
+// shellQuote wraps s in single quotes for POSIX shells when it contains any
+// character that the shell would interpret. Single quotes inside s are escaped
+// as '\''.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	safe := true
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z',
+			c >= 'A' && c <= 'Z',
+			c >= '0' && c <= '9',
+			c == '_', c == '-', c == '.', c == '/', c == ':', c == '@', c == '+', c == ',', c == '=':
+			// safe shell-bareword character
+		default:
+			safe = false
+		}
+		if !safe {
+			break
+		}
+	}
+	if safe {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func launchAgent(bin string, args []string, projectPath string) error {

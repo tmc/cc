@@ -67,6 +67,22 @@ func TestRenderResumeCommand(t *testing.T) {
 	}
 }
 
+func TestRenderResumeCommandQuotesSpaces(t *testing.T) {
+	got := renderResumeCommand("/Volumes/My Disk/proj", "claude", []string{"-r", "sid 1"})
+	want := "cd '/Volumes/My Disk/proj'; claude -r 'sid 1'"
+	if got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
+func TestRenderResumeCommandQuotesShellMetachars(t *testing.T) {
+	got := renderResumeCommand("/work/proj's; rm -rf /", "claude", nil)
+	want := `cd '/work/proj'\''s; rm -rf /'; claude`
+	if got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
 func TestResolveMatchPrefersLatestExistingCWD(t *testing.T) {
 	dir := t.TempDir()
 	stale := filepath.Join(dir, "stale-does-not-exist")
