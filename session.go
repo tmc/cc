@@ -62,6 +62,43 @@ type Entry struct {
 	// File history snapshot.
 	Snapshot         json.RawMessage `json:"snapshot,omitempty"`
 	IsSnapshotUpdate bool            `json:"isSnapshotUpdate,omitempty"`
+
+	// Attachment carries typed event payloads emitted by the CLI itself
+	// (not the model). Known types include "goal_status", "skill_listing",
+	// "task_reminder", "command_permissions", "deferred_tools_delta",
+	// "edited_text_file", "queued_command".
+	Attachment *Attachment `json:"attachment,omitempty"`
+}
+
+// Attachment is a CLI-emitted event payload attached to an entry.
+// The Type field tags the variant; type-specific fields are populated when
+// recognized, and Raw preserves the original JSON for forward compatibility.
+type Attachment struct {
+	Type string `json:"type"`
+
+	// goal_status fields. See https://go.dev/doc/comment — these are zero
+	// when the attachment is a different variant.
+	Condition string `json:"condition,omitempty"`
+	Met       bool   `json:"met,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Sentinel  bool   `json:"sentinel,omitempty"`
+
+	// Raw is the full original attachment JSON, preserved for variants we
+	// do not yet have typed fields for.
+	Raw json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON keeps the raw payload alongside the typed decode so callers
+// can recover fields specific to less common attachment variants.
+func (a *Attachment) UnmarshalJSON(data []byte) error {
+	type alias Attachment
+	var v alias
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*a = Attachment(v)
+	a.Raw = append(a.Raw[:0], data...)
+	return nil
 }
 
 // Message is the core message object with role and content.
