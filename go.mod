@@ -8,7 +8,6 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/marcboeker/go-duckdb v1.8.5
-	github.com/tmc/misc/proxyman v0.0.0-00010101000000-000000000000
 	github.com/tmc/tokencount v0.0.0-20251120051056-e3c81af3140e
 	modernc.org/sqlite v1.45.0
 )
@@ -53,5 +52,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/tmc/misc/proxyman => ../misc/proxyman

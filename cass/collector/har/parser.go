@@ -3,6 +3,7 @@ package har
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -310,6 +311,17 @@ func computeSourceHash(requestID, sourcePath string) string {
 // ScanDir walks a directory for Proxyman HAR export files and returns parsed
 // API requests. Non-Anthropic requests and unparseable files are silently skipped.
 func ScanDir(dir string) ([]cass.APIRequest, error) {
+	return ScanDirContext(context.Background(), dir)
+}
+
+// ScanDirContext is like ScanDir but stops early when ctx is canceled.
+func ScanDirContext(ctx context.Context, dir string) ([]cass.APIRequest, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read dir %s: %w", dir, err)
@@ -317,6 +329,9 @@ func ScanDir(dir string) ([]cass.APIRequest, error) {
 
 	var results []cass.APIRequest
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if entry.IsDir() {
 			continue
 		}

@@ -1,6 +1,8 @@
 package har
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +15,33 @@ func testHARDir(t *testing.T) string {
 		t.Skipf("sample HAR dir not available: %s", dir)
 	}
 	return dir
+}
+
+func TestScanDirContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ScanDirContext(ctx, t.TempDir())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ScanDirContext error = %v, want context canceled", err)
+	}
+}
+
+func TestScanArtifactDirsContextCanceled(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "session"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "session", "proxy-traffic.1.jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ScanArtifactDirsContext(ctx, root)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ScanArtifactDirsContext error = %v, want context canceled", err)
+	}
 }
 
 func TestParseFile_Classifier(t *testing.T) {

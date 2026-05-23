@@ -10,7 +10,9 @@ go test ./...
 go vet ./...
 ```
 
-`cmd/cass` requires SQLite via `modernc.org/sqlite` (pure Go, no CGO).
+`cmd/cass` uses SQLite via `modernc.org/sqlite` by default (pure Go, no CGO).
+The DuckDB backend is experimental and only builds when explicitly requested
+with the `duckdb` build tag.
 
 ## Code style
 

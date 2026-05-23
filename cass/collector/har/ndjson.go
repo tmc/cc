@@ -2,6 +2,7 @@ package har
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -75,6 +76,18 @@ func ParseArtifactFile(path string) ([]cass.APIRequest, error) {
 // each file. Non-Anthropic entries and parse errors are silently skipped.
 // The default root is ~/.it2/sessions; pass an override for testing.
 func ScanArtifactDirs(root string) ([]cass.APIRequest, error) {
+	return ScanArtifactDirsContext(context.Background(), root)
+}
+
+// ScanArtifactDirsContext is like ScanArtifactDirs but stops early when ctx is
+// canceled.
+func ScanArtifactDirsContext(ctx context.Context, root string) ([]cass.APIRequest, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if root == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -91,6 +104,9 @@ func ScanArtifactDirs(root string) ([]cass.APIRequest, error) {
 
 	var all []cass.APIRequest
 	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		reqs, err := ParseArtifactFile(path)
 		if err != nil {
 			continue // skip unreadable files
