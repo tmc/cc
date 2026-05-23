@@ -262,7 +262,7 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Look up the session's source path directly by ID.
-	sourcePath, err := s.svc.GetSourcePath(r.Context(), id)
+	sourcePath, err := s.svc.SourcePath(r.Context(), id)
 	if err != nil || sourcePath == "" {
 		writeError(w, fmt.Errorf("session not found: %s", id), http.StatusNotFound)
 		return

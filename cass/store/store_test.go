@@ -201,7 +201,7 @@ func TestMetadata(t *testing.T) {
 	if err := s.SetMeta(ctx, "schema_version", "1"); err != nil {
 		t.Fatal(err)
 	}
-	v, err := s.GetMeta(ctx, "schema_version")
+	v, err := s.Meta(ctx, "schema_version")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestMetadata(t *testing.T) {
 	}
 
 	// Missing key returns empty string.
-	v, err = s.GetMeta(ctx, "nonexistent")
+	v, err = s.Meta(ctx, "nonexistent")
 	if err != nil {
 		t.Fatal(err)
 	}

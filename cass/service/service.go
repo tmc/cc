@@ -99,7 +99,7 @@ func (s *Service) Detect(ctx context.Context) ([]cass.DetectionResult, error) {
 func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (int, error) {
 	var since time.Time
 	if !force {
-		if ts, err := s.store.GetMeta(ctx, "last_indexed_at"); err == nil && ts != "" {
+		if ts, err := s.store.Meta(ctx, "last_indexed_at"); err == nil && ts != "" {
 			if unix, err := strconv.ParseInt(ts, 10, 64); err == nil {
 				since = time.Unix(unix, 0)
 			}
@@ -192,9 +192,16 @@ func (s *Service) Search(ctx context.Context, req cass.SearchRequest) (*cass.Sea
 	return s.store.Search(ctx, req)
 }
 
+// SourcePath returns the source file path for a session by its ID.
+func (s *Service) SourcePath(ctx context.Context, id string) (string, error) {
+	return s.store.SourcePath(ctx, id)
+}
+
 // GetSourcePath returns the source file path for a session by its ID.
+//
+// Deprecated: use SourcePath.
 func (s *Service) GetSourcePath(ctx context.Context, id string) (string, error) {
-	return s.store.GetSourcePath(ctx, id)
+	return s.SourcePath(ctx, id)
 }
 
 // Session returns indexed metadata for a session.
@@ -208,7 +215,7 @@ func (s *Service) Stats(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	lastIndexed, _ := s.store.GetMeta(ctx, "last_indexed_at")
+	lastIndexed, _ := s.store.Meta(ctx, "last_indexed_at")
 	return map[string]any{
 		"session_count": count,
 		"last_indexed":  lastIndexed,
@@ -372,7 +379,7 @@ func collectorForPath(path string) cass.Collector {
 // Pass an empty root to use the default ~/.it2/sessions location.
 // Returns the number of API requests indexed.
 func (s *Service) IndexArtifactDirs(ctx context.Context, root string) (int, error) {
-	requests, err := har.ScanArtifactDirs(root)
+	requests, err := har.ScanArtifactDirsContext(ctx, root)
 	if err != nil {
 		return 0, fmt.Errorf("scan artifact dirs: %w", err)
 	}
@@ -450,7 +457,7 @@ func (s *Service) IndexSessionV2(ctx context.Context, path string) (int, error) 
 // and indexes the resulting API requests and rate-limit snapshots.
 // Returns the number of API requests indexed.
 func (s *Service) IndexHAR(ctx context.Context, dir string) (int, error) {
-	requests, err := har.ScanDir(dir)
+	requests, err := har.ScanDirContext(ctx, dir)
 	if err != nil {
 		return 0, fmt.Errorf("scan har dir: %w", err)
 	}
