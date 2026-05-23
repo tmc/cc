@@ -1,5 +1,8 @@
 # Build outputs in the repo root (named after their cmd/* source dir)
 /ccfmt
+/cccat
+/ccconfig
+/ccfiles
 /ccloc
 /ccmemory
 /ccresume
@@ -21,6 +24,7 @@ screenshot-*.png
 
 # One-off scratch scripts
 /a.sh
+/output.har.jsonl
 
 
 # beads issue-tracker working tree (local planning state)
