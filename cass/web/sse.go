@@ -47,6 +47,10 @@ func (b *SSEBroker) Subscribe() chan Event {
 // Unsubscribe removes a client.
 func (b *SSEBroker) Unsubscribe(ch chan Event) {
 	b.mu.Lock()
+	if _, ok := b.clients[ch]; !ok {
+		b.mu.Unlock()
+		return
+	}
 	delete(b.clients, ch)
 	b.mu.Unlock()
 	close(ch)
@@ -60,7 +64,9 @@ func (b *SSEBroker) Publish(e Event) {
 		select {
 		case ch <- e:
 		default:
-			// Drop event if client is slow.
+			// Disconnect slow clients instead of silently dropping events.
+			delete(b.clients, ch)
+			close(ch)
 		}
 	}
 }

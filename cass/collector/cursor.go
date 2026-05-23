@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -39,20 +40,7 @@ func (c *Cursor) Detect(ctx context.Context) (*cass.DetectionResult, error) {
 // and produces no sessions.
 func (c *Cursor) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cass.Session) error {
 	defer close(out)
-
-	paths := config.Paths
-	if len(paths) == 0 {
-		root, err := c.root()
-		if err != nil {
-			return err
-		}
-		paths = []string{root}
-	}
-
-	// TODO: implement scanning of Cursor workspace storage / SQLite databases.
-	// For now, this is a clean placeholder skeleton.
-
-	return nil
+	return errors.New("cursor scan not implemented")
 }
 
 func (c *Cursor) root() (string, error) {
