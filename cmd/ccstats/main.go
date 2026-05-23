@@ -125,7 +125,7 @@ func resolveFiles() ([]string, error) {
 	if *sinceFlag == "" {
 		return nil, nil
 	}
-	since, err := parseDuration(*sinceFlag)
+	since, err := cc.ParseDuration(*sinceFlag)
 	if err != nil {
 		return nil, err
 	}
@@ -303,24 +303,4 @@ func fmtDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh%dm", h, m)
 	}
 	return fmt.Sprintf("%dm", m)
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid duration: %s", s)
-	}
-	suffix := s[len(s)-1]
-	numStr := s[:len(s)-1]
-	var num int
-	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
-		return time.ParseDuration(s)
-	}
-	switch suffix {
-	case 'd':
-		return time.Duration(num) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(num) * 7 * 24 * time.Hour, nil
-	default:
-		return time.ParseDuration(s)
-	}
 }

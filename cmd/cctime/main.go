@@ -226,19 +226,19 @@ func fmtToolUse(b cc.ContentBlock) string {
 			FilePath string `json:"file_path"`
 		}
 		json.Unmarshal(b.Input, &inp)
-		return fmt.Sprintf("Edit: %s", shortPath(inp.FilePath))
+		return fmt.Sprintf("Edit: %s", cc.ShortPath(inp.FilePath))
 	case "Write":
 		var inp struct {
 			FilePath string `json:"file_path"`
 		}
 		json.Unmarshal(b.Input, &inp)
-		return fmt.Sprintf("Write: %s", shortPath(inp.FilePath))
+		return fmt.Sprintf("Write: %s", cc.ShortPath(inp.FilePath))
 	case "Read":
 		var inp struct {
 			FilePath string `json:"file_path"`
 		}
 		json.Unmarshal(b.Input, &inp)
-		return fmt.Sprintf("Read: %s", shortPath(inp.FilePath))
+		return fmt.Sprintf("Read: %s", cc.ShortPath(inp.FilePath))
 	case "Grep":
 		var inp struct {
 			Pattern string `json:"pattern"`
@@ -282,14 +282,6 @@ func printWrapped(s string, width int) {
 	}
 }
 
-func shortPath(p string) string {
-	home, _ := os.UserHomeDir()
-	if home != "" && strings.HasPrefix(p, home) {
-		return "~" + p[len(home):]
-	}
-	return p
-}
-
 func shortModel(m string) string {
 	m = strings.TrimPrefix(m, "claude-")
 	if i := strings.LastIndex(m, "-"); i > 10 {
@@ -321,7 +313,7 @@ func fmtDuration(d time.Duration) string {
 func inputs() ([]io.Reader, []io.Closer, error) {
 	args := flag.Args()
 	if *sinceFlag != "" && len(args) == 0 {
-		since, err := parseDuration(*sinceFlag)
+		since, err := cc.ParseDuration(*sinceFlag)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -346,24 +338,4 @@ func inputs() ([]io.Reader, []io.Closer, error) {
 		closers = append(closers, f)
 	}
 	return readers, closers, nil
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid duration: %s", s)
-	}
-	suffix := s[len(s)-1]
-	numStr := s[:len(s)-1]
-	var num int
-	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
-		return time.ParseDuration(s)
-	}
-	switch suffix {
-	case 'd':
-		return time.Duration(num) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(num) * 7 * 24 * time.Hour, nil
-	default:
-		return time.ParseDuration(s)
-	}
 }

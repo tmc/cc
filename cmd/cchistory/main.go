@@ -161,7 +161,7 @@ func findSessionFiles() ([]string, error) {
 	}
 
 	// Parse since duration
-	since, err := parseDuration(*sinceFlag)
+	since, err := cc.ParseDuration(*sinceFlag)
 	if err != nil {
 		return nil, fmt.Errorf("invalid duration: %w", err)
 	}
@@ -451,32 +451,4 @@ func outputMatches(matches []searchMatch) error {
 		}
 	}
 	return nil
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	// Handle extended duration formats: 7d, 2w, 3m, 1y
-	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid duration: %s", s)
-	}
-
-	suffix := s[len(s)-1]
-	numStr := s[:len(s)-1]
-
-	var num int
-	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
-		return time.ParseDuration(s)
-	}
-
-	switch suffix {
-	case 'd':
-		return time.Duration(num) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(num) * 7 * 24 * time.Hour, nil
-	case 'm':
-		return time.Duration(num) * 30 * 24 * time.Hour, nil
-	case 'y':
-		return time.Duration(num) * 365 * 24 * time.Hour, nil
-	default:
-		return time.ParseDuration(s)
-	}
 }

@@ -16,7 +16,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/tmc/cc"
 )
@@ -180,7 +179,7 @@ func truncate(s string, n int) string {
 func inputs() ([]io.Reader, []io.Closer, error) {
 	args := flag.Args()
 	if *sinceFlag != "" && len(args) == 0 {
-		since, err := parseDuration(*sinceFlag)
+		since, err := cc.ParseDuration(*sinceFlag)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -205,24 +204,4 @@ func inputs() ([]io.Reader, []io.Closer, error) {
 		closers = append(closers, f)
 	}
 	return readers, closers, nil
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid duration: %s", s)
-	}
-	suffix := s[len(s)-1]
-	numStr := s[:len(s)-1]
-	var num int
-	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
-		return time.ParseDuration(s)
-	}
-	switch suffix {
-	case 'd':
-		return time.Duration(num) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(num) * 7 * 24 * time.Hour, nil
-	default:
-		return time.ParseDuration(s)
-	}
 }

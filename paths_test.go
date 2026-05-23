@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestEncodePath(t *testing.T) {
@@ -70,6 +71,27 @@ func TestDecodeSegmentsDotPrefix(t *testing.T) {
 func TestDecodeSegmentsMissing(t *testing.T) {
 	if _, ok := DecodeSegments("", []string{"nope-not-here-" + t.Name()}); ok {
 		t.Errorf("DecodeSegments returned ok for missing path")
+	}
+}
+
+func TestParseDuration(t *testing.T) {
+	tests := []struct {
+		in   string
+		want time.Duration
+	}{
+		{"16h", 16 * time.Hour},
+		{"30m", 30 * time.Minute},
+		{"7d", 7 * 24 * time.Hour},
+		{"2w", 14 * 24 * time.Hour},
+	}
+	for _, tt := range tests {
+		got, err := ParseDuration(tt.in)
+		if err != nil {
+			t.Fatalf("ParseDuration(%q): %v", tt.in, err)
+		}
+		if got != tt.want {
+			t.Errorf("ParseDuration(%q) = %v, want %v", tt.in, got, tt.want)
+		}
 	}
 }
 

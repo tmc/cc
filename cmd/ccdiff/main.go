@@ -18,7 +18,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/tmc/cc"
 )
@@ -152,7 +151,7 @@ func printStat(edits []editOp, writes []writeOp) error {
 		if delta < 0 {
 			sign = ""
 		}
-		fmt.Printf(" %-60s | %3d edits  %s%d lines\n", shortPath(f), c[0], sign, delta)
+		fmt.Printf(" %-60s | %3d edits  %s%d lines\n", cc.ShortPath(f), c[0], sign, delta)
 	}
 	fmt.Printf(" %d files changed, %d edits, %d writes\n", len(fileCounts), len(edits), len(writes))
 	return nil
@@ -160,8 +159,8 @@ func printStat(edits []editOp, writes []writeOp) error {
 
 func printDiffs(edits []editOp, writes []writeOp) error {
 	for _, e := range edits {
-		fmt.Printf("\033[1m--- %s\033[0m\n", shortPath(e.file))
-		fmt.Printf("\033[1m+++ %s\033[0m  (%s)\n", shortPath(e.file), e.ts)
+		fmt.Printf("\033[1m--- %s\033[0m\n", cc.ShortPath(e.file))
+		fmt.Printf("\033[1m+++ %s\033[0m  (%s)\n", cc.ShortPath(e.file), e.ts)
 		oldLines := strings.Split(e.oldString, "\n")
 		newLines := strings.Split(e.newString, "\n")
 		for _, l := range oldLines {
@@ -173,7 +172,7 @@ func printDiffs(edits []editOp, writes []writeOp) error {
 		fmt.Println()
 	}
 	for _, w := range writes {
-		fmt.Printf("\033[1m+++ %s\033[0m (new file, %s)\n", shortPath(w.file), w.ts)
+		fmt.Printf("\033[1m+++ %s\033[0m (new file, %s)\n", cc.ShortPath(w.file), w.ts)
 		lines := strings.Split(w.content, "\n")
 		if len(lines) > 20 {
 			for _, l := range lines[:20] {
@@ -190,18 +189,10 @@ func printDiffs(edits []editOp, writes []writeOp) error {
 	return nil
 }
 
-func shortPath(p string) string {
-	home, _ := os.UserHomeDir()
-	if home != "" && strings.HasPrefix(p, home) {
-		return "~" + p[len(home):]
-	}
-	return p
-}
-
 func inputs() ([]io.Reader, []io.Closer, error) {
 	args := flag.Args()
 	if *sinceFlag != "" && len(args) == 0 {
-		since, err := parseDuration(*sinceFlag)
+		since, err := cc.ParseDuration(*sinceFlag)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -226,24 +217,4 @@ func inputs() ([]io.Reader, []io.Closer, error) {
 		closers = append(closers, f)
 	}
 	return readers, closers, nil
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid duration: %s", s)
-	}
-	suffix := s[len(s)-1]
-	numStr := s[:len(s)-1]
-	var num int
-	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
-		return time.ParseDuration(s)
-	}
-	switch suffix {
-	case 'd':
-		return time.Duration(num) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(num) * 7 * 24 * time.Hour, nil
-	default:
-		return time.ParseDuration(s)
-	}
 }

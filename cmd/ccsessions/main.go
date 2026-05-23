@@ -30,7 +30,7 @@ func main() {
 }
 
 func run() error {
-	since, err := parseDuration(*sinceFlag)
+	since, err := cc.ParseDuration(*sinceFlag)
 	if err != nil {
 		return fmt.Errorf("invalid duration %q: %w", *sinceFlag, err)
 	}
@@ -68,7 +68,7 @@ func runIndex(since time.Duration) error {
 	default:
 		for _, e := range entries {
 			ts := e.ModifiedTime().Local().Format("2006-01-02 15:04")
-			proj := shortPath(e.ProjectPath)
+			proj := cc.ShortPath(e.ProjectPath)
 			prompt := collapse(e.FirstPrompt, 120)
 			if e.Summary != "" {
 				prompt = collapse(e.Summary, 120)
@@ -128,7 +128,7 @@ func runFull(since time.Duration) error {
 	default:
 		for _, s := range sessions {
 			ts := s.LastTime.Local().Format("2006-01-02 15:04")
-			proj := shortPath(s.CWD)
+			proj := cc.ShortPath(s.CWD)
 			fmt.Printf("%-16s  %-36s  %-30s  msgs:%d/%d  lines:%d",
 				ts, s.SessionID, proj, s.UserMessages, s.AsstMessages, s.TotalLines)
 			if s.Compactions > 0 {
@@ -149,14 +149,6 @@ func runFull(since time.Duration) error {
 	}
 }
 
-func shortPath(p string) string {
-	home, _ := os.UserHomeDir()
-	if home != "" && strings.HasPrefix(p, home) {
-		return "~" + p[len(home):]
-	}
-	return p
-}
-
 func collapse(s string, max int) string {
 	s = strings.TrimSpace(s)
 	s = strings.Join(strings.Fields(s), " ")
@@ -164,24 +156,4 @@ func collapse(s string, max int) string {
 		return s[:max] + "..."
 	}
 	return s
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid duration: %s", s)
-	}
-	suffix := s[len(s)-1]
-	numStr := s[:len(s)-1]
-	var num int
-	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
-		return time.ParseDuration(s)
-	}
-	switch suffix {
-	case 'd':
-		return time.Duration(num) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(num) * 7 * 24 * time.Hour, nil
-	default:
-		return time.ParseDuration(s)
-	}
 }

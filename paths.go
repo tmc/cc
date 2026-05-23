@@ -1,9 +1,12 @@
 package cc
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // EncodePath converts a filesystem path to Claude Code's project-directory
@@ -14,6 +17,37 @@ import (
 func EncodePath(path string) string {
 	s := strings.ReplaceAll(path, string(filepath.Separator), "-")
 	return strings.ReplaceAll(s, ".", "-")
+}
+
+// ShortPath returns p with the current user's home directory replaced by "~".
+func ShortPath(p string) string {
+	home, _ := os.UserHomeDir()
+	if home != "" && strings.HasPrefix(p, home) {
+		return "~" + p[len(home):]
+	}
+	return p
+}
+
+// ParseDuration parses a time duration, accepting d and w suffixes in addition
+// to the standard library syntax.
+func ParseDuration(s string) (time.Duration, error) {
+	if len(s) < 2 {
+		return 0, fmt.Errorf("invalid duration: %s", s)
+	}
+	suffix := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return time.ParseDuration(s)
+	}
+	switch suffix {
+	case 'd':
+		return time.Duration(num) * 24 * time.Hour, nil
+	case 'w':
+		return time.Duration(num) * 7 * 24 * time.Hour, nil
+	default:
+		return time.ParseDuration(s)
+	}
 }
 
 // ClaudeHome returns the base directory for Claude data.
