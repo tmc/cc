@@ -2,6 +2,7 @@ package cc
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -73,15 +74,19 @@ func decodeEntryLine(line []byte) (Entry, bool) {
 	switch env.Type {
 	case "session_meta":
 		return decodeCodexSessionMeta(env)
+	case "turn_context":
+		return decodeCodexTurnContext(env)
 	case "response_item":
 		return decodeCodexResponseItem(env)
+	case "web_search_call":
+		return decodeCodexWebSearch(env)
 	case "compacted":
 		return Entry{
 			Type:      "system",
 			Subtype:   "compact_boundary",
 			Timestamp: env.Timestamp,
 		}, true
-	case "event_msg", "turn_context", "reasoning", "ghost_snapshot", "web_search_call":
+	case "event_msg", "reasoning", "ghost_snapshot":
 		return Entry{}, false
 	default:
 		return Entry{}, false
@@ -129,6 +134,27 @@ func decodeCodexSessionMeta(env codexEnvelope) (Entry, bool) {
 	}, true
 }
 
+func decodeCodexTurnContext(env codexEnvelope) (Entry, bool) {
+	var payload struct {
+		TurnID string `json:"turn_id"`
+		CWD    string `json:"cwd"`
+	}
+	if err := json.Unmarshal(env.Payload, &payload); err != nil {
+		return Entry{}, false
+	}
+	if payload.CWD == "" {
+		return Entry{}, false
+	}
+	return Entry{
+		Type:      "system",
+		Subtype:   "turn_context",
+		UUID:      payload.TurnID,
+		Timestamp: env.Timestamp,
+		CWD:       payload.CWD,
+		IsMeta:    true,
+	}, true
+}
+
 func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 	var payload struct {
 		Type      string          `json:"type"`
@@ -173,11 +199,14 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 		}
 		return entry, true
 
-	case "function_call", "custom_tool_call":
+	case "function_call", "custom_tool_call", "tool_search_call":
 		toolName := payload.Name
 		toolInput := payload.Input
-		if payload.Type == "function_call" {
+		if payload.Type == "function_call" || payload.Type == "tool_search_call" {
 			toolInput = payload.Arguments
+		}
+		if payload.Type == "tool_search_call" {
+			toolName = "tool_search"
 		}
 		toolUseName := toolName
 		if toolName == "exec_command" || toolName == "shell" {
@@ -204,8 +233,12 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 			},
 		}, true
 
-	case "function_call_output", "custom_tool_call_output":
-		stdout, status, success, errText := parseCodexToolOutput(payload.Output)
+	case "function_call_output", "custom_tool_call_output", "tool_search_output":
+		output := payload.Output
+		if payload.Type == "tool_search_output" && len(output) == 0 {
+			output = env.Payload
+		}
+		stdout, status, success, errText := parseCodexToolOutput(output)
 		content, _ := json.Marshal([]ContentBlock{
 			{
 				Type:      "tool_result",
@@ -245,24 +278,44 @@ func decodeCodexResponseItem(env codexEnvelope) (Entry, bool) {
 
 func decodeCodexWebSearch(env codexEnvelope) (Entry, bool) {
 	var payload struct {
+		Query  string `json:"query"`
+		URL    string `json:"url"`
 		Status string `json:"status"`
 		Action struct {
 			Type    string   `json:"type"`
 			Query   string   `json:"query"`
 			Queries []string `json:"queries"`
+			URL     string   `json:"url"`
 		} `json:"action"`
 	}
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
 		return Entry{}, false
 	}
-	query := payload.Action.Query
+	query := payload.Query
+	if query == "" {
+		query = payload.Action.Query
+	}
 	if query == "" && len(payload.Action.Queries) > 0 {
 		query = payload.Action.Queries[0]
 	}
-	if query == "" {
+	url := payload.URL
+	if url == "" {
+		url = payload.Action.URL
+	}
+	if query == "" && url == "" {
 		return Entry{}, false
 	}
-	input, _ := json.Marshal(map[string]string{"query": query})
+	inputFields := map[string]string{}
+	if query != "" {
+		inputFields["query"] = query
+	}
+	if url != "" {
+		inputFields["url"] = url
+	}
+	if payload.Action.Type != "" {
+		inputFields["action"] = payload.Action.Type
+	}
+	input, _ := json.Marshal(inputFields)
 	content, _ := json.Marshal([]ContentBlock{
 		{
 			Type:  "tool_use",
@@ -684,6 +737,15 @@ func collapseWhitespace(s string, max int) string {
 // ~/.gemini/projects/, and ~/.codex/sessions/.
 // It excludes subagent files and filters by modification time.
 func FindSessionFiles(since time.Duration, project string) ([]string, error) {
+	return FindSessionFilesContext(context.Background(), since, project)
+}
+
+// FindSessionFilesContext is like FindSessionFiles but stops early when ctx is
+// canceled.
+func FindSessionFilesContext(ctx context.Context, since time.Duration, project string) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	ch, err := ClaudeHome()
 	if err != nil {
 		return nil, err
@@ -708,7 +770,13 @@ func FindSessionFiles(since time.Duration, project string) ([]string, error) {
 	}
 
 	for _, dir := range dirs {
-		filepath.Walk(dir.path, func(path string, info os.FileInfo, err error) error {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		err := filepath.Walk(dir.path, func(path string, info os.FileInfo, err error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if err != nil {
 				return nil
 			}
@@ -738,6 +806,9 @@ func FindSessionFiles(since time.Duration, project string) ([]string, error) {
 			files = append(files, path)
 			return nil
 		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	return files, nil
 }

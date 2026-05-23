@@ -96,7 +96,7 @@ func TestResolveMatchPrefersLatestExistingCWD(t *testing.T) {
 		{"sessionId": "s1", "cwd": live},
 	})
 
-	r := resolveMatch(cc.IndexEntry{FullPath: session, ProjectPath: stale})
+	r := resolveMatch("", cc.IndexEntry{FullPath: session, ProjectPath: stale})
 	if r.target != live {
 		t.Fatalf("target = %q, want %q", r.target, live)
 	}
@@ -112,9 +112,94 @@ func TestResolveMatchFallsBackToProjectPath(t *testing.T) {
 		{"sessionId": "s1", "cwd": gone2},
 	})
 
-	r := resolveMatch(cc.IndexEntry{FullPath: session, ProjectPath: dir})
+	r := resolveMatch("", cc.IndexEntry{FullPath: session, ProjectPath: dir})
 	if r.target != dir {
 		t.Fatalf("target = %q, want %q", r.target, dir)
+	}
+}
+
+func TestPreferredProjectPathUsesHomeGoSrcSymlink(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	target := filepath.Join(root, "vol", "go", "src")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(target, "github.com", "tmc", "appledocs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "go"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(home, "go", "src")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	got := preferredProjectPath(filepath.Join(target, "github.com", "tmc", "appledocs"))
+	want := filepath.Join(home, "go", "src", "github.com", "tmc", "appledocs")
+	if got != want {
+		t.Fatalf("preferredProjectPath = %q, want %q", got, want)
+	}
+}
+
+func TestCountOccurrences(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		text  string
+		want  int
+	}{
+		{
+			name:  "case insensitive",
+			query: "rdma",
+			text:  "RDMA setup mentioned rdma twice",
+			want:  2,
+		},
+		{
+			name:  "non overlapping",
+			query: "aa",
+			text:  "aaaa",
+			want:  2,
+		},
+		{
+			name:  "empty query",
+			query: "",
+			text:  "rdma",
+			want:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := countOccurrences(tt.query, tt.text); got != tt.want {
+				t.Fatalf("countOccurrences(%q, %q) = %d, want %d", tt.query, tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFileHasToolMatchCommandAndResult(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := []byte(
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"Bash","input":{"command":"it2 session current"}}]}}` + "\n" +
+			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"052AB527-F732-4D5A-A35D-D72E2EF98137"}]}}` + "\n")
+	if err := os.WriteFile(path, data, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := fileHasToolMatch(path, "it2 session current", "052AB527")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("tool command/result match not found")
+	}
+	ok, err = fileHasToolMatch(path, "it2 session current", "missing-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("unexpected tool command/result match")
 	}
 }
 

@@ -1,13 +1,32 @@
 package cc
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestFindSessionFilesContextCanceled(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_HOME", filepath.Join(root, "claude"))
+	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
+	if err := os.MkdirAll(filepath.Join(root, "claude", "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := FindSessionFilesContext(ctx, time.Hour, "")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("FindSessionFilesContext error = %v, want context canceled", err)
+	}
+}
 
 func TestReadFileCodexCLI(t *testing.T) {
 	tmp := t.TempDir()
@@ -80,8 +99,8 @@ func TestReadFileCodexCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	if len(entries) != 5 {
-		t.Fatalf("len(entries) = %d, want 5", len(entries))
+	if len(entries) != 6 {
+		t.Fatalf("len(entries) = %d, want 6", len(entries))
 	}
 	if entries[0].Subtype != "session_meta" {
 		t.Fatalf("meta subtype = %q, want session_meta", entries[0].Subtype)
@@ -96,7 +115,7 @@ func TestReadFileCodexCLI(t *testing.T) {
 		t.Fatalf("meta origin/source = %q/%q", entries[0].Originator, entries[0].Source)
 	}
 
-	var gotPrompt, gotTool, gotResult bool
+	var gotPrompt, gotTool, gotResult, gotWebSearch bool
 	for _, e := range entries {
 		if e.Message != nil && e.Message.Role == "user" && e.Message.TextContent() == "hello from codex" {
 			gotPrompt = true
@@ -114,6 +133,18 @@ func TestReadFileCodexCLI(t *testing.T) {
 					gotTool = true
 				}
 			}
+			for _, b := range e.Message.ToolUses() {
+				if b.Name != "WebSearch" {
+					continue
+				}
+				var inp struct {
+					Query string `json:"query"`
+				}
+				_ = json.Unmarshal(b.Input, &inp)
+				if inp.Query == "golang" {
+					gotWebSearch = true
+				}
+			}
 		}
 		if e.ToolUseResult != nil && e.ToolUseResult.Stdout == "ok" && e.ToolUseResult.Success {
 			gotResult = true
@@ -124,6 +155,9 @@ func TestReadFileCodexCLI(t *testing.T) {
 	}
 	if !gotTool {
 		t.Fatalf("did not parse shell tool call as Bash")
+	}
+	if !gotWebSearch {
+		t.Fatalf("did not parse top-level web_search_call")
 	}
 	if !gotResult {
 		t.Fatalf("did not parse function_call_output")
@@ -141,6 +175,53 @@ func TestReadFileCodexCLI(t *testing.T) {
 	}
 	if sum.Compactions != 1 {
 		t.Fatalf("summary compactions = %d, want 1", sum.Compactions)
+	}
+}
+
+func TestReadFileCodexTurnContextCWD(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "session.jsonl")
+	const cwd = "/Users/tmc/go/src/github.com/tmc/appledocs"
+
+	writeJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-19T03:47:27.046Z",
+			"type":      "turn_context",
+			"payload": map[string]any{
+				"turn_id": "019e3e58-7c8f-7e20-8e66-9642f7fa292a",
+				"cwd":     cwd,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-19T03:47:28.000Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "he AppKit errors are two separate generic problems"},
+				},
+			},
+		},
+	)
+
+	entries, err := ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+	if entries[0].Subtype != "turn_context" {
+		t.Fatalf("subtype = %q, want turn_context", entries[0].Subtype)
+	}
+	if entries[0].CWD != cwd {
+		t.Fatalf("cwd = %q, want %q", entries[0].CWD, cwd)
+	}
+
+	sum := Summarize(path, entries)
+	if sum.CWD != cwd {
+		t.Fatalf("summary cwd = %q, want %q", sum.CWD, cwd)
 	}
 }
 
@@ -328,6 +409,144 @@ func TestReadFileCodexGoalMode(t *testing.T) {
 	}
 	if sum.ToolUses != 1 {
 		t.Fatalf("summary tool uses = %d, want 1", sum.ToolUses)
+	}
+}
+
+func TestReadFileCodexWebSearchResponseItem(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "session.jsonl")
+
+	writeJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-05T01:28:25Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":   "web_search_call",
+				"status": "completed",
+				"action": map[string]any{
+					"type": "search",
+					"queries": []string{
+						"Apple Developer VZVirtualMachine attachStorageDevice",
+						"VZVirtioFileSystemDeviceConfiguration hot add",
+					},
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-05T01:28:47Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":   "web_search_call",
+				"status": "completed",
+				"action": map[string]any{
+					"type": "open_page",
+					"url":  "https://developer.apple.com/documentation/virtualization/vzvirtualmachine",
+				},
+			},
+		},
+	)
+
+	entries, err := ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+
+	var gotQuery, gotURL bool
+	for _, e := range entries {
+		if e.Message == nil {
+			continue
+		}
+		for _, b := range e.Message.ToolUses() {
+			if b.Name != "WebSearch" {
+				continue
+			}
+			var inp struct {
+				Query  string `json:"query"`
+				URL    string `json:"url"`
+				Action string `json:"action"`
+			}
+			_ = json.Unmarshal(b.Input, &inp)
+			if inp.Action == "search" && strings.Contains(inp.Query, "VZVirtualMachine") {
+				gotQuery = true
+			}
+			if inp.Action == "open_page" && strings.Contains(inp.URL, "vzvirtualmachine") {
+				gotURL = true
+			}
+		}
+	}
+	if !gotQuery {
+		t.Fatalf("did not parse response_item web search query")
+	}
+	if !gotURL {
+		t.Fatalf("did not parse response_item web search URL")
+	}
+}
+
+func TestReadFileCodexToolSearch(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "session.jsonl")
+
+	writeJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-01T16:50:57Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "tool_search_call",
+				"call_id": "call-search",
+				"status":  "completed",
+				"arguments": map[string]any{
+					"query": "browser navigate screenshot local url",
+					"limit": 5,
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-01T16:50:58Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "tool_search_output",
+				"call_id": "call-search",
+				"status":  "completed",
+				"tools": []map[string]any{
+					{"type": "namespace", "name": "mcp__browser__"},
+				},
+			},
+		},
+	)
+
+	entries, err := ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+
+	use := entries[0]
+	if use.Type != "assistant" || use.UUID != "call-search" || use.Message == nil {
+		t.Fatalf("tool search use entry = %#v", use)
+	}
+	uses := use.Message.ToolUses()
+	if len(uses) != 1 || uses[0].Name != "tool_search" {
+		t.Fatalf("tool uses = %#v, want tool_search", uses)
+	}
+	if !strings.Contains(string(uses[0].Input), "browser navigate") {
+		t.Fatalf("tool search input = %s", uses[0].Input)
+	}
+
+	result := entries[1]
+	if result.Type != "user" || result.UUID != "call-search" || result.Message == nil || result.ToolUseResult == nil {
+		t.Fatalf("tool search result entry = %#v", result)
+	}
+	results := result.Message.ToolResults()
+	if len(results) != 1 || results[0].ToolUseID != "call-search" {
+		t.Fatalf("tool results = %#v", results)
+	}
+	if !strings.Contains(result.ToolUseResult.Stdout, "mcp__browser__") {
+		t.Fatalf("tool search stdout = %q", result.ToolUseResult.Stdout)
 	}
 }
 

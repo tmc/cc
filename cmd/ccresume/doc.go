@@ -16,6 +16,9 @@
 //	-1           Print only the single most recent match.
 //	-clip        Use the clipboard contents as the query when no args given (default true).
 //	-paths       Print raw session file paths instead of resume commands.
+//	-has text    Only include sessions whose transcript contains text.
+//	-cmd text    Only include sessions with a tool command containing text.
+//	-result text Only include sessions with a tool result containing text.
 //
 // # Examples
 //
@@ -30,4 +33,8 @@
 // Limit the search window to the last 24 hours:
 //
 //	ccresume -since 24h "auth refactor"
+//
+// Find sessions that ran a command and captured a particular result:
+//
+//	ccresume -cmd "it2 session current" -result 052AB527
 package main
