@@ -102,6 +102,46 @@ func TestResolveMatchPrefersLatestExistingCWD(t *testing.T) {
 	}
 }
 
+func TestResolveMatchPrefersExistingProjectPathOverLaterCWD(t *testing.T) {
+	dir := t.TempDir()
+	project := filepath.Join(dir, "project")
+	nested := filepath.Join(project, "subdir")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	session := filepath.Join(dir, "session.jsonl")
+	writeJSONL(t, session, []map[string]any{
+		{"sessionId": "s1", "cwd": project},
+		{"sessionId": "s1", "cwd": nested},
+	})
+
+	r := resolveMatch("", cc.IndexEntry{FullPath: session, ProjectPath: project})
+	if r.target != project {
+		t.Fatalf("target = %q, want %q", r.target, project)
+	}
+}
+
+func TestResolveMatchIgnoresCodexSessionStorageProjectPath(t *testing.T) {
+	dir := t.TempDir()
+	project := filepath.Join(dir, "project")
+	storage := filepath.Join(dir, ".codex", "sessions", "2026", "05", "23")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(storage, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	session := filepath.Join(storage, "rollout-2026-05-23T00-00-00-s1.jsonl")
+	writeJSONL(t, session, []map[string]any{
+		{"sessionId": "s1", "cwd": project},
+	})
+
+	r := resolveMatch("", cc.IndexEntry{FullPath: session, ProjectPath: storage})
+	if r.target != project {
+		t.Fatalf("target = %q, want %q", r.target, project)
+	}
+}
+
 func TestResolveMatchFallsBackToProjectPath(t *testing.T) {
 	dir := t.TempDir()
 	gone := filepath.Join(dir, "gone-1")

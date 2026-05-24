@@ -126,6 +126,13 @@ func run() error {
 		sortIndexMatches(query, matches, curGitCommonDir)
 		matches = matches[:1]
 	}
+	if *pathsFlag && !*launchFlag {
+		sortIndexMatches(query, matches, curGitCommonDir)
+		for _, m := range matches {
+			fmt.Println(m.FullPath)
+		}
+		return nil
+	}
 
 	resolved := make([]resolvedMatch, len(matches))
 	for i, m := range matches {
@@ -149,10 +156,6 @@ func run() error {
 		bin, args := resumeInvocation(r.entry)
 		if *launchFlag {
 			return launchAgent(bin, args, r.target)
-		}
-		if *pathsFlag {
-			fmt.Println(r.entry.FullPath)
-			continue
 		}
 		fmt.Println(renderResumeCommand(r.target, bin, args))
 	}
@@ -195,6 +198,10 @@ func resolveMatch(query string, m cc.IndexEntry) resolvedMatch {
 	if n := countFileOccurrences(query, m.FullPath); n > r.occurrences {
 		r.occurrences = n
 	}
+	if canPreferProjectPath(query, m) && dirExists(r.target) {
+		r.target = preferredProjectPath(r.target)
+		return r
+	}
 	for i := len(r.summary.DistinctCWDs) - 1; i >= 0; i-- {
 		if dirExists(r.summary.DistinctCWDs[i]) {
 			r.target = preferredProjectPath(r.summary.DistinctCWDs[i])
@@ -219,6 +226,16 @@ func resolveMatch(query string, m cc.IndexEntry) resolvedMatch {
 	}
 	r.target = preferredProjectPath(r.target)
 	return r
+}
+
+func canPreferProjectPath(query string, m cc.IndexEntry) bool {
+	if m.ProjectPath == "" {
+		return false
+	}
+	if filepath.IsAbs(query) && m.ProjectPath == query {
+		return true
+	}
+	return !strings.Contains(m.FullPath, string(filepath.Separator)+".codex"+string(filepath.Separator)+"sessions"+string(filepath.Separator))
 }
 
 func preferredProjectPath(path string) string {
