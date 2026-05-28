@@ -2,11 +2,21 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/tmc/cc.svg)](https://pkg.go.dev/github.com/tmc/cc)
 
-A Go toolkit for working with Claude Code session data.
+A Go toolkit for working with Claude Code and OpenAI Codex CLI session
+data. `cc` provides a small library for parsing session JSONL plus a
+collection of CLI tools for generating session IDs, formatting messages,
+replaying, searching, and indexing sessions across both agents.
 
-`cc` provides a small library for parsing Claude Code (and Codex)
-session JSONL plus a collection of CLI tools for searching, replaying,
-formatting, and indexing those sessions.
+## Quickstart
+
+The core tools compose as a Unix pipeline:
+
+```sh
+# Create a session, format a message, replay it later.
+export SID=$(mksid)
+echo "user input" | cmsg | tee session-$SID.ndjson
+creplay $SID
+```
 
 ## Install
 
@@ -14,28 +24,26 @@ formatting, and indexing those sessions.
 go install github.com/tmc/cc/cmd/...@latest
 ```
 
-This installs every binary in `cmd/`. To install just one:
+This installs every binary in `cmd/` (currently 27). To install just one:
 
 ```
 go install github.com/tmc/cc/cmd/ccfmt@latest
 ```
 
-## Quickstart
+## Streaming and NDJSON
 
-```sh
-# Show the most recent sessions for the current project.
-ccsessions
+The tools read and write NDJSON on stdin/stdout, one JSON object per
+line. They are designed for Unix pipes: no input buffering, no batching,
+output flushed per line. `cmsg`, `ccfmt`, `cccat`, and friends all
+operate as filters and compose with `tee`, `grep`, `jq`, and `xargs`.
 
-# Format a session as readable markdown.
-ccfmt -format markdown ~/.claude/projects/<encoded>/sid.jsonl > session.md
+## Session IDs
 
-# Resume a recent session matching a query.
-ccresume "kafka rebalance"
-
-# Search every indexed session across every agent.
-cass index
-cass search "retry policy"
-```
+`mksid` generates timestamp-sortable UUIDs that embed a hash of the
+current git repo. IDs sort chronologically by creation time, and the
+embedded repo hash correlates sessions back to a working tree without
+extra lookups. Use them as filenames, log keys, or correlation IDs
+across `cc` tools.
 
 ## Library
 
@@ -69,58 +77,58 @@ the full API.
 
 | Command | Description |
 |---|---|
-| [`ccsessions`](cmd/ccsessions) | List and summarize Claude Code sessions. |
-| [`ccfmt`](cmd/ccfmt) | Format coding session transcripts (text or markdown). |
-| [`creplay`](cmd/creplay) | Replay a Claude Code session in a terminal UI. |
-| [`cccat`](cmd/cccat) | Filter and display Claude Code session entries. |
-| [`cchistory`](cmd/cchistory) | Search through Claude Code session history. |
-| [`cctime`](cmd/cctime) | Show a timeline of events in a Claude Code session. |
+| [`ccsessions`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccsessions) | List and summarize Claude Code sessions. |
+| [`ccfmt`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccfmt) | Format coding session transcripts (text or markdown). |
+| [`creplay`](https://pkg.go.dev/github.com/tmc/cc/cmd/creplay) | Replay a Claude Code session in a terminal UI. |
+| [`cccat`](https://pkg.go.dev/github.com/tmc/cc/cmd/cccat) | Filter and display Claude Code session entries. |
+| [`cchistory`](https://pkg.go.dev/github.com/tmc/cc/cmd/cchistory) | Search through Claude Code session history. |
+| [`cctime`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctime) | Show a timeline of events in a Claude Code session. |
 
 ### Search, resume, indexing
 
 | Command | Description |
 |---|---|
-| [`cass`](cmd/cass) | Index and search AI coding-agent session history (Claude Code, Codex, etc.). |
-| [`ccresume`](cmd/ccresume) | Find a recent Claude Code session and resume it. |
-| [`ccstats`](cmd/ccstats) | Report token usage, tool counts, and timing for sessions. |
-| [`ccloc`](cmd/ccloc) | Print the Claude Code agent cache location for a directory. |
+| [`cass`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | Index and search AI coding-agent session history (Claude Code, Codex, etc.). |
+| [`ccresume`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccresume) | Find a recent Claude Code session and resume it. |
+| [`ccstats`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccstats) | Report token usage, tool counts, and timing for sessions. |
+| [`ccloc`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccloc) | Print the Claude Code agent cache location for a directory. |
 
 ### Inspection and analysis
 
 | Command | Description |
 |---|---|
-| [`ccdiff`](cmd/ccdiff) | Show file changes made during Claude Code sessions. |
-| [`ccfiles`](cmd/ccfiles) | Extract file operations from Claude Code sessions. |
-| [`ccerr`](cmd/ccerr) | Find errors, failures, and retries in Claude Code sessions. |
-| [`cctool`](cmd/cctool) | Extract tool use details from Claude Code sessions. |
+| [`ccdiff`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccdiff) | Show file changes made during Claude Code sessions. |
+| [`ccfiles`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccfiles) | Extract file operations from Claude Code sessions. |
+| [`ccerr`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccerr) | Find errors, failures, and retries in Claude Code sessions. |
+| [`cctool`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctool) | Extract tool use details from Claude Code sessions. |
 
 ### Authoring and integration
 
 | Command | Description |
 |---|---|
-| [`cmsg`](cmd/cmsg) | Format stdin as Claude messages in NDJSON format. |
-| [`mksid`](cmd/mksid) | Generate timestamp-sorted session IDs with git repo context. |
-| [`cchandoff`](cmd/cchandoff) | Build a cross-tool handoff prompt from a prior session. |
-| [`ccimport`](cmd/ccimport) | Convert Claude Code session JSONL into Gemini CLI chat format. |
-| [`ccmemory`](cmd/ccmemory) | List and read Claude Code auto-memory files. |
-| [`ccconfig`](cmd/ccconfig) | Manage Claude Code configuration. |
+| [`cmsg`](https://pkg.go.dev/github.com/tmc/cc/cmd/cmsg) | Format stdin as Claude messages in NDJSON format. |
+| [`mksid`](https://pkg.go.dev/github.com/tmc/cc/cmd/mksid) | Generate timestamp-sorted session IDs with git repo context. |
+| [`cchandoff`](https://pkg.go.dev/github.com/tmc/cc/cmd/cchandoff) | Build a cross-tool handoff prompt from a prior session. |
+| [`ccimport`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccimport) | Convert Claude Code session JSONL into Gemini CLI chat format. |
+| [`ccmemory`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccmemory) | List and read Claude Code auto-memory files. |
+| [`ccconfig`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccconfig) | Manage Claude Code configuration. |
 
 ### Multi-agent coordination
 
 | Command | Description |
 |---|---|
-| [`ccteam`](cmd/ccteam) | Manage Claude Code agent teams. |
-| [`ccagent`](cmd/ccagent) | Inspect agent status and coordinate agents. |
-| [`ccspawn`](cmd/ccspawn) | Spawn Claude Code agent processes in teammate mode. |
-| [`ccinbox`](cmd/ccinbox) | Read and write agent inbox messages. |
-| [`cctask`](cmd/cctask) | Manage persistent tasks for agent teams. |
-| [`ccapprove`](cmd/ccapprove) | Handle plan and permission approval workflows. |
+| [`ccteam`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccteam) | Manage Claude Code agent teams. |
+| [`ccagent`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccagent) | Inspect agent status and coordinate agents. |
+| [`ccspawn`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccspawn) | Spawn Claude Code agent processes in teammate mode. |
+| [`ccinbox`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccinbox) | Read and write agent inbox messages. |
+| [`cctask`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctask) | Manage persistent tasks for agent teams. |
+| [`ccapprove`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccapprove) | Handle plan and permission approval workflows. |
 
 ### Meta
 
 | Command | Description |
 |---|---|
-| [`cctl`](cmd/cctl) | Unified control command dispatching to the others (`cctl m` ≡ `cmsg`, `cctl r` ≡ `creplay`, etc.). |
+| [`cctl`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctl) | Unified control command dispatching to the others (`cctl m` ≡ `cmsg`, `cctl r` ≡ `creplay`, etc.). |
 
 Run any binary with `-h` for full flag documentation, or read its
 [godoc](https://pkg.go.dev/github.com/tmc/cc) page.
@@ -129,6 +137,13 @@ Run any binary with `-h` for full flag documentation, or read its
 
 A small Vim plugin under [`vim/`](vim/) provides syntax highlighting
 and filetype detection for Claude Code session JSONL files.
+
+## See also
+
+- [`cass/DATAMODEL.md`](cass/DATAMODEL.md) — formal data model for the
+  session index (node and edge types).
+- [`docs/TRACE_INTEROP.md`](docs/TRACE_INTEROP.md) — trace interop
+  notes for cross-agent session data.
 
 ## Contributing
 
