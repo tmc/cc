@@ -86,17 +86,12 @@ type SessionStats struct {
 	ToolCalls     int            `json:"tool_calls"`
 	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"` // Tool name -> count.
 
-	// Token usage.
-	// NOTE: OutputTokens is systematically undercounted: JSONL assistant entries store the
-	// streaming-start snapshot (output_tokens=1) not the final count. The final output token
-	// count is only available in SSE message_delta events which are not persisted to JSONL.
-	// Real output token usage is typically 10-100x higher than what is reported here.
-	//
-	// NOTE: Hidden Haiku classifier calls (~294 input + 21 output tokens per user turn) are
-	// made by Claude Code before each Sonnet response and are completely absent from JSONL.
-	// Actual token usage is ~3% higher than JSONL-derived figures.
+	// Token usage. OutputTokensSnapshot is the streaming-start value persisted in
+	// JSONL (often 1); real output usage is typically 10-100x higher and only
+	// available from SSE message_delta events. Hidden Haiku classifier calls
+	// (~294 in + 21 out per user turn) are absent from JSONL entirely.
 	InputTokens              int  `json:"input_tokens"`
-	OutputTokens             int  `json:"output_tokens"`
+	OutputTokensSnapshot     int  `json:"output_tokens"`
 	OutputTokensEstimated    bool `json:"output_tokens_estimated,omitempty"` // True when output tokens estimated via BPE (JSONL lacks final counts).
 	CacheReads               int  `json:"cache_reads"`
 	CacheCreationInputTokens int  `json:"cache_creation_input_tokens"`

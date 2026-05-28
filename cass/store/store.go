@@ -370,7 +370,7 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			now,
 			sess.Stats.ToolCalls,
 			sess.Stats.InputTokens,
-			sess.Stats.OutputTokens,
+			sess.Stats.OutputTokensSnapshot,
 			sess.Stats.FilesRead,
 			sess.Stats.FilesWritten,
 			sess.Stats.FilesEdited,

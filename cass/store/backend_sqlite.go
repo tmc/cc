@@ -127,7 +127,7 @@ func (b *sqliteBackend) BatchIndex(ctx context.Context, sessions []cass.Session)
 		if _, err := stmt.ExecContext(ctx,
 			sess.ID, sess.Agent, sess.Title, sess.Workspace, sess.SourcePath,
 			sess.StartedAt.Unix(), sess.EndedAt.Unix(), content, now,
-			sess.Stats.ToolCalls, sess.Stats.InputTokens, sess.Stats.OutputTokens,
+			sess.Stats.ToolCalls, sess.Stats.InputTokens, sess.Stats.OutputTokensSnapshot,
 			sess.Stats.FilesRead, sess.Stats.FilesWritten, sess.Stats.FilesEdited,
 			sess.Stats.LinesWritten, sess.Stats.Turns, sess.Stats.DurationSecs,
 			sess.Stats.SubagentSpawns, sess.Stats.IT2Splits, sess.Stats.IT2Sends,

@@ -112,7 +112,7 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 			s.TeamMessagesRecvd += strings.Count(text, "<subagent_notification>")
 		case "assistant":
 			// Token usage.
-			// OutputTokens in JSONL is a streaming-start snapshot (value=1);
+			// OutputTokensSnapshot in JSONL is a streaming-start snapshot (value=1);
 			// the final count lives only in SSE message_delta, not in JSONL.
 			// We estimate it via BPE tokenization of the text content.
 			if e.Message.Usage != nil {
@@ -127,7 +127,7 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 						}
 					}
 				}
-				s.OutputTokens += out
+				s.OutputTokensSnapshot += out
 				s.CacheReads += e.Message.Usage.CacheReadInputTokens
 				s.CacheCreationInputTokens += e.Message.Usage.CacheCreationInputTokens
 			}

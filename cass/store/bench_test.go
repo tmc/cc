@@ -35,7 +35,7 @@ func makeSessions(n, targetBytes int) []cass.Session {
 			Stats: cass.SessionStats{
 				ToolCalls:    42,
 				InputTokens:  8000,
-				OutputTokens: 2000,
+				OutputTokensSnapshot: 2000,
 				Turns:        5,
 				DurationSecs: 300,
 			},
