@@ -266,6 +266,25 @@ Cass extracts these into V1.Session.goals_json so they share the existing
 goal_count / active_goal_count / completed_goal_count surface and FTS
 indexing path with goals derived from prose-style goal blocks.
 
+### V12c: WorkflowRun
+
+Native Claude Code workflows are launched by an assistant `tool_use` named
+`Workflow`. The parent session records the launch and task ID; the durable
+fan-out artifacts live under the session sidecar directory.
+
+    Launch:     Entry.Message.Content tool_use name == "Workflow"
+    Result:     parent toolUseResult.status == "async_launched"
+    State:      <session-dir>/workflows/<run_id>.json
+    Agents:     <session-dir>/subagents/workflows/<run_id>/agent-*.jsonl
+    Journal:    <session-dir>/subagents/workflows/<run_id>/journal.jsonl
+
+Cass treats a workflow as a session-level summary, not as ordinary chat
+history. It extracts run ID, task ID, name, description, script path,
+transcript dir, status, agent count, and journal event count into
+`Session.Workflows`. Native checklist tools (`TaskCreate`, `TaskUpdate`,
+`TaskList`, `TaskGet`, `TaskOutput`, `TaskStop`) are counted separately from
+subagent `Task` spawns.
+
 ### V13: AgentDef
 
 A user-defined agent template stored at `~/.claude/agents/<name>.json`.
@@ -710,6 +729,7 @@ PIDs that become invalid after process exit.
 | 8  | AskUserQuestion                    | Standard tool mechanics; timestamp gap captures think time |
 | 9  | Skill use / isMeta                 | isMeta=true marks system-injected entries                |
 | 10 | MCP tool use                       | Standard tool mechanics; mcp_progress entries for timing |
+| 11 | Workflow                           | parent launch + sidecar state/journal/agent JSONLs       |
 
 ---
 
