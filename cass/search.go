@@ -1,0 +1,114 @@
+package cass
+
+import "time"
+
+// SearchMode controls the type of search.
+type SearchMode int
+
+const (
+	// SearchLexical performs FTS5 full-text search.
+	SearchLexical SearchMode = iota
+	// SearchSemantic is reserved for future embedding search.
+	SearchSemantic
+	// SearchHybrid is reserved for combined lexical and semantic search.
+	SearchHybrid
+)
+
+// SortMode controls result ordering.
+type SortMode string
+
+const (
+	// SortRecent orders results by ended_at descending (most recently active).
+	SortRecent SortMode = "recent"
+	// SortRelevance orders results by BM25 rank; only meaningful with a query.
+	SortRelevance SortMode = "relevance"
+	// SortStarted orders results by started_at descending.
+	SortStarted SortMode = "started"
+	// SortOldest orders results by started_at ascending.
+	SortOldest SortMode = "oldest"
+)
+
+// SearchRequest encapsulates query parameters.
+type SearchRequest struct {
+	Query   string
+	Mode    SearchMode
+	Sort    SortMode
+	Filters Filters
+	Limit   int
+	Offset  int
+}
+
+// Filters constrains search results.
+type Filters struct {
+	Agent        string    // Filter by agent slug.
+	Workspace    string    // Filter by workspace path.
+	GitCommonDir string    // Filter by resolved git common dir (stable across worktrees).
+	Team         string    // Filter by agent team name.
+	GoalStatus   string    // Filter by goal status.
+	Skill        string    // Filter by skill name or path substring.
+	After        time.Time // Sessions started after this time.
+	Before       time.Time // Sessions started before this time.
+}
+
+// SearchResult holds search results.
+type SearchResult struct {
+	Hits       []Hit `json:"hits"`
+	TotalCount int   `json:"total_count"`
+}
+
+// Hit is a single search result.
+type Hit struct {
+	SessionID    string  `json:"session_id"`
+	Agent        string  `json:"agent"`
+	Title        string  `json:"title"`
+	Snippet      string  `json:"snippet"`
+	Score        float64 `json:"score"`
+	Workspace    string  `json:"workspace,omitempty"`
+	GitCommonDir string  `json:"git_common_dir,omitempty"`
+	Branch       string  `json:"branch,omitempty"`
+	SourcePath   string  `json:"source_path,omitempty"`
+	StartedAt    string  `json:"started_at,omitempty"`
+	EndedAt      string  `json:"ended_at,omitempty"`
+
+	// Stats summary (populated when available).
+	ToolCalls                int    `json:"tool_calls,omitempty"`
+	Turns                    int    `json:"turns,omitempty"`
+	InputTokens              int    `json:"input_tokens,omitempty"`
+	OutputTokens             int    `json:"output_tokens,omitempty"`
+	CacheReads               int    `json:"cache_reads,omitempty"`
+	CacheCreationInputTokens int    `json:"cache_creation_input_tokens,omitempty"`
+	FilesEdited              int    `json:"files_edited,omitempty"`
+	LinesWritten             int    `json:"lines_written,omitempty"`
+	DurationSecs             int    `json:"duration_secs,omitempty"`
+	Sparkline                string `json:"sparkline,omitempty"`
+	Compactions              int    `json:"compactions,omitempty"`
+	SubagentSpawns           int    `json:"subagent_spawns,omitempty"`
+	IT2Sends                 int    `json:"it2_sends,omitempty"`
+	IT2Screens               int    `json:"it2_screens,omitempty"`
+	IT2Splits                int    `json:"it2_splits,omitempty"`
+
+	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"`
+
+	// Agent teams context.
+	TeamName   string `json:"team_name,omitempty"`
+	AgentName  string `json:"agent_name,omitempty"`
+	IsTeamLead bool   `json:"is_team_lead,omitempty"`
+
+	// Goal-mode context.
+	Goals              []Goal `json:"goals,omitempty"`
+	GoalCount          int    `json:"goal_count,omitempty"`
+	ActiveGoalCount    int    `json:"active_goal_count,omitempty"`
+	CompletedGoalCount int    `json:"completed_goal_count,omitempty"`
+
+	// Skill context.
+	Skills             []SkillUse `json:"skills,omitempty"`
+	SkillCount         int        `json:"skill_count,omitempty"`
+	SelectedSkillCount int        `json:"selected_skill_count,omitempty"`
+	LoadedSkillCount   int        `json:"loaded_skill_count,omitempty"`
+
+	// Native workflow context.
+	Workflows           []WorkflowRun `json:"workflows,omitempty"`
+	WorkflowCount       int           `json:"workflow_count,omitempty"`
+	WorkflowAgentCount  int           `json:"workflow_agent_count,omitempty"`
+	WorkflowTaskOpCount int           `json:"workflow_task_op_count,omitempty"`
+}
