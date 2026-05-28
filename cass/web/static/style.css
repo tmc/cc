@@ -304,6 +304,7 @@ input::placeholder { color: var(--faint); }
 .hit-team { color: var(--magenta); font-size: 11px; }
 .hit-goals { color: var(--orange); }
 .hit-skills { color: var(--cyan); }
+.hit-workflows { color: var(--magenta); }
 .hit-goal-badge {
   font-size: 10px;
   color: var(--orange);
@@ -635,6 +636,14 @@ input::placeholder { color: var(--faint); }
   border-left-color: var(--faint);
   margin-left: 16px;
   font-size: 11px;
+}
+.conv-tool-summary {
+  color: var(--dim);
+  font-weight: 400;
+  margin-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conv-role {

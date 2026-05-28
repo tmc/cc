@@ -996,6 +996,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
   if (h.turns > 1) stats.push(h.turns + ' turns');
   if (h.files_edited) stats.push(h.files_edited + ' files');
   if (h.lines_written) stats.push(h.lines_written + ' lines');
+  if (h.workflow_count) stats.push(h.workflow_count + ' workflow' + (h.workflow_count === 1 ? '' : 's'));
   if (h.duration_secs) stats.push(fmtDuration(h.duration_secs));
 
   const inTok = h.input_tokens || 0;
@@ -1076,6 +1077,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         ${h.compactions > 0 && html`<span class="hit-compactions">${h.compactions} compaction${h.compactions > 1 ? 's' : ''}</span>`}
         ${h.goal_count > 0 && html`<span class="hit-goals">${h.active_goal_count || 0} active / ${h.completed_goal_count || 0} complete</span>`}
         ${h.skill_count > 0 && html`<span class="hit-skills">${h.selected_skill_count || 0} selected / ${h.loaded_skill_count || 0} loaded</span>`}
+        ${h.workflow_count > 0 && html`<span class="hit-workflows">${h.workflow_agent_count || 0} agents / ${h.workflow_task_op_count || 0} task ops</span>`}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
       </div>
       <${ToolMicroBar} breakdown=${h.tool_breakdown} onToolClick=${onToolClick} />
@@ -1682,6 +1684,17 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
         `;
       }
 
+      if (entry.type === 'attachment' && entry.attachment) {
+        const text = attachmentSummary(entry.attachment);
+        if (!text) return null;
+        return html`
+          <div class="conv-entry role-system${dimClass}${hlClass}" key=${idx} data-eidx=${idx}>
+            <div class="conv-role">attachment</div>
+            ${renderAnsiContent(text, 500)}
+          </div>
+        `;
+      }
+
       const msg = entry.message;
       if (!msg) return null;
       const role = msg.role || entry.type || 'unknown';
@@ -1694,10 +1707,12 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
             if (block.type === 'tool_use') {
               const isExp = expanded[key];
               const inputText = typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2);
+              const summary = toolBlockSummary(block);
               return html`
                 <div class="conv-entry role-tool_use" key=${key} onClick=${() => toggleExpand(key)}>
                   <div class="conv-role">
                     <span class="conv-tool-name">${block.name || 'tool'}</span>
+                    ${summary && html`<span class="conv-tool-summary">${summary}</span>`}
                     <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
                   </div>
                   ${isExp && renderAnsiContent(inputText, 5000, 'tool-input')}
@@ -1743,6 +1758,29 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       }
       return null;
     });
+  }
+
+  function attachmentSummary(att) {
+    if (!att) return '';
+    if (att.type === 'workflow_keyword_request') return 'workflow requested';
+    if (att.type === 'task_reminder') return 'task reminder';
+    if (att.type === 'deferred_tools_delta') {
+      const n = (att.addedNames || att.added_names || []).length;
+      return n ? 'deferred tools +' + n : 'deferred tools changed';
+    }
+    return '';
+  }
+
+  function toolBlockSummary(block) {
+    const input = block.input || {};
+    if (block.name === 'Workflow') {
+      const script = input.script || '';
+      const m = script.match(/\bname\s*:\s*['"]([^'"]+)['"]/);
+      return m ? m[1] : (input.scriptPath || '');
+    }
+    if (block.name === 'TaskCreate') return input.subject || '';
+    if (block.name === 'TaskUpdate') return '#' + (input.taskId || '') + ' ' + (input.status || '');
+    return '';
   }
 
   function renderRequestsTab() {
@@ -1940,6 +1978,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
             ${hit.compactions > 0 && html`<span class="hit-compactions">${hit.compactions} compaction${hit.compactions > 1 ? 's' : ''}</span>`}
             ${hit.goal_count > 0 && html`<span class="hit-goals">${hit.active_goal_count || 0} active goals / ${hit.completed_goal_count || 0} complete</span>`}
             ${hit.skill_count > 0 && html`<span class="hit-skills">${hit.selected_skill_count || 0} selected skills / ${hit.loaded_skill_count || 0} loaded</span>`}
+            ${hit.workflow_count > 0 && html`<span class="hit-workflows">${hit.workflow_count} workflow${hit.workflow_count === 1 ? '' : 's'} / ${hit.workflow_agent_count || 0} agents / ${hit.workflow_task_op_count || 0} task ops</span>`}
           </div>
           ${renderGoalPanel()}
           ${renderSkillPanel()}
@@ -3630,6 +3669,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('lines written', fmtNum(agg.lines_written))}
         ${card('total time', fmtDuration(agg.duration_secs))}
         ${card('subagent spawns', fmtNum(agg.subagent_spawns))}
+        ${card('workflows', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' agents · ' + (agg.workflow_task_ops || 0) + ' task ops')}
         ${card('goals', fmtNum(agg.goals || 0), (agg.active_goals || 0) + ' active · ' + (agg.completed_goals || 0) + ' complete')}
         ${card('skills', fmtNum(agg.skills || 0), (agg.selected_skills || 0) + ' selected · ' + (agg.loaded_skills || 0) + ' loaded')}
         ${card('it2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
