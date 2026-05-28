@@ -407,6 +407,9 @@ func entryActor(e cc.Entry) string {
 }
 
 func entryBody(e cc.Entry) string {
+	if e.Attachment != nil {
+		return attachmentText(e.Attachment)
+	}
 	if e.Message != nil {
 		if blocks := e.Message.ContentBlocks(); blocks != nil {
 			var parts []string
@@ -424,6 +427,23 @@ func entryBody(e cc.Entry) string {
 	}
 	if e.Content != "" {
 		return redactText(strings.TrimSpace(e.Content))
+	}
+	return ""
+}
+
+func attachmentText(a *cc.Attachment) string {
+	switch a.Type {
+	case "workflow_keyword_request":
+		return "Workflow mode requested."
+	case "deferred_tools_delta":
+		var raw struct {
+			AddedNames []string `json:"addedNames"`
+		}
+		if json.Unmarshal(a.Raw, &raw) == nil && len(raw.AddedNames) > 0 {
+			return "Deferred tools added: " + strings.Join(raw.AddedNames, ", ")
+		}
+	case "task_reminder":
+		return "Task reminder."
 	}
 	return ""
 }
@@ -507,6 +527,9 @@ func toolBlock(block cc.ContentBlock) string {
 }
 
 func textToolLine(block cc.ContentBlock) string {
+	if s := toolSummary(block); s != "" {
+		return "tool " + block.Name + ": " + limitText(s)
+	}
 	line := "tool " + block.Name
 	if cmd := toolCommand(block); cmd != "" {
 		line += ": " + limitText(cmd)
@@ -515,10 +538,55 @@ func textToolLine(block cc.ContentBlock) string {
 }
 
 func markdownToolLine(block cc.ContentBlock) string {
+	if s := toolSummary(block); s != "" {
+		return fmt.Sprintf("Tool `%s`: `%s`", block.Name, s)
+	}
 	if cmd := toolCommand(block); cmd != "" {
 		return fmt.Sprintf("Tool `%s`: `%s`", block.Name, cmd)
 	}
 	return fmt.Sprintf("Tool `%s`", block.Name)
+}
+
+func toolSummary(block cc.ContentBlock) string {
+	switch block.Name {
+	case "Workflow":
+		var input struct {
+			Script     string `json:"script"`
+			ScriptPath string `json:"scriptPath"`
+		}
+		if json.Unmarshal(block.Input, &input) != nil {
+			return ""
+		}
+		if name := workflowMetaField(input.Script, "name"); name != "" {
+			return name
+		}
+		return input.ScriptPath
+	case "TaskCreate":
+		var input struct {
+			Subject string `json:"subject"`
+		}
+		if json.Unmarshal(block.Input, &input) == nil {
+			return input.Subject
+		}
+	case "TaskUpdate":
+		var input struct {
+			TaskID string `json:"taskId"`
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(block.Input, &input) == nil {
+			return "#" + input.TaskID + " " + input.Status
+		}
+	}
+	return ""
+}
+
+func workflowMetaField(script, field string) string {
+	re := regexp.MustCompile(`(?m)\b` + regexp.QuoteMeta(field) + `\s*:\s*['"]([^'"]+)['"]`)
+	m := re.FindStringSubmatch(script)
+	if len(m) == 2 {
+		return m[1]
+	}
+	return ""
 }
 
 func toolResultText(block cc.ContentBlock) string {

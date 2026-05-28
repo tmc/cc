@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/tmc/cc"
@@ -82,6 +83,23 @@ type TaskInput struct {
 	Description  string `json:"description"`
 	Prompt       string `json:"prompt"`
 	SubagentType string `json:"subagent_type,omitempty"`
+}
+
+type WorkflowInput struct {
+	Script             string `json:"script"`
+	ScriptPath         string `json:"scriptPath"`
+	ResumeFromRunID    string `json:"resumeFromRunId"`
+	ResumeFromRunIDAlt string `json:"resume_from_run_id"`
+}
+
+type TaskCreateInput struct {
+	Subject     string `json:"subject"`
+	Description string `json:"description"`
+}
+
+type TaskUpdateInput struct {
+	TaskID string `json:"taskId"`
+	Status string `json:"status"`
 }
 
 func main() {
@@ -270,6 +288,44 @@ func printToolUse(tu cc.ContentBlock) {
 			}
 		}
 
+	case "Workflow":
+		var inp WorkflowInput
+		json.Unmarshal(tu.Input, &inp)
+		name := workflowMetaField(inp.Script, "name")
+		desc := workflowMetaField(inp.Script, "description")
+		if *compactFlag {
+			if name == "" {
+				name = inp.ScriptPath
+			}
+			fmt.Printf("workflow %s\n", name)
+		} else {
+			fmt.Printf("── Workflow %s ──\n", name)
+			if desc != "" {
+				fmt.Printf("%s\n", desc)
+			}
+			if inp.ScriptPath != "" {
+				fmt.Printf("script: %s\n", inp.ScriptPath)
+			}
+			if inp.ResumeFromRunID != "" || inp.ResumeFromRunIDAlt != "" {
+				fmt.Printf("resume: %s%s\n", inp.ResumeFromRunID, inp.ResumeFromRunIDAlt)
+			}
+			fmt.Println()
+		}
+
+	case "TaskCreate":
+		var inp TaskCreateInput
+		json.Unmarshal(tu.Input, &inp)
+		if *compactFlag {
+			fmt.Printf("task create %s\n", inp.Subject)
+		} else {
+			fmt.Printf("── TaskCreate %s ──\n%s\n\n", inp.Subject, inp.Description)
+		}
+
+	case "TaskUpdate":
+		var inp TaskUpdateInput
+		json.Unmarshal(tu.Input, &inp)
+		fmt.Printf("task update #%s %s\n", inp.TaskID, inp.Status)
+
 	default:
 		if *compactFlag {
 			fmt.Printf("%s\n", tu.Name)
@@ -277,6 +333,15 @@ func printToolUse(tu cc.ContentBlock) {
 			fmt.Printf("── %s ──\n\n", tu.Name)
 		}
 	}
+}
+
+func workflowMetaField(script, field string) string {
+	re := regexp.MustCompile(`(?m)\b` + regexp.QuoteMeta(field) + `\s*:\s*['"]([^'"]+)['"]`)
+	m := re.FindStringSubmatch(script)
+	if len(m) == 2 {
+		return m[1]
+	}
+	return ""
 }
 
 func truncLines(s string, n int) string {

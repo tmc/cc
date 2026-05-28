@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -101,6 +102,19 @@ func printEntry(e cc.Entry, prevTime *time.Time) {
 	}
 
 	switch e.Type {
+	case "attachment":
+		if e.Attachment == nil {
+			return
+		}
+		text := attachmentText(e.Attachment)
+		if text == "" {
+			return
+		}
+		if *briefFlag {
+			fmt.Printf("\033[90m%s\033[0m%s  \033[1mATTACH\033[0m  %s\n", ts, gap, truncate(text, 100))
+		} else {
+			fmt.Printf("\033[90m%s\033[0m%s  \033[1;90m• %s\033[0m\n", ts, gap, text)
+		}
 	case "user":
 		if e.Message == nil {
 			return
@@ -211,6 +225,23 @@ func printEntry(e cc.Entry, prevTime *time.Time) {
 	}
 }
 
+func attachmentText(a *cc.Attachment) string {
+	switch a.Type {
+	case "workflow_keyword_request":
+		return "workflow requested"
+	case "task_reminder":
+		return "task reminder"
+	case "deferred_tools_delta":
+		var raw struct {
+			AddedNames []string `json:"addedNames"`
+		}
+		if json.Unmarshal(a.Raw, &raw) == nil && len(raw.AddedNames) > 0 {
+			return fmt.Sprintf("deferred tools +%d", len(raw.AddedNames))
+		}
+	}
+	return ""
+}
+
 func fmtToolUse(b cc.ContentBlock) string {
 	switch b.Name {
 	case "Bash":
@@ -258,9 +289,42 @@ func fmtToolUse(b cc.ContentBlock) string {
 		}
 		json.Unmarshal(b.Input, &inp)
 		return fmt.Sprintf("Task[%s]: %s", inp.SubagentType, inp.Description)
+	case "Workflow":
+		var inp struct {
+			Script     string `json:"script"`
+			ScriptPath string `json:"scriptPath"`
+		}
+		json.Unmarshal(b.Input, &inp)
+		name := workflowMetaField(inp.Script, "name")
+		if name == "" {
+			name = cc.ShortPath(inp.ScriptPath)
+		}
+		return fmt.Sprintf("Workflow: %s", name)
+	case "TaskCreate":
+		var inp struct {
+			Subject string `json:"subject"`
+		}
+		json.Unmarshal(b.Input, &inp)
+		return fmt.Sprintf("TaskCreate: %s", truncate(inp.Subject, 60))
+	case "TaskUpdate":
+		var inp struct {
+			TaskID string `json:"taskId"`
+			Status string `json:"status"`
+		}
+		json.Unmarshal(b.Input, &inp)
+		return fmt.Sprintf("TaskUpdate: #%s %s", inp.TaskID, inp.Status)
 	default:
 		return b.Name
 	}
+}
+
+func workflowMetaField(script, field string) string {
+	re := regexp.MustCompile(`(?m)\b` + regexp.QuoteMeta(field) + `\s*:\s*['"]([^'"]+)['"]`)
+	m := re.FindStringSubmatch(script)
+	if len(m) == 2 {
+		return m[1]
+	}
+	return ""
 }
 
 func truncate(s string, n int) string {
