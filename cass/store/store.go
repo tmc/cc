@@ -24,22 +24,55 @@ type hitScanner interface {
 	Scan(dest ...any) error
 }
 
+// config holds tunables applied by Option values in New.
+type config struct {
+	maxOpenConns int
+	busyTimeout  time.Duration
+	journalMode  string
+}
+
+// Option configures a Store opened by New.
+type Option func(*config)
+
+// WithMaxOpenConns sets the maximum number of open connections to the database.
+func WithMaxOpenConns(n int) Option {
+	return func(c *config) { c.maxOpenConns = n }
+}
+
+// WithBusyTimeout sets the SQLite busy_timeout pragma.
+func WithBusyTimeout(d time.Duration) Option {
+	return func(c *config) { c.busyTimeout = d }
+}
+
+// WithJournalMode sets the SQLite journal_mode pragma (e.g. "WAL", "DELETE").
+func WithJournalMode(mode string) Option {
+	return func(c *config) { c.journalMode = mode }
+}
+
 // New opens or creates a SQLite store at the given path.
-func New(dbPath string) (*DB, error) {
+func New(dbPath string, opts ...Option) (*DB, error) {
+	cfg := config{
+		maxOpenConns: 2,
+		busyTimeout:  5000 * time.Millisecond,
+		journalMode:  "WAL",
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 	// SQLite only supports one writer at a time. Limit the pool to avoid
 	// holding idle connections that extend WAL checkpoints or cause SQLITE_BUSY.
-	db.SetMaxOpenConns(2)
+	db.SetMaxOpenConns(cfg.maxOpenConns)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxIdleTime(30 * time.Second)
 
-	// Enable WAL mode for concurrent reads and busy timeout for contention.
+	// Enable journal mode for concurrent reads and busy timeout for contention.
 	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
+		fmt.Sprintf("PRAGMA journal_mode=%s", cfg.journalMode),
+		fmt.Sprintf("PRAGMA busy_timeout=%d", cfg.busyTimeout.Milliseconds()),
 	} {
 		if _, err := db.Exec(pragma); err != nil {
 			db.Close()
