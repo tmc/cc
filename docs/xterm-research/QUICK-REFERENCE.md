@@ -204,7 +204,7 @@ term.write('Hello\r\n');
 
 ```bash
 # Serve examples locally
-cd examples/xterm-research
+cd docs/xterm-research
 python3 -m http.server 8000
 
 # Open in browser

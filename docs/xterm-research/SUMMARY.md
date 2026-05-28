@@ -240,7 +240,7 @@ It's simpler, lighter, and better suited for structured session data. Reserve xt
 All example files are standalone HTML - no build step required:
 
 ```bash
-cd examples/xterm-research
+cd docs/xterm-research
 python3 -m http.server 8000
 # Open http://localhost:8000/comparison.html
 ```
