@@ -87,7 +87,7 @@ func (c *ClaudeCode) scanDir(ctx context.Context, root string, config cass.ScanC
 			}
 		}
 
-		session, err := c.parseSession(path)
+		session, err := c.parseSession(ctx, path)
 		if err != nil {
 			return nil // skip unparseable files
 		}
@@ -101,8 +101,8 @@ func (c *ClaudeCode) scanDir(ctx context.Context, root string, config cass.ScanC
 	})
 }
 
-func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
-	parentEntries, err := cc.ReadFile(path)
+func (c *ClaudeCode) parseSession(ctx context.Context, path string) (cass.Session, error) {
+	parentEntries, err := cc.ReadFile(ctx, path)
 	if err != nil {
 		return cass.Session{}, err
 	}
@@ -129,7 +129,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 			if strings.HasPrefix(name, "agent-acompact") {
 				continue
 			}
-			sub, err := cc.ReadFile(filepath.Join(subagentDir, name))
+			sub, err := cc.ReadFile(ctx, filepath.Join(subagentDir, name))
 			if err == nil {
 				entries = append(entries, sub...)
 			}
@@ -221,7 +221,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 		AgentName:    agentName,
 		IsTeamLead:   isTeamLead,
 	}
-	session.Subagents = extractSubagentRuns(path, parentEntries, session)
+	session.Subagents = extractSubagentRuns(ctx, path, parentEntries, session)
 	return session, nil
 }
 

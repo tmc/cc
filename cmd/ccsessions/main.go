@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -88,14 +89,14 @@ func runIndex(since time.Duration) error {
 }
 
 func runFull(since time.Duration) error {
-	files, err := cc.FindSessionFiles(since, *projectFlag)
+	files, err := cc.FindSessionFiles(context.Background(), since, *projectFlag)
 	if err != nil {
 		return err
 	}
 
 	var sessions []cc.SessionSummary
 	for _, f := range files {
-		entries, err := cc.ReadFile(f)
+		entries, err := cc.ReadFile(context.Background(), f)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", f, err)
 			continue

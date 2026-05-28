@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +16,7 @@ func TestReadSubagents_NoDir(t *testing.T) {
 		"uuid":      "u1",
 	})
 
-	subs, err := ReadSubagents(path)
+	subs, err := ReadSubagents(context.Background(), path)
 	if err != nil {
 		t.Fatalf("ReadSubagents: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestReadSubagents_TagsAgentIDAndSidechain(t *testing.T) {
 		},
 	)
 
-	subs, err := ReadSubagents(parentPath)
+	subs, err := ReadSubagents(context.Background(), parentPath)
 	if err != nil {
 		t.Fatalf("ReadSubagents: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestReadSubagents_SkipsACompact(t *testing.T) {
 		map[string]any{"type": "user", "timestamp": "2026-04-20T10:00:02Z"},
 	)
 
-	subs, err := ReadSubagents(parentPath)
+	subs, err := ReadSubagents(context.Background(), parentPath)
 	if err != nil {
 		t.Fatalf("ReadSubagents: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestReadFileWithSubagents_MergesAndSorts(t *testing.T) {
 		},
 	)
 
-	entries, err := ReadFileWithSubagents(parentPath)
+	entries, err := ReadFileWithSubagents(context.Background(), parentPath)
 	if err != nil {
 		t.Fatalf("ReadFileWithSubagents: %v", err)
 	}

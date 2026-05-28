@@ -18,6 +18,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -124,7 +125,7 @@ func run() error {
 	counts := make(map[string]int)
 
 	for _, r := range readers {
-		rd := cc.NewReader(r)
+		rd := cc.NewReader(context.Background(), r)
 		for rd.Next() {
 			e := rd.Entry()
 			if e.Message == nil {

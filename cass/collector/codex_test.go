@@ -182,7 +182,7 @@ func TestCodexGoals(t *testing.T) {
 		},
 	)
 
-	sess, err := (&Codex{}).parseSession(path)
+	sess, err := (&Codex{}).parseSession(context.Background(), path)
 	if err != nil {
 		t.Fatalf("parseSession: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestCodexGoalCompletionGatesMultipleObjectives(t *testing.T) {
 		},
 	)
 
-	sess, err := (&Codex{}).parseSession(path)
+	sess, err := (&Codex{}).parseSession(context.Background(), path)
 	if err != nil {
 		t.Fatalf("parseSession: %v", err)
 	}

@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,7 +44,7 @@ func TestExtractWorkflowsFromClaudeSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sess, err := (&ClaudeCode{}).parseSession(sessionPath)
+	sess, err := (&ClaudeCode{}).parseSession(context.Background(), sessionPath)
 	if err != nil {
 		t.Fatal(err)
 	}

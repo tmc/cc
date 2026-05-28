@@ -476,7 +476,7 @@ func readSessionEntries(path string) ([]cc.Entry, error) {
 	if strings.HasSuffix(path, ".json") && strings.HasPrefix(filepath.Base(path), "session-") {
 		return readGeminiJSONSessionEntries(path)
 	}
-	return cc.ReadFile(path)
+	return cc.ReadFile(context.Background(), path)
 }
 
 func readGeminiJSONSessionEntries(path string) ([]cc.Entry, error) {
@@ -699,7 +699,7 @@ func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {
 	// Read last N messages from each inbox.
 	inboxes := map[string][]cc.InboxMessage{}
 	for _, m := range cfg.Members {
-		msgs, err := cc.ReadInbox(name, m.Name)
+		msgs, err := cc.ReadInbox(r.Context(), name, m.Name)
 		if err != nil {
 			continue
 		}
@@ -750,7 +750,7 @@ func (s *Server) handleTeamInbox(w http.ResponseWriter, r *http.Request) {
 			From: body.From,
 			Text: body.Text,
 		}
-		if err := cc.AppendInbox(name, agent, msg); err != nil {
+		if err := cc.AppendInbox(r.Context(), name, agent, msg); err != nil {
 			writeError(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -766,7 +766,7 @@ func (s *Server) handleTeamInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgs, err := cc.ReadInbox(name, agent)
+	msgs, err := cc.ReadInbox(r.Context(), name, agent)
 	if err != nil {
 		writeError(w, err, http.StatusInternalServerError)
 		return

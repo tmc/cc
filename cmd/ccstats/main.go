@@ -13,6 +13,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -129,11 +130,11 @@ func resolveFiles() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cc.FindSessionFiles(since, "")
+	return cc.FindSessionFiles(context.Background(), since, "")
 }
 
 func statsForFile(path string) (sessionStats, error) {
-	entries, err := cc.ReadFile(path)
+	entries, err := cc.ReadFile(context.Background(), path)
 	if err != nil {
 		return sessionStats{}, err
 	}

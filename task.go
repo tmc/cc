@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,7 +32,10 @@ type TaskStore struct {
 
 // NewTaskStore creates a TaskStore for the given namespace (typically a team name).
 // If CC_TASKS_DIR is set, it is used as the base; otherwise defaults to ~/.claude/tasks/.
-func NewTaskStore(namespace string) (*TaskStore, error) {
+func NewTaskStore(ctx context.Context, namespace string) (*TaskStore, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	base := os.Getenv("CC_TASKS_DIR")
 	if base == "" {
 		ch, err := ClaudeHome()

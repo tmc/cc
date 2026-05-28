@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -11,7 +12,7 @@ import (
 // nextID/writeTask and pick duplicate IDs.
 func TestTaskStoreConcurrentCreate(t *testing.T) {
 	t.Setenv("CC_TASKS_DIR", t.TempDir())
-	s, err := NewTaskStore("team")
+	s, err := NewTaskStore(context.Background(), "team")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +60,7 @@ func TestTaskStoreConcurrentCreate(t *testing.T) {
 // window exposes a 0-byte file that fails json.Unmarshal.
 func TestTaskStoreConcurrentGetUpdate(t *testing.T) {
 	t.Setenv("CC_TASKS_DIR", t.TempDir())
-	s, err := NewTaskStore("team")
+	s, err := NewTaskStore(context.Background(), "team")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestTaskStoreConcurrentGetUpdate(t *testing.T) {
 // flock a concurrent reader could observe a truncated file.
 func TestTaskStoreConcurrentUpdate(t *testing.T) {
 	t.Setenv("CC_TASKS_DIR", t.TempDir())
-	s, err := NewTaskStore("team")
+	s, err := NewTaskStore(context.Background(), "team")
 	if err != nil {
 		t.Fatal(err)
 	}

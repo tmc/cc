@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -190,7 +191,7 @@ type resolvedMatch struct {
 func resolveMatch(query string, m cc.IndexEntry) resolvedMatch {
 	r := resolvedMatch{entry: m, target: m.ProjectPath}
 	r.occurrences = countIndexOccurrences(query, m)
-	entries, err := cc.ReadFile(m.FullPath)
+	entries, err := cc.ReadFile(context.Background(), m.FullPath)
 	if err != nil {
 		return r
 	}
@@ -397,7 +398,7 @@ func fileHasToolMatch(path, cmdText, resultText string) (bool, error) {
 	cmdIDs := map[string]bool{}
 	sawCommand := cmdText == ""
 	sawResult := resultText == ""
-	r := cc.NewReader(f)
+	r := cc.NewReader(context.Background(), f)
 	for r.Next() {
 		e := r.Entry()
 		if e.Message != nil {
@@ -567,7 +568,7 @@ func fileHasSessionCWD(path, cwd string) (bool, error) {
 		return false, nil
 	}
 	defer f.Close()
-	r := cc.NewReader(f)
+	r := cc.NewReader(context.Background(), f)
 	for r.Next() {
 		e := r.Entry()
 		if e.CWD == cwd && (e.Subtype == "session_meta" || e.Subtype == "turn_context" || e.Type == "user" || e.Type == "assistant") {

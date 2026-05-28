@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -146,7 +147,7 @@ func inferSourceAgent(path string, entries []cc.Entry) string {
 
 func readSessionEntries(path string) ([]cc.Entry, error) {
 	if strings.HasSuffix(path, ".jsonl") {
-		return cc.ReadFile(path)
+		return cc.ReadFile(context.Background(), path)
 	}
 	if strings.HasSuffix(path, ".json") && strings.HasPrefix(filepath.Base(path), "session-") {
 		return readGeminiSessionJSON(path)

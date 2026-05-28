@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -219,7 +220,7 @@ func checkPID(team, agent string) (int, bool) {
 }
 
 func checkIdle(team, agent string) (bool, string) {
-	msgs, err := cc.ReadInbox(team, agent)
+	msgs, err := cc.ReadInbox(context.Background(), team, agent)
 	if err != nil {
 		return false, ""
 	}

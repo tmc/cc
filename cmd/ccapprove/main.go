@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -59,7 +60,7 @@ type pendingApproval struct {
 }
 
 func findPending(team, inboxName string) ([]pendingApproval, error) {
-	msgs, err := cc.ReadInbox(team, inboxName)
+	msgs, err := cc.ReadInbox(context.Background(), team, inboxName)
 	if err != nil {
 		return nil, err
 	}
@@ -207,10 +208,10 @@ func sendResponse(team, inboxName, agent string, p pendingApproval, approved boo
 		Timestamp: now,
 		Read:      false,
 	}
-	if err := cc.AppendInbox(team, inboxName, msg); err != nil {
+	if err := cc.AppendInbox(context.Background(), team, inboxName, msg); err != nil {
 		return fmt.Errorf("record response: %w", err)
 	}
-	return cc.AppendInbox(team, agent, msg)
+	return cc.AppendInbox(context.Background(), team, agent, msg)
 }
 
 func doAuto(team, inboxName string) error {

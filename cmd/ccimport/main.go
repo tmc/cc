@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
@@ -54,7 +55,7 @@ func run() error {
 	if *from == "" {
 		return fmt.Errorf("missing -from")
 	}
-	entries, err := cc.ReadFile(*from)
+	entries, err := cc.ReadFile(context.Background(), *from)
 	if err != nil {
 		return fmt.Errorf("read source: %w", err)
 	}

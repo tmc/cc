@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -35,7 +36,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	store, err := cc.NewTaskStore(*team)
+	store, err := cc.NewTaskStore(context.Background(), *team)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cctask: %v\n", err)
 		os.Exit(1)

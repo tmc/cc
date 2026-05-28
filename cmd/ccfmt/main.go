@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -89,17 +90,17 @@ func run(w io.Writer, args []string) error {
 
 func readEntries(args []string) ([]cc.Entry, string, error) {
 	if len(args) == 0 {
-		entries, err := cc.ReadAll(os.Stdin)
+		entries, err := cc.ReadAll(context.Background(), os.Stdin)
 		return entries, "stdin", err
 	}
 	if len(args) == 1 {
-		entries, err := cc.ReadFileWithSubagents(args[0])
+		entries, err := cc.ReadFileWithSubagents(context.Background(), args[0])
 		return entries, args[0], err
 	}
 
 	var all []cc.Entry
 	for _, path := range args {
-		entries, err := cc.ReadFileWithSubagents(path)
+		entries, err := cc.ReadFileWithSubagents(context.Background(), path)
 		if err != nil {
 			return nil, "", err
 		}

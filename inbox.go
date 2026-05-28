@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -77,7 +78,10 @@ func InboxPath(teamName, agentName string) (string, error) {
 }
 
 // ReadInbox reads all messages from an agent's inbox.
-func ReadInbox(teamName, agentName string) ([]InboxMessage, error) {
+func ReadInbox(ctx context.Context, teamName, agentName string) ([]InboxMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	path, err := InboxPath(teamName, agentName)
 	if err != nil {
 		return nil, err
@@ -86,7 +90,10 @@ func ReadInbox(teamName, agentName string) ([]InboxMessage, error) {
 }
 
 // ReadUnread reads unread messages and marks them as read atomically.
-func ReadUnread(teamName, agentName string) ([]InboxMessage, error) {
+func ReadUnread(ctx context.Context, teamName, agentName string) ([]InboxMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	path, err := InboxPath(teamName, agentName)
 	if err != nil {
 		return nil, err
@@ -139,7 +146,10 @@ func ReadUnread(teamName, agentName string) ([]InboxMessage, error) {
 }
 
 // AppendInbox appends a message to an agent's inbox with file locking.
-func AppendInbox(teamName, agentName string, msg InboxMessage) error {
+func AppendInbox(ctx context.Context, teamName, agentName string, msg InboxMessage) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	path, err := InboxPath(teamName, agentName)
 	if err != nil {
 		return err

@@ -22,9 +22,9 @@ func TestFindSessionFilesContextCanceled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := FindSessionFilesContext(ctx, time.Hour, "")
+	_, err := FindSessionFiles(ctx, time.Hour, "")
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("FindSessionFilesContext error = %v, want context canceled", err)
+		t.Fatalf("FindSessionFiles error = %v, want context canceled", err)
 	}
 }
 
@@ -95,7 +95,7 @@ func TestReadFileCodexCLI(t *testing.T) {
 		},
 	)
 
-	entries, err := ReadFile(path)
+	entries, err := ReadFile(context.Background(), path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestReadFileCodexTurnContextCWD(t *testing.T) {
 		},
 	)
 
-	entries, err := ReadFile(path)
+	entries, err := ReadFile(context.Background(), path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestReadFileCodexDesktopExecCommand(t *testing.T) {
 		},
 	)
 
-	entries, err := ReadFile(path)
+	entries, err := ReadFile(context.Background(), path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestReadFileCodexGoalMode(t *testing.T) {
 		},
 	)
 
-	entries, err := ReadFile(path)
+	entries, err := ReadFile(context.Background(), path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestReadFileCodexWebSearchResponseItem(t *testing.T) {
 		},
 	)
 
-	entries, err := ReadFile(path)
+	entries, err := ReadFile(context.Background(), path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestReadFileCodexToolSearch(t *testing.T) {
 		},
 	)
 
-	entries, err := ReadFile(path)
+	entries, err := ReadFile(context.Background(), path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestFindSessionFilesIncludesCodexAndProjectFilterByCWD(t *testing.T) {
 		},
 	)
 
-	got, err := FindSessionFiles(24*time.Hour, "github.com/tmc/cc")
+	got, err := FindSessionFiles(context.Background(), 24*time.Hour, "github.com/tmc/cc")
 	if err != nil {
 		t.Fatalf("FindSessionFiles: %v", err)
 	}
@@ -600,7 +600,7 @@ func TestFindSessionFilesIncludesCodexAndProjectFilterByCWD(t *testing.T) {
 		t.Fatalf("FindSessionFiles did not include codex file; got=%v", got)
 	}
 
-	got, err = FindSessionFiles(24*time.Hour, "does-not-match-project")
+	got, err = FindSessionFiles(context.Background(), 24*time.Hour, "does-not-match-project")
 	if err != nil {
 		t.Fatalf("FindSessionFiles (project mismatch): %v", err)
 	}

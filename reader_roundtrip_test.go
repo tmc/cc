@@ -2,6 +2,7 @@ package cc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"reflect"
@@ -19,7 +20,7 @@ func TestSampleSessionsRoundTripNormalizedJSONL(t *testing.T) {
 
 	for _, path := range paths {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			entries, err := ReadFile(path)
+			entries, err := ReadFile(context.Background(), path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -35,7 +36,7 @@ func TestSampleSessionsRoundTripNormalizedJSONL(t *testing.T) {
 				}
 			}
 
-			got, err := ReadAll(bytes.NewReader(buf.Bytes()))
+			got, err := ReadAll(context.Background(), bytes.NewReader(buf.Bytes()))
 			if err != nil {
 				t.Fatalf("decode encoded session: %v", err)
 			}

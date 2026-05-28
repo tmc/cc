@@ -1,6 +1,7 @@
 package cc
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -13,12 +14,12 @@ func TestInboxAppendAndRead(t *testing.T) {
 		{From: "bob", Text: "ack", Summary: "ack"},
 	}
 	for _, m := range want {
-		if err := AppendInbox("review", "lead", m); err != nil {
+		if err := AppendInbox(context.Background(),"review", "lead", m); err != nil {
 			t.Fatalf("AppendInbox: %v", err)
 		}
 	}
 
-	got, err := ReadInbox("review", "lead")
+	got, err := ReadInbox(context.Background(),"review", "lead")
 	if err != nil {
 		t.Fatalf("ReadInbox: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestInboxAppendAndRead(t *testing.T) {
 
 func TestInboxReadMissing(t *testing.T) {
 	t.Setenv("CC_TEAMS_DIR", t.TempDir())
-	got, err := ReadInbox("nope", "nobody")
+	got, err := ReadInbox(context.Background(),"nope", "nobody")
 	if err != nil {
 		t.Fatalf("ReadInbox(missing): %v", err)
 	}
@@ -54,12 +55,12 @@ func TestReadUnreadMarksMessages(t *testing.T) {
 		{From: "x", Text: "two"},
 		{From: "x", Text: "three"},
 	} {
-		if err := AppendInbox("t", "a", m); err != nil {
+		if err := AppendInbox(context.Background(),"t", "a", m); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	first, err := ReadUnread("t", "a")
+	first, err := ReadUnread(context.Background(),"t", "a")
 	if err != nil {
 		t.Fatalf("ReadUnread (1): %v", err)
 	}
@@ -67,7 +68,7 @@ func TestReadUnreadMarksMessages(t *testing.T) {
 		t.Errorf("first ReadUnread = %d messages, want 3", len(first))
 	}
 
-	second, err := ReadUnread("t", "a")
+	second, err := ReadUnread(context.Background(),"t", "a")
 	if err != nil {
 		t.Fatalf("ReadUnread (2): %v", err)
 	}
@@ -75,7 +76,7 @@ func TestReadUnreadMarksMessages(t *testing.T) {
 		t.Errorf("second ReadUnread = %v, want nil", second)
 	}
 
-	all, err := ReadInbox("t", "a")
+	all, err := ReadInbox(context.Background(),"t", "a")
 	if err != nil {
 		t.Fatal(err)
 	}

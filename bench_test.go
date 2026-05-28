@@ -2,6 +2,7 @@ package cc
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"testing"
 )
@@ -14,7 +15,7 @@ func BenchmarkReader(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(data)))
 	for i := 0; i < b.N; i++ {
-		r := NewReader(bytes.NewReader(data))
+		r := NewReader(context.Background(), bytes.NewReader(data))
 		for r.Next() {
 		}
 		if err := r.Err(); err != nil {

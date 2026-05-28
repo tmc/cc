@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,7 +31,7 @@ const agentCompactPrefix = "agent-acompact"
 // Subagent JSONLs that lack a matching queue-operation notification still
 // produce a SubagentRun with Status="unknown" and zero usage. Existence
 // of the file is itself informative.
-func extractSubagentRuns(sessionPath string, parentEntries []cc.Entry, parentSession cass.Session) []cass.SubagentRun {
+func extractSubagentRuns(ctx context.Context, sessionPath string, parentEntries []cc.Entry, parentSession cass.Session) []cass.SubagentRun {
 	subagentDir := filepath.Join(strings.TrimSuffix(sessionPath, ".jsonl"), "subagents")
 	infos, err := os.ReadDir(subagentDir)
 	if err != nil {
@@ -59,7 +60,7 @@ func extractSubagentRuns(sessionPath string, parentEntries []cc.Entry, parentSes
 			continue
 		}
 		runPath := filepath.Join(subagentDir, name)
-		entries, err := cc.ReadFile(runPath)
+		entries, err := cc.ReadFile(ctx, runPath)
 		if err != nil {
 			continue
 		}

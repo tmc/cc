@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,7 +81,7 @@ func TestGeminiParseSession_ContentFormats(t *testing.T) {
 			}
 
 			c := &GeminiCLI{}
-			sess, err := c.parseSession(sessionPath)
+			sess, err := c.parseSession(context.Background(), sessionPath)
 			if err != nil {
 				t.Fatalf("parseSession: %v", err)
 			}

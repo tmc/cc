@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -49,7 +50,7 @@ func run() error {
 	}()
 
 	for _, r := range readers {
-		rd := cc.NewReader(r)
+		rd := cc.NewReader(context.Background(), r)
 		var prevTime time.Time
 		for rd.Next() {
 			e := rd.Entry()
@@ -381,7 +382,7 @@ func inputs() ([]io.Reader, []io.Closer, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		files, err := cc.FindSessionFiles(since, "")
+		files, err := cc.FindSessionFiles(context.Background(), since, "")
 		if err != nil {
 			return nil, nil, err
 		}

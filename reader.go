@@ -23,21 +23,32 @@ const (
 // Reader reads entries from a JSONL session file.
 // The zero value is not usable; use NewReader.
 type Reader struct {
+	ctx     context.Context
 	scanner *bufio.Scanner
 	err     error
 	entry   Entry
+	n       int
 }
 
-// NewReader creates a Reader from an io.Reader.
-func NewReader(r io.Reader) *Reader {
+// NewReader creates a Reader from an io.Reader. The context is checked
+// cooperatively during Next so callers can cancel long reads.
+func NewReader(ctx context.Context, r io.Reader) *Reader {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, initialBufferSize), MaxLineSize)
-	return &Reader{scanner: s}
+	return &Reader{ctx: ctx, scanner: s}
 }
 
-// Next advances to the next entry. Returns false at EOF or on error.
+// Next advances to the next entry. Returns false at EOF, on error, or when
+// the reader's context is canceled.
 func (r *Reader) Next() bool {
 	for r.scanner.Scan() {
+		r.n++
+		if r.n%256 == 0 {
+			if err := r.ctx.Err(); err != nil {
+				r.err = err
+				return false
+			}
+		}
 		line := r.scanner.Text()
 		if line == "" {
 			continue
@@ -542,8 +553,8 @@ func (r *Reader) Entry() Entry { return r.entry }
 func (r *Reader) Err() error { return r.err }
 
 // ReadAll reads all entries from the reader.
-func ReadAll(r io.Reader) ([]Entry, error) {
-	rd := NewReader(r)
+func ReadAll(ctx context.Context, r io.Reader) ([]Entry, error) {
+	rd := NewReader(ctx, r)
 	var entries []Entry
 	for rd.Next() {
 		entries = append(entries, rd.Entry())
@@ -552,25 +563,28 @@ func ReadAll(r io.Reader) ([]Entry, error) {
 }
 
 // ReadFile reads all entries from a JSONL file.
-func ReadFile(path string) ([]Entry, error) {
+func ReadFile(ctx context.Context, path string) ([]Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	return ReadAll(f)
+	return ReadAll(ctx, f)
 }
 
 // ReadFileWithSubagents reads a session JSONL file and merges entries from any
 // subagent files found at <path-without-.jsonl>/subagents/agent-*.jsonl.
 // Subagent entries are tagged with AgentID (from the filename) and IsSidechain=true.
 // The merged result is sorted by timestamp.
-func ReadFileWithSubagents(path string) ([]Entry, error) {
-	entries, err := ReadFile(path)
+func ReadFileWithSubagents(ctx context.Context, path string) ([]Entry, error) {
+	entries, err := ReadFile(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	subs, err := ReadSubagents(path)
+	subs, err := ReadSubagents(ctx, path)
 	if err != nil {
 		return entries, nil
 	}
@@ -585,7 +599,7 @@ func ReadFileWithSubagents(path string) ([]Entry, error) {
 // <path-without-.jsonl>/subagents/agent-*.jsonl. Each entry is tagged with
 // AgentID derived from the filename and IsSidechain=true. Returns a nil slice
 // and nil error if the subagents directory does not exist.
-func ReadSubagents(path string) ([]Entry, error) {
+func ReadSubagents(ctx context.Context, path string) ([]Entry, error) {
 	subagentDir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
 	infos, err := os.ReadDir(subagentDir)
 	if err != nil {
@@ -603,7 +617,7 @@ func ReadSubagents(path string) ([]Entry, error) {
 		if strings.HasPrefix(name, "agent-acompact") {
 			continue
 		}
-		sub, err := ReadFile(filepath.Join(subagentDir, name))
+		sub, err := ReadFile(ctx, filepath.Join(subagentDir, name))
 		if err != nil {
 			continue
 		}
@@ -735,18 +749,9 @@ func collapseWhitespace(s string, max int) string {
 }
 
 // FindSessionFiles finds JSONL session files under ~/.claude/projects/,
-// ~/.gemini/projects/, and ~/.codex/sessions/.
-// It excludes subagent files and filters by modification time.
-func FindSessionFiles(since time.Duration, project string) ([]string, error) {
-	return FindSessionFilesContext(context.Background(), since, project)
-}
-
-// FindSessionFilesContext is like FindSessionFiles but stops early when ctx is
-// canceled.
-func FindSessionFilesContext(ctx context.Context, since time.Duration, project string) ([]string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+// ~/.gemini/projects/, and ~/.codex/sessions/. It excludes subagent files,
+// filters by modification time, and stops early when ctx is canceled.
+func FindSessionFiles(ctx context.Context, since time.Duration, project string) ([]string, error) {
 	ch, err := ClaudeHome()
 	if err != nil {
 		return nil, err
@@ -794,7 +799,7 @@ func FindSessionFilesContext(ctx context.Context, since time.Duration, project s
 				q := strings.ToLower(project)
 				switch dir.kind {
 				case "codex":
-					if !codexPathMatchesProject(path, q) {
+					if !codexPathMatchesProject(ctx, path, q) {
 						return nil
 					}
 				default:
@@ -814,8 +819,8 @@ func FindSessionFilesContext(ctx context.Context, since time.Duration, project s
 	return files, nil
 }
 
-func codexPathMatchesProject(path, query string) bool {
-	entries, err := ReadFile(path)
+func codexPathMatchesProject(ctx context.Context, path, query string) bool {
+	entries, err := ReadFile(ctx, path)
 	if err != nil {
 		return strings.Contains(strings.ToLower(path), query)
 	}
