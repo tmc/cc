@@ -21,6 +21,7 @@ const (
 )
 
 // Reader reads entries from a JSONL session file.
+// The zero value is not usable; use NewReader.
 type Reader struct {
 	scanner *bufio.Scanner
 	err     error
