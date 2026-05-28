@@ -19,6 +19,7 @@ type Session struct {
 	Messages     []Message      `json:"messages"`
 	Goals        []Goal         `json:"goals,omitempty"`
 	Skills       []SkillUse     `json:"skills,omitempty"`
+	Workflows    []WorkflowRun  `json:"workflows,omitempty"`
 	Stats        SessionStats   `json:"stats"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
 
@@ -125,6 +126,25 @@ type SkillHit struct {
 	SourcePath string `json:"source_path,omitempty"`
 	StartedAt  string `json:"started_at,omitempty"`
 	EndedAt    string `json:"ended_at,omitempty"`
+}
+
+// WorkflowRun is one native Claude Code Workflow invocation observed in a
+// session. The parent session records the Workflow tool call; fan-out agents
+// and the journal live under subagents/workflows/<run_id>/.
+type WorkflowRun struct {
+	RunID             string    `json:"run_id,omitempty"`
+	TaskID            string    `json:"task_id,omitempty"`
+	Name              string    `json:"name,omitempty"`
+	Description       string    `json:"description,omitempty"`
+	Status            string    `json:"status,omitempty"`
+	Summary           string    `json:"summary,omitempty"`
+	ScriptPath        string    `json:"script_path,omitempty"`
+	TranscriptDir     string    `json:"transcript_dir,omitempty"`
+	AgentCount        int       `json:"agent_count,omitempty"`
+	JournalEventCount int       `json:"journal_event_count,omitempty"`
+	StartedAt         time.Time `json:"started_at,omitempty"`
+	CompletedAt       time.Time `json:"completed_at,omitempty"`
+	SourcePath        string    `json:"source_path,omitempty"`
 }
 
 // SubagentRun is one Task subagent invocation. Subagent JSONLs share the
@@ -311,6 +331,12 @@ type Hit struct {
 	SkillCount         int        `json:"skill_count,omitempty"`
 	SelectedSkillCount int        `json:"selected_skill_count,omitempty"`
 	LoadedSkillCount   int        `json:"loaded_skill_count,omitempty"`
+
+	// Native workflow context.
+	Workflows           []WorkflowRun `json:"workflows,omitempty"`
+	WorkflowCount       int           `json:"workflow_count,omitempty"`
+	WorkflowAgentCount  int           `json:"workflow_agent_count,omitempty"`
+	WorkflowTaskOpCount int           `json:"workflow_task_op_count,omitempty"`
 }
 
 // SessionLink represents an interaction between two sessions.
@@ -377,6 +403,15 @@ type SessionStats struct {
 	TeamSpawns         int `json:"team_spawns"`            // Agent spawns via ccspawn.
 	TeamMembersSpawned int `json:"team_members_spawned"`   // Members spawned via Task with team_name.
 	TeamMessagesRecvd  int `json:"team_messages_received"` // Incoming <teammate-message> count.
+
+	// Native Claude Code workflows and task checklist tools.
+	WorkflowRuns            int `json:"workflow_runs"`
+	WorkflowAsyncRuns       int `json:"workflow_async_runs,omitempty"`
+	WorkflowAgentRuns       int `json:"workflow_agent_runs,omitempty"`
+	WorkflowKeywordRequests int `json:"workflow_keyword_requests,omitempty"`
+	WorkflowTaskOps         int `json:"workflow_task_ops,omitempty"`
+	TaskCreates             int `json:"task_creates,omitempty"`
+	TaskUpdates             int `json:"task_updates,omitempty"`
 
 	// Activity sparkline: message counts bucketed into time slots.
 	// Encoded as a string of Unicode block chars (▁▂▃▄▅▆▇█).

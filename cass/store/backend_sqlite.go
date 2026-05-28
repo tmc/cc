@@ -304,6 +304,9 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 				h.Compactions = stats.Compactions
 				h.CacheReads = stats.CacheReads
 				h.CacheCreationInputTokens = stats.CacheCreationInputTokens
+				h.WorkflowCount = stats.WorkflowRuns
+				h.WorkflowAgentCount = stats.WorkflowAgentRuns
+				h.WorkflowTaskOpCount = stats.WorkflowTaskOps
 			}
 		}
 		hits = append(hits, h)

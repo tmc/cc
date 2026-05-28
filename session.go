@@ -177,6 +177,12 @@ type ToolUseResult struct {
 	Tasks  []TaskSummary `json:"tasks,omitempty"`
 	TaskID string        `json:"taskId,omitempty"`
 
+	// Workflow fields returned by Claude Code's Workflow tool.
+	RunID         string `json:"runId,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	TranscriptDir string `json:"transcriptDir,omitempty"`
+	ScriptPath    string `json:"scriptPath,omitempty"`
+
 	// Usage for subagent results.
 	Usage             *Usage  `json:"usage,omitempty"`
 	DurationMs        float64 `json:"durationMs,omitempty"`

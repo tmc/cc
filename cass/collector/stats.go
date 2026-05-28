@@ -82,6 +82,12 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 		if e.Type == "system" && e.Subtype == "compact_boundary" {
 			s.Compactions++
 		}
+		if e.Attachment != nil && e.Attachment.Type == "workflow_keyword_request" {
+			s.WorkflowKeywordRequests++
+		}
+		if e.ToolUseResult != nil && e.ToolUseResult.Status == "async_launched" && e.ToolUseResult.RunID != "" {
+			s.WorkflowAsyncRuns++
+		}
 		if e.Message == nil {
 			continue
 		}
@@ -158,6 +164,16 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 					if tn := extractTaskTeamName(b.Input); tn != "" {
 						s.TeamMembersSpawned++
 					}
+				case "Workflow":
+					s.WorkflowRuns++
+				case "TaskCreate":
+					s.WorkflowTaskOps++
+					s.TaskCreates++
+				case "TaskUpdate":
+					s.WorkflowTaskOps++
+					s.TaskUpdates++
+				case "TaskList", "TaskGet", "TaskOutput", "TaskStop":
+					s.WorkflowTaskOps++
 				case "Bash":
 					cmd := extractBashCommand(b.Input)
 					countIT2Commands(cmd, &s)

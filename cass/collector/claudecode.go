@@ -168,6 +168,10 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 	stats := ExtractStats(entries)
 	skills := ExtractSkills(entries, "claude-code")
 	goals := ExtractClaudeGoals(entries)
+	workflows := ExtractWorkflows(path, parentEntries)
+	for _, w := range workflows {
+		stats.WorkflowAgentRuns += w.AgentCount
+	}
 
 	// Extract team links (native Claude Code agent teams).
 	teamLinks := ExtractTeamLinks(entries)
@@ -212,6 +216,7 @@ func (c *ClaudeCode) parseSession(path string) (cass.Session, error) {
 		Goals:        goals,
 		Stats:        stats,
 		Metadata:     meta,
+		Workflows:    workflows,
 		TeamName:     teamName,
 		AgentName:    agentName,
 		IsTeamLead:   isTeamLead,

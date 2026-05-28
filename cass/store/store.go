@@ -768,6 +768,9 @@ func scanHit(row hitScanner) (cass.Hit, error) {
 			h.Compactions = stats.Compactions
 			h.CacheReads = stats.CacheReads
 			h.CacheCreationInputTokens = stats.CacheCreationInputTokens
+			h.WorkflowCount = stats.WorkflowRuns
+			h.WorkflowAgentCount = stats.WorkflowAgentRuns
+			h.WorkflowTaskOpCount = stats.WorkflowTaskOps
 		}
 	}
 	return h, nil
@@ -888,6 +891,7 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 	}
 	defer skillRows.Close()
 	topSkills := map[string]int{}
+	var workflowRuns, workflowAgents, workflowTaskOps int
 	for skillRows.Next() {
 		var skillsJSON string
 		if err := skillRows.Scan(&skillsJSON); err != nil {
@@ -907,6 +911,25 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 			}
 			topSkills[sk.Name] += n
 		}
+	}
+
+	statsRows, err := s.db.QueryContext(ctx, `SELECT stats_json FROM sessions `+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer statsRows.Close()
+	for statsRows.Next() {
+		var statsJSON string
+		if err := statsRows.Scan(&statsJSON); err != nil {
+			return nil, err
+		}
+		var stats cass.SessionStats
+		if json.Unmarshal([]byte(statsJSON), &stats) != nil {
+			continue
+		}
+		workflowRuns += stats.WorkflowRuns
+		workflowAgents += stats.WorkflowAgentRuns
+		workflowTaskOps += stats.WorkflowTaskOps
 	}
 
 	// Sessions per day (last 30 days).
@@ -929,38 +952,41 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 	}
 
 	return map[string]any{
-		"sessions":         sessions,
-		"agents":           agents,
-		"workspaces":       workspaces,
-		"tool_calls":       tools,
-		"input_tokens":     inTok,
-		"output_tokens":    outTok,
-		"total_tokens":     inTok + outTok,
-		"files_read":       fRead,
-		"files_written":    fWritten,
-		"files_edited":     fEdited,
-		"lines_written":    lWritten,
-		"turns":            turns,
-		"duration_secs":    dur,
-		"subagent_spawns":  subSpawns,
-		"it2_splits":       it2Splits,
-		"it2_sends":        it2Sends,
-		"it2_screens":      it2Screens,
-		"it2_buffers":      it2Buffers,
-		"team_inbox_reads": teamInbox,
-		"team_inbox_sends": teamSends,
-		"team_task_ops":    teamTasks,
-		"team_spawns":      teamSpawns,
-		"agents_breakdown": agentCounts,
-		"workspace_top":    wsCounts,
-		"top_skills":       topSkills,
-		"sessions_per_day": daily,
-		"goals":            goalCount,
-		"active_goals":     activeGoalCount,
-		"completed_goals":  completedGoalCount,
-		"skills":           skillCount,
-		"selected_skills":  selectedSkillCount,
-		"loaded_skills":    loadedSkillCount,
+		"sessions":          sessions,
+		"agents":            agents,
+		"workspaces":        workspaces,
+		"tool_calls":        tools,
+		"input_tokens":      inTok,
+		"output_tokens":     outTok,
+		"total_tokens":      inTok + outTok,
+		"files_read":        fRead,
+		"files_written":     fWritten,
+		"files_edited":      fEdited,
+		"lines_written":     lWritten,
+		"turns":             turns,
+		"duration_secs":     dur,
+		"subagent_spawns":   subSpawns,
+		"it2_splits":        it2Splits,
+		"it2_sends":         it2Sends,
+		"it2_screens":       it2Screens,
+		"it2_buffers":       it2Buffers,
+		"team_inbox_reads":  teamInbox,
+		"team_inbox_sends":  teamSends,
+		"team_task_ops":     teamTasks,
+		"team_spawns":       teamSpawns,
+		"agents_breakdown":  agentCounts,
+		"workspace_top":     wsCounts,
+		"top_skills":        topSkills,
+		"sessions_per_day":  daily,
+		"goals":             goalCount,
+		"active_goals":      activeGoalCount,
+		"completed_goals":   completedGoalCount,
+		"skills":            skillCount,
+		"selected_skills":   selectedSkillCount,
+		"loaded_skills":     loadedSkillCount,
+		"workflows":         workflowRuns,
+		"workflow_agents":   workflowAgents,
+		"workflow_task_ops": workflowTaskOps,
 	}, nil
 }
 
