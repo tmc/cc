@@ -92,22 +92,28 @@ func ReadUnread(teamName, agentName string) ([]InboxMessage, error) {
 		return nil, err
 	}
 
-	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat inbox %q: %w", agentName, err)
+	}
+
+	lock, err := acquireInboxLock(path)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.release()
+
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("open inbox %q: %w", agentName, err)
+		return nil, fmt.Errorf("read inbox %q: %w", agentName, err)
 	}
-	defer f.Close()
-
-	if err := lockFile(f); err != nil {
-		return nil, err
-	}
-	defer unlockFile(f)
-
 	var msgs []InboxMessage
-	if err := json.NewDecoder(f).Decode(&msgs); err != nil {
+	if err := json.Unmarshal(data, &msgs); err != nil {
 		return nil, fmt.Errorf("parse inbox %q: %w", agentName, err)
 	}
 
@@ -122,18 +128,11 @@ func ReadUnread(teamName, agentName string) ([]InboxMessage, error) {
 		return nil, nil
 	}
 
-	// Rewrite file with updated read flags.
-	if err := f.Truncate(0); err != nil {
-		return unread, fmt.Errorf("truncate inbox: %w", err)
-	}
-	if _, err := f.Seek(0, 0); err != nil {
-		return unread, fmt.Errorf("seek inbox: %w", err)
-	}
-	data, err := json.MarshalIndent(msgs, "", "  ")
+	out, err := json.MarshalIndent(msgs, "", "  ")
 	if err != nil {
 		return unread, fmt.Errorf("marshal inbox: %w", err)
 	}
-	if _, err := f.Write(data); err != nil {
+	if err := writeFileAtomic(path, out, 0o644); err != nil {
 		return unread, fmt.Errorf("write inbox: %w", err)
 	}
 	return unread, nil
@@ -155,42 +154,33 @@ func AppendInbox(teamName, agentName string, msg InboxMessage) error {
 		msg.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	}
 
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	lock, err := acquireInboxLock(path)
 	if err != nil {
-		return fmt.Errorf("open inbox %q: %w", agentName, err)
-	}
-	defer f.Close()
-
-	if err := lockFile(f); err != nil {
 		return err
 	}
-	defer unlockFile(f)
+	defer lock.release()
 
 	var msgs []InboxMessage
-	info, err := f.Stat()
-	if err != nil {
-		return fmt.Errorf("stat inbox: %w", err)
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read inbox %q: %w", agentName, err)
 	}
-	if info.Size() > 0 {
-		if err := json.NewDecoder(f).Decode(&msgs); err != nil {
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &msgs); err != nil {
 			return fmt.Errorf("parse inbox %q: %w", agentName, err)
 		}
 	}
 
 	msgs = append(msgs, msg)
 
-	if err := f.Truncate(0); err != nil {
-		return fmt.Errorf("truncate inbox: %w", err)
-	}
-	if _, err := f.Seek(0, 0); err != nil {
-		return fmt.Errorf("seek inbox: %w", err)
-	}
-	data, err := json.MarshalIndent(msgs, "", "  ")
+	out, err := json.MarshalIndent(msgs, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal inbox: %w", err)
 	}
-	_, err = f.Write(data)
-	return err
+	if err := writeFileAtomic(path, out, 0o644); err != nil {
+		return fmt.Errorf("write inbox: %w", err)
+	}
+	return nil
 }
 
 // ParseMessage attempts to parse an InboxMessage's text as a StructuredMessage.
@@ -219,6 +209,67 @@ func readInboxFile(path string) ([]InboxMessage, error) {
 		return nil, fmt.Errorf("parse inbox: %w", err)
 	}
 	return msgs, nil
+}
+
+// writeFileAtomic writes data to path by creating a temp file in the same
+// directory and renaming it into place. If path already exists, its mode is
+// preserved; otherwise perm is used.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if fi, err := os.Stat(path); err == nil {
+		perm = fi.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(dir, ".cc-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return fmt.Errorf("chmod temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Rename(name, path); err != nil {
+		os.Remove(name)
+		return fmt.Errorf("rename temp: %w", err)
+	}
+	return nil
+}
+
+// inboxLock is a sidecar flock that survives atomic renames of the inbox file.
+type inboxLock struct{ f *os.File }
+
+func (l *inboxLock) release() {
+	if l == nil || l.f == nil {
+		return
+	}
+	unlockFile(l.f)
+	l.f.Close()
+}
+
+// acquireInboxLock takes an exclusive flock on a sidecar ".lock" file next to
+// path. The sidecar is created if needed; its inode is stable across renames
+// of the inbox file, so it serializes concurrent writers correctly.
+func acquireInboxLock(path string) (*inboxLock, error) {
+	lp := path + ".lock"
+	f, err := os.OpenFile(lp, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open inbox lock: %w", err)
+	}
+	if err := lockFile(f); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return &inboxLock{f: f}, nil
 }
 
 func lockFile(f *os.File) error {

@@ -98,7 +98,7 @@ func WriteTeamConfig(teamName string, cfg *TeamConfig) error {
 		return fmt.Errorf("marshal team config: %w", err)
 	}
 	path := filepath.Join(dir, "config.json")
-	return os.WriteFile(path, data, 0o644)
+	return writeFileAtomic(path, data, 0o644)
 }
 
 // ListTeams returns the names of all teams.
