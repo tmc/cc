@@ -3,11 +3,28 @@
 // Each collector implements [cass.Collector] and handles discovering and
 // parsing session logs from a specific agent.
 //
-// Currently supported agents:
-//   - Claude Code: ~/.claude/projects/ JSONL session files
-//   - Codex: ~/.codex/sessions/ JSONL session files
-//   - Gemini CLI: ~/.gemini/tmp/<project>/chats/ session JSON files
-//   - Cursor: Cursor IDE workspace storage
-//   - OpenClaw: ~/.openclaw/agents/<agent>/sessions/ JSONL files
-//   - Antigravity: ~/.gemini/antigravity/ session data
+// # Collectors
+//
+//   - [ClaudeCode]: ~/.claude/projects/ JSONL session files
+//   - [Codex]: ~/.codex/sessions/ JSONL session files
+//   - [GeminiCLI]: ~/.gemini/tmp/<project>/chats/ session JSON files
+//   - [Cursor]: Cursor IDE workspace storage
+//   - [OpenClaw]: ~/.openclaw/agents/<agent>/sessions/ JSONL files
+//   - [Antigravity]: ~/.gemini/antigravity/ session data
+//
+// # Derived-data helpers
+//
+// Scanners walk on-disk state outside the per-session JSONL stream:
+//
+//   - [ScanAgentDefs]: ~/.claude/agents/**/*.md agent definitions
+//   - [ScanJobs]: ~/.claude/jobs/<shortId>/state.json job records
+//   - [ScanTeamConfigs]: ~/.claude/teams/<name>/config.json team rosters
+//
+// Extractors derive structured records from a session's parsed entries:
+//
+//   - [ExtractClaudeGoals]: goal-mode objectives
+//   - [ExtractLinks]: inter-session message/observation links
+//   - [ExtractTeamLinks]: team-membership links
+//   - [ExtractSkills]: skill invocations
+//   - [ExtractStats]: per-session aggregate statistics
 package collector

@@ -15,4 +15,23 @@
 //
 // Session linkage uses the session ID embedded in the request body's
 // metadata.user_id field (format: "user_..._session_<UUID>").
+//
+// # Usage
+//
+// Parse a single HAR file or scan a directory:
+//
+//	req, err := har.ParseFile("/path/to/export.har")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	fmt.Println(req.SessionID, req.Model, req.Usage.OutputTokens)
+//
+//	reqs, err := har.ScanDirContext(ctx, "/path/to/har/dir")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
+// [ParseSessionV2File] / [ScanSessionV2Dir] handle Proxyman's newer
+// .proxymansessionv2 / .proxymanlogv2 captures. [ScanArtifactDirsContext]
+// scans ~/.it2/sessions/*/proxy-traffic.*.jsonl artifact streams.
 package har
