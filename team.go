@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/tmc/cc/ccfs"
 )
 
 // TeamConfig represents a team's configuration stored at
@@ -98,7 +100,7 @@ func WriteTeamConfig(teamName string, cfg *TeamConfig) error {
 		return fmt.Errorf("marshal team config: %w", err)
 	}
 	path := filepath.Join(dir, "config.json")
-	return writeFileAtomic(path, data, 0o644)
+	return ccfs.WriteFileAtomic(path, data, 0o644)
 }
 
 // ListTeams returns the names of all teams.

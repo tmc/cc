@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
+
+	"github.com/tmc/cc/ccfs"
 )
 
 // InboxMessage is a single message in an agent's inbox file.
@@ -139,7 +140,7 @@ func ReadUnread(ctx context.Context, teamName, agentName string) ([]InboxMessage
 	if err != nil {
 		return unread, fmt.Errorf("marshal inbox: %w", err)
 	}
-	if err := writeFileAtomic(path, out, 0o644); err != nil {
+	if err := ccfs.WriteFileAtomic(path, out, 0o644); err != nil {
 		return unread, fmt.Errorf("write inbox: %w", err)
 	}
 	return unread, nil
@@ -187,7 +188,7 @@ func AppendInbox(ctx context.Context, teamName, agentName string, msg InboxMessa
 	if err != nil {
 		return fmt.Errorf("marshal inbox: %w", err)
 	}
-	if err := writeFileAtomic(path, out, 0o644); err != nil {
+	if err := ccfs.WriteFileAtomic(path, out, 0o644); err != nil {
 		return fmt.Errorf("write inbox: %w", err)
 	}
 	return nil
@@ -221,40 +222,6 @@ func readInboxFile(path string) ([]InboxMessage, error) {
 	return msgs, nil
 }
 
-// writeFileAtomic writes data to path by creating a temp file in the same
-// directory and renaming it into place. If path already exists, its mode is
-// preserved; otherwise perm is used.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if fi, err := os.Stat(path); err == nil {
-		perm = fi.Mode().Perm()
-	}
-	tmp, err := os.CreateTemp(dir, ".cc-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
-	}
-	name := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return fmt.Errorf("write temp: %w", err)
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		return fmt.Errorf("chmod temp: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(name)
-		return fmt.Errorf("close temp: %w", err)
-	}
-	if err := os.Rename(name, path); err != nil {
-		os.Remove(name)
-		return fmt.Errorf("rename temp: %w", err)
-	}
-	return nil
-}
-
 // inboxLock is a sidecar flock that survives atomic renames of the inbox file.
 type inboxLock struct{ f *os.File }
 
@@ -262,7 +229,7 @@ func (l *inboxLock) release() {
 	if l == nil || l.f == nil {
 		return
 	}
-	unlockFile(l.f)
+	ccfs.UnlockFile(l.f)
 	l.f.Close()
 }
 
@@ -275,27 +242,9 @@ func acquireInboxLock(path string) (*inboxLock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open inbox lock: %w", err)
 	}
-	if err := lockFile(f); err != nil {
+	if err := ccfs.LockFile(f); err != nil {
 		f.Close()
 		return nil, err
 	}
 	return &inboxLock{f: f}, nil
-}
-
-func lockFile(f *os.File) error {
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("lock file: %w", err)
-	}
-	return nil
-}
-
-func lockFileShared(f *os.File) error {
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
-		return fmt.Errorf("rlock file: %w", err)
-	}
-	return nil
-}
-
-func unlockFile(f *os.File) {
-	syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }

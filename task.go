@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+
+	"github.com/tmc/cc/ccfs"
 )
 
 // TeamTask represents a task stored at ~/.claude/tasks/{namespace}/{id}.json.
@@ -92,10 +94,10 @@ func (s *TaskStore) Get(id string) (TeamTask, error) {
 	}
 	defer f.Close()
 
-	if err := lockFileShared(f); err != nil {
+	if err := ccfs.LockFileShared(f); err != nil {
 		return TeamTask{}, fmt.Errorf("rlock task %q: %w", id, err)
 	}
-	defer unlockFile(f)
+	defer ccfs.UnlockFile(f)
 
 	data, err := io.ReadAll(f)
 	if err != nil {
@@ -166,10 +168,10 @@ func (s *TaskStore) writeTask(t TeamTask) error {
 	}
 	defer f.Close()
 
-	if err := lockFile(f); err != nil {
+	if err := ccfs.LockFile(f); err != nil {
 		return fmt.Errorf("lock task %q: %w", t.ID, err)
 	}
-	defer unlockFile(f)
+	defer ccfs.UnlockFile(f)
 
 	return s.writeTaskLockedFile(f, t)
 }
@@ -225,12 +227,12 @@ func (s *TaskStore) lockStore() (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("open task store lock: %w", err)
 	}
-	if err := lockFile(f); err != nil {
+	if err := ccfs.LockFile(f); err != nil {
 		f.Close()
 		return nil, fmt.Errorf("lock task store: %w", err)
 	}
 	return func() {
-		unlockFile(f)
+		ccfs.UnlockFile(f)
 		f.Close()
 	}, nil
 }
