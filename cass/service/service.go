@@ -26,7 +26,7 @@ type Config struct {
 
 // Service orchestrates collection, indexing, and search.
 type Service struct {
-	store      *store.Store
+	store      *store.DB
 	collectors []cass.Collector
 	log        *slog.Logger
 }

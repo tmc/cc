@@ -8,7 +8,7 @@ import (
 
 // StandaloneBackend wraps a Backend and exposes just BatchIndex, Search,
 // SessionCount, BackendStats, and Close. It is used for benchmarking and for
-// the DuckDB prototype without touching the existing Store type.
+// the DuckDB prototype without touching the existing DB type.
 type StandaloneBackend struct {
 	b Backend
 }

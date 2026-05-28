@@ -8,7 +8,7 @@ import (
 )
 
 // Backend is the minimal interface a storage engine must implement.
-// The Store type wraps a Backend and exposes the full cass.Index plus
+// The DB type wraps a Backend and exposes the full cass.Index plus
 // supplementary methods (Links, GraphData, Stats, etc.).
 //
 // A Backend handles only the two hot-path operations—indexing and search—

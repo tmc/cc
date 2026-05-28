@@ -13,8 +13,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Store implements cass.Index using SQLite with FTS5.
-type Store struct {
+// DB implements cass.Index using SQLite with FTS5.
+type DB struct {
 	db *sql.DB
 }
 
@@ -25,7 +25,7 @@ type hitScanner interface {
 }
 
 // New opens or creates a SQLite store at the given path.
-func New(dbPath string) (*Store, error) {
+func New(dbPath string) (*DB, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -46,7 +46,7 @@ func New(dbPath string) (*Store, error) {
 			return nil, fmt.Errorf("exec %s: %w", pragma, err)
 		}
 	}
-	s := &Store{db: db}
+	s := &DB{db: db}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -54,7 +54,7 @@ func New(dbPath string) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) migrate() error {
+func (s *DB) migrate() error {
 	schema := `
 		CREATE TABLE IF NOT EXISTS sessions (
 			id TEXT PRIMARY KEY,
@@ -302,7 +302,7 @@ func (s *Store) migrate() error {
 }
 
 // BatchIndex adds or updates sessions atomically.
-func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
+func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -487,7 +487,7 @@ func (s *Store) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 }
 
 // Search executes a full-text query and returns matching results.
-func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchResult, error) {
+func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchResult, error) {
 	if req.Limit <= 0 {
 		req.Limit = 20
 	}
@@ -632,7 +632,7 @@ func (s *Store) Search(ctx context.Context, req cass.SearchRequest) (*cass.Searc
 }
 
 // Delete removes sessions matching the filter.
-func (s *Store) Delete(ctx context.Context, filter cass.DeleteFilter) error {
+func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -685,19 +685,19 @@ func agentFilterArgs(agent string) []any {
 // Close checkpoints the WAL and releases the database connection.
 // Without checkpointing, the WAL file grows unboundedly and can reach
 // several GB even when the main DB is small.
-func (s *Store) Close() error {
+func (s *DB) Close() error {
 	s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return s.db.Close()
 }
 
 // SetMeta stores a key-value pair in the metadata table.
-func (s *Store) SetMeta(ctx context.Context, key, value string) error {
+func (s *DB) SetMeta(ctx context.Context, key, value string) error {
 	_, err := s.db.ExecContext(ctx, `INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)`, key, value)
 	return err
 }
 
 // Meta retrieves a metadata value by key.
-func (s *Store) Meta(ctx context.Context, key string) (string, error) {
+func (s *DB) Meta(ctx context.Context, key string) (string, error) {
 	var value string
 	err := s.db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = ?`, key).Scan(&value)
 	if err == sql.ErrNoRows {
@@ -707,14 +707,14 @@ func (s *Store) Meta(ctx context.Context, key string) (string, error) {
 }
 
 // SourcePath returns the source file path for a session by its ID.
-func (s *Store) SourcePath(ctx context.Context, id string) (string, error) {
+func (s *DB) SourcePath(ctx context.Context, id string) (string, error) {
 	var path string
 	err := s.db.QueryRowContext(ctx, `SELECT source_path FROM sessions WHERE id = ?`, id).Scan(&path)
 	return path, err
 }
 
 // Session returns indexed metadata for a single session.
-func (s *Store) Session(ctx context.Context, id string) (cass.Hit, error) {
+func (s *DB) Session(ctx context.Context, id string) (cass.Hit, error) {
 	query := `SELECT id, agent, title, substr(content, 1, 200) as snip, 0.0 as score, workspace, source_path, started_at, ` + hitStatsCols + ` FROM sessions WHERE id = ?`
 	return scanHit(s.db.QueryRowContext(ctx, query, id))
 }
@@ -763,7 +763,7 @@ func scanHit(row hitScanner) (cass.Hit, error) {
 }
 
 // SessionCount returns the number of indexed sessions.
-func (s *Store) SessionCount(ctx context.Context) (int, error) {
+func (s *DB) SessionCount(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM sessions`).Scan(&count)
 	return count, err
@@ -771,7 +771,7 @@ func (s *Store) SessionCount(ctx context.Context) (int, error) {
 
 // AggregateStats returns detailed aggregate statistics across all sessions,
 // optionally filtered by time range.
-func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (map[string]any, error) {
+func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[string]any, error) {
 	where := "WHERE 1=1"
 	var args []any
 	if !after.IsZero() {
@@ -977,7 +977,7 @@ func (s *Store) AggregateStats(ctx context.Context, after, before time.Time) (ma
 }
 
 // SaveMapping stores a mapping between iTerm2 session, Claude session, and CASS session IDs.
-func (s *Store) SaveMapping(ctx context.Context, itermSID, claudeSID, cassSID, workspace, title string, startedAt int64) error {
+func (s *DB) SaveMapping(ctx context.Context, itermSID, claudeSID, cassSID, workspace, title string, startedAt int64) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO session_mapping (iterm_session, claude_session, cass_session, workspace, title, started_at)
 		VALUES (?, ?, ?, ?, ?, ?)
@@ -986,7 +986,7 @@ func (s *Store) SaveMapping(ctx context.Context, itermSID, claudeSID, cassSID, w
 }
 
 // Mappings returns all session mappings, optionally filtered by iTerm2 or Claude session ID.
-func (s *Store) Mappings(ctx context.Context, filter string) ([]SessionMapping, error) {
+func (s *DB) Mappings(ctx context.Context, filter string) ([]SessionMapping, error) {
 	query := `SELECT iterm_session, claude_session, cass_session, workspace, title, started_at FROM session_mapping`
 	var args []any
 	if filter != "" {
@@ -1023,7 +1023,7 @@ type SessionMapping struct {
 }
 
 // Links returns all session links, optionally filtered by session ID.
-func (s *Store) Links(ctx context.Context, sessionID string) ([]cass.SessionLink, error) {
+func (s *DB) Links(ctx context.Context, sessionID string) ([]cass.SessionLink, error) {
 	query := `SELECT source_session, target_session, kind, action, text, timestamp, team_name FROM session_links`
 	var args []any
 	if sessionID != "" {
@@ -1050,7 +1050,7 @@ func (s *Store) Links(ctx context.Context, sessionID string) ([]cass.SessionLink
 }
 
 // Goals returns goal-mode objectives joined with parent session metadata.
-func (s *Store) Goals(ctx context.Context, status string, limit int) ([]cass.GoalHit, error) {
+func (s *DB) Goals(ctx context.Context, status string, limit int) ([]cass.GoalHit, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -1108,7 +1108,7 @@ func (s *Store) Goals(ctx context.Context, status string, limit int) ([]cass.Goa
 }
 
 // Skills returns skill usage records joined with parent session metadata.
-func (s *Store) Skills(ctx context.Context, skill string, kind string, limit int) ([]cass.SkillHit, error) {
+func (s *DB) Skills(ctx context.Context, skill string, kind string, limit int) ([]cass.SkillHit, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -1179,7 +1179,7 @@ type SessionLabel struct {
 }
 
 // ResolveLabels looks up human-readable labels for a set of iTerm2 session ID prefixes.
-func (s *Store) ResolveLabels(ctx context.Context, prefixes []string) (map[string]SessionLabel, error) {
+func (s *DB) ResolveLabels(ctx context.Context, prefixes []string) (map[string]SessionLabel, error) {
 	if len(prefixes) == 0 {
 		return nil, nil
 	}
@@ -1218,7 +1218,7 @@ func (s *Store) ResolveLabels(ctx context.Context, prefixes []string) (map[strin
 
 // GraphData returns combined links and node metadata for the session graph.
 // If since is non-zero, only links after that time are included.
-func (s *Store) GraphData(ctx context.Context, since time.Time) (*cass.GraphData, error) {
+func (s *DB) GraphData(ctx context.Context, since time.Time) (*cass.GraphData, error) {
 	// Get all links, optionally filtered by time.
 	links, err := s.Links(ctx, "")
 	if err != nil {
@@ -1360,7 +1360,7 @@ func (s *Store) GraphData(ctx context.Context, since time.Time) (*cass.GraphData
 }
 
 // BatchIndexRequests adds or updates API request records atomically.
-func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIRequest) error {
+func (s *DB) BatchIndexRequests(ctx context.Context, requests []cass.APIRequest) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -1420,7 +1420,7 @@ func (s *Store) BatchIndexRequests(ctx context.Context, requests []cass.APIReque
 }
 
 // SaveRateLimitSnapshots stores rate-limit utilization data points.
-func (s *Store) SaveRateLimitSnapshots(ctx context.Context, snapshots []cass.RateLimitSnapshot) error {
+func (s *DB) SaveRateLimitSnapshots(ctx context.Context, snapshots []cass.RateLimitSnapshot) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -1455,7 +1455,7 @@ func (s *Store) SaveRateLimitSnapshots(ctx context.Context, snapshots []cass.Rat
 }
 
 // QueryRequests returns API requests for a session, ordered by timestamp.
-func (s *Store) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIRequest, error) {
+func (s *DB) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIRequest, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, session_id, request_id, timestamp,
 			model, model_family, purpose,
@@ -1510,7 +1510,7 @@ func (s *Store) QueryRequests(ctx context.Context, sessionID string) ([]cass.API
 }
 
 // RateLimitTrend returns rate-limit utilization over time for a given bucket.
-func (s *Store) RateLimitTrend(ctx context.Context, bucket string, since time.Time) ([]cass.RateLimitSnapshot, error) {
+func (s *DB) RateLimitTrend(ctx context.Context, bucket string, since time.Time) ([]cass.RateLimitSnapshot, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT timestamp, utilization, reset_at
 		FROM rate_limit_snapshots
@@ -1548,7 +1548,7 @@ func (s *Store) RateLimitTrend(ctx context.Context, bucket string, since time.Ti
 }
 
 // APIRequestCount returns the number of indexed API requests.
-func (s *Store) APIRequestCount(ctx context.Context) (int, error) {
+func (s *DB) APIRequestCount(ctx context.Context) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM api_requests`).Scan(&count)
 	return count, err
@@ -1569,7 +1569,7 @@ type DailyTokenRow struct {
 
 // DailyTokenUsage returns per-day token totals from api_requests for the given window.
 // after zero means no lower bound.
-func (s *Store) DailyTokenUsage(ctx context.Context, after time.Time) ([]DailyTokenRow, error) {
+func (s *DB) DailyTokenUsage(ctx context.Context, after time.Time) ([]DailyTokenRow, error) {
 	where := "WHERE timestamp > 0"
 	var args []any
 	if !after.IsZero() {
@@ -1619,7 +1619,7 @@ type TeamConfig struct {
 }
 
 // SaveTeamConfig upserts a team config record.
-func (s *Store) SaveTeamConfig(ctx context.Context, tc TeamConfig) error {
+func (s *DB) SaveTeamConfig(ctx context.Context, tc TeamConfig) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO team_configs
 			(name, lead_session_id, lead_agent_id, description, created_at, members_json, indexed_at)
@@ -1631,7 +1631,7 @@ func (s *Store) SaveTeamConfig(ctx context.Context, tc TeamConfig) error {
 }
 
 // TeamConfigs returns all indexed team configurations.
-func (s *Store) TeamConfigs(ctx context.Context) ([]TeamConfig, error) {
+func (s *DB) TeamConfigs(ctx context.Context) ([]TeamConfig, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, lead_session_id, lead_agent_id, description, created_at, members_json
 		FROM team_configs ORDER BY name`)

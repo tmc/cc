@@ -8,7 +8,7 @@ import (
 	"github.com/tmc/cc/cass"
 )
 
-func newTestStore(t *testing.T) *Store {
+func newTestStore(t *testing.T) *DB {
 	t.Helper()
 	s, err := New(":memory:")
 	if err != nil {

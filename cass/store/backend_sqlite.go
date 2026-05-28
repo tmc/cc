@@ -14,7 +14,7 @@ import (
 
 // sqliteBackend implements Backend using SQLite FTS5.
 // It is a thin wrapper around *sql.DB so the same migrate/query logic
-// used by Store can be reused for both the default and porter variants.
+// used by DB can be reused for both the default and porter variants.
 type sqliteBackend struct {
 	db          *sql.DB
 	tokenizer   string // "unicode61" or "porter unicode61"

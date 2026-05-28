@@ -27,7 +27,7 @@ type SubagentRunListEntry struct {
 }
 
 // SubagentRuns lists subagent runs ordered by started_at DESC.
-func (s *Store) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentRunListEntry, error) {
+func (s *DB) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentRunListEntry, error) {
 	if f.Limit <= 0 {
 		f.Limit = 50
 	}
@@ -116,7 +116,7 @@ type SubagentRunSummary struct {
 
 // SubagentRunsSummary returns aggregate counts and per-agent-type
 // histogram. Used by `cass stats`.
-func (s *Store) SubagentRunsSummary(ctx context.Context) (SubagentRunSummary, error) {
+func (s *DB) SubagentRunsSummary(ctx context.Context) (SubagentRunSummary, error) {
 	var sum SubagentRunSummary
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*), COUNT(DISTINCT parent_session_id),

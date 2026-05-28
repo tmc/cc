@@ -102,7 +102,7 @@ const jobsAgentsSchema = `
 `
 
 // SaveJob upserts a Job row.
-func (s *Store) SaveJob(ctx context.Context, j Job) error {
+func (s *DB) SaveJob(ctx context.Context, j Job) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO jobs
 			(short_id, session_id, resume_session_id, name, name_source, intent,
@@ -126,7 +126,7 @@ func (s *Store) SaveJob(ctx context.Context, j Job) error {
 }
 
 // Jobs returns indexed jobs ordered by updated_at desc.
-func (s *Store) Jobs(ctx context.Context) ([]Job, error) {
+func (s *DB) Jobs(ctx context.Context) ([]Job, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT short_id, session_id, resume_session_id, name, name_source, intent,
 			state, detail, tempo, in_flight_tasks, in_flight_queued,
@@ -158,14 +158,14 @@ func (s *Store) Jobs(ctx context.Context) ([]Job, error) {
 }
 
 // JobCount returns the number of indexed jobs.
-func (s *Store) JobCount(ctx context.Context) (int, error) {
+func (s *DB) JobCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM jobs`).Scan(&n)
 	return n, err
 }
 
 // SaveAgentDef upserts an AgentDef row.
-func (s *Store) SaveAgentDef(ctx context.Context, a AgentDef) error {
+func (s *DB) SaveAgentDef(ctx context.Context, a AgentDef) error {
 	disabled := 0
 	if a.Disabled {
 		disabled = 1
@@ -187,7 +187,7 @@ func (s *Store) SaveAgentDef(ctx context.Context, a AgentDef) error {
 }
 
 // AgentDefs returns indexed agent definitions ordered by name.
-func (s *Store) AgentDefs(ctx context.Context) ([]AgentDef, error) {
+func (s *DB) AgentDefs(ctx context.Context) ([]AgentDef, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, description, version, command, disabled,
 			keywords_json, patterns_json, tools_json, capabilities_json,
@@ -215,7 +215,7 @@ func (s *Store) AgentDefs(ctx context.Context) ([]AgentDef, error) {
 }
 
 // AgentDefCount returns the number of indexed agent definitions.
-func (s *Store) AgentDefCount(ctx context.Context) (int, error) {
+func (s *DB) AgentDefCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM agent_defs`).Scan(&n)
 	return n, err
