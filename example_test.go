@@ -1,6 +1,7 @@
 package cc_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -11,7 +12,7 @@ func ExampleNewReader() {
 	const jsonl = `{"type":"user","sessionId":"s1","uuid":"u1","message":{"role":"user","content":"hello"}}
 {"type":"assistant","sessionId":"s1","uuid":"u2","message":{"role":"assistant","content":[{"type":"text","text":"hi there"}]}}
 `
-	r := cc.NewReader(strings.NewReader(jsonl))
+	r := cc.NewReader(context.Background(), strings.NewReader(jsonl))
 	for r.Next() {
 		e := r.Entry()
 		fmt.Println(e.Type, e.UUID)
@@ -34,7 +35,7 @@ func ExampleSummarize() {
 	const jsonl = `{"type":"user","sessionId":"s1","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"do the thing"}]}}
 {"type":"assistant","sessionId":"s1","uuid":"u2","message":{"role":"assistant","model":"claude","content":[{"type":"text","text":"ok"}]}}
 `
-	entries, err := cc.ReadAll(strings.NewReader(jsonl))
+	entries, err := cc.ReadAll(context.Background(), strings.NewReader(jsonl))
 	if err != nil {
 		fmt.Println("err:", err)
 		return
