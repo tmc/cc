@@ -66,7 +66,7 @@ func (c *OpenClaw) Scan(ctx context.Context, config cass.ScanConfig, out chan<- 
 func (c *OpenClaw) scanAgentsDir(ctx context.Context, agentsRoot string, config cass.ScanConfig, out chan<- cass.Session) error {
 	entries, err := os.ReadDir(agentsRoot)
 	if err != nil {
-		return fmt.Errorf("openclaw: read agents dir: %w", err)
+		return fmt.Errorf("read agents dir: %w", err)
 	}
 
 	for _, agentEntry := range entries {
@@ -245,7 +245,7 @@ func (c *OpenClaw) root() (string, error) {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("openclaw: home dir: %w", err)
+		return "", fmt.Errorf("home dir: %w", err)
 	}
 	return filepath.Join(home, ".openclaw", "agents"), nil
 }
