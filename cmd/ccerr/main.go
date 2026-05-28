@@ -1,12 +1,3 @@
-// Command ccerr finds errors, failures, and retries in Claude Code sessions.
-//
-// It scans for tool errors, bash failures, API errors, and user rejections.
-//
-// Usage:
-//
-//	ccerr [flags] [file...]
-//	ccerr session.jsonl
-//	ccerr -since 16h
 package main
 
 import (

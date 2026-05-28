@@ -1,13 +1,3 @@
-// Command cctime shows a timeline of events in a Claude Code session.
-//
-// It prints a chronological view of user messages, assistant actions,
-// tool uses, and errors with timestamps.
-//
-// Usage:
-//
-//	cctime [flags] [file...]
-//	cctime session.jsonl
-//	cctime -tools session.jsonl
 package main
 
 import (

@@ -1,14 +1,3 @@
-// Command ccdiff shows file changes made during Claude Code sessions.
-//
-// It reconstructs diffs from Edit tool uses (old_string → new_string)
-// and shows Write tool content. Output is in unified diff format.
-//
-// Usage:
-//
-//	ccdiff [flags] [file...]
-//	ccdiff session.jsonl
-//	ccdiff -path models/qwen2.go session.jsonl
-//	ccdiff -since 16h
 package main
 
 import (

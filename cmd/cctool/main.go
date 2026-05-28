@@ -1,20 +1,3 @@
-// Command cctool extracts tool use details from Claude Code sessions.
-//
-// It shows what tools were invoked, with what arguments, enabling review
-// of bash commands run, files edited, searches performed, etc.
-//
-// Usage:
-//
-//	cctool [flags] [file...]
-//	cctool -name Bash session.jsonl
-//	cctool -name Edit -show-input session.jsonl
-//
-// Examples:
-//
-//	cctool -name Bash session.jsonl            # show all bash commands
-//	cctool -name Edit session.jsonl            # show all file edits
-//	cctool -names session.jsonl                # list tool names used
-//	cctool -name Write -show-input session.jsonl  # show file writes with content
 package main
 
 import (

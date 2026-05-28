@@ -1,15 +1,3 @@
-// Command ccstats reports token usage, tool counts, and timing for sessions.
-//
-// Usage:
-//
-//	ccstats [flags] [file...]
-//	ccstats session.jsonl
-//	ccstats -since 24h
-//
-// Examples:
-//
-//	ccstats ~/.claude/projects/*/44fc759a*.jsonl
-//	ccstats -since 16h -format json
 package main
 
 import (

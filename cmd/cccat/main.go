@@ -1,21 +1,3 @@
-// Command cccat filters and displays Claude Code session entries.
-//
-// It reads JSONL session files from stdin or file arguments and outputs
-// entries matching the given filters. It works like grep but understands
-// session structure.
-//
-// Usage:
-//
-//	cccat [flags] [file...]
-//	ccsessions -format jsonl | cccat -type user
-//
-// Examples:
-//
-//	cccat -role user session.jsonl
-//	cccat -role assistant -text session.jsonl
-//	cccat -tool Bash session.jsonl
-//	cccat -type summary session.jsonl
-//	cccat -role assistant -tool-names session.jsonl
 package main
 
 import (

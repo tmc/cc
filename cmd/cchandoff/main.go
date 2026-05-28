@@ -1,7 +1,3 @@
-// Command cchandoff builds a cross-tool handoff prompt from a prior session.
-//
-// It reads a Claude JSONL session or a Gemini chat JSON file and produces a
-// structured bootstrap prompt for continuing work in the target tool.
 package main
 
 import (

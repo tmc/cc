@@ -1,22 +1,3 @@
-// Command ccfiles extracts file operations from Claude Code sessions.
-//
-// It finds all files that were written, edited, read, or created during a
-// session, including those modified via Bash commands (redirects, tee, cp, mv).
-//
-// Usage:
-//
-//	ccfiles [flags] [file...]
-//	ccfiles session.jsonl
-//	ccfiles -writes session.jsonl
-//	ccfiles -since 16h
-//
-// Examples:
-//
-//	ccfiles session.jsonl                    # all file ops
-//	ccfiles -writes session.jsonl            # only writes/edits
-//	ccfiles -reads session.jsonl             # only reads
-//	ccfiles -unique session.jsonl            # deduplicated file list
-//	ccfiles -writes -unique -since 16h       # all files written in last 16h
 package main
 
 import (
