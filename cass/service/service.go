@@ -134,10 +134,10 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 			defer wg.Done()
 
 			ch := make(chan cass.Session, 100)
-			var scanErr error
+			errCh := make(chan error, 1)
 
 			go func() {
-				scanErr = col.Scan(ctx, cass.ScanConfig{
+				errCh <- col.Scan(ctx, cass.ScanConfig{
 					Paths: paths,
 					Since: since,
 				}, ch)
@@ -171,7 +171,7 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 				mu.Unlock()
 			}
 
-			if scanErr != nil {
+			if scanErr := <-errCh; scanErr != nil {
 				s.log.Error("scan", "agent", col.Name(), "err", scanErr)
 			}
 		}(c, paths)
@@ -278,16 +278,16 @@ func (s *Service) IndexRoots(ctx context.Context, paths []string) (int, error) {
 	total := 0
 	for _, g := range groups {
 		ch := make(chan cass.Session, 64)
-		var scanErr error
+		errCh := make(chan error, 1)
 		go func(col cass.Collector, paths []string) {
-			scanErr = col.Scan(ctx, cass.ScanConfig{Paths: paths}, ch)
+			errCh <- col.Scan(ctx, cass.ScanConfig{Paths: paths}, ch)
 		}(g.collector, g.paths)
 
 		var batch []cass.Session
 		for sess := range ch {
 			batch = append(batch, sess)
 		}
-		if scanErr != nil {
+		if scanErr := <-errCh; scanErr != nil {
 			return 0, fmt.Errorf("scan %s: %w", g.collector.Name(), scanErr)
 		}
 		if len(batch) == 0 {
@@ -333,13 +333,17 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 		}
 
 		ch := make(chan cass.Session, 64)
+		errCh := make(chan error, 1)
 		go func(col cass.Collector, paths []string) {
-			_ = col.Scan(ctx, cass.ScanConfig{Paths: paths}, ch)
+			errCh <- col.Scan(ctx, cass.ScanConfig{Paths: paths}, ch)
 		}(g.collector, dirList)
 
 		var batch []cass.Session
 		for sess := range ch {
 			batch = append(batch, sess)
+		}
+		if scanErr := <-errCh; scanErr != nil {
+			return 0, fmt.Errorf("scan %s: %w", g.collector.Name(), scanErr)
 		}
 		if len(batch) == 0 {
 			continue
