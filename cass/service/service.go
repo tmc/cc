@@ -197,13 +197,6 @@ func (s *Service) SourcePath(ctx context.Context, id string) (string, error) {
 	return s.store.SourcePath(ctx, id)
 }
 
-// GetSourcePath returns the source file path for a session by its ID.
-//
-// Deprecated: use SourcePath.
-func (s *Service) GetSourcePath(ctx context.Context, id string) (string, error) {
-	return s.SourcePath(ctx, id)
-}
-
 // Session returns indexed metadata for a session.
 func (s *Service) Session(ctx context.Context, id string) (cass.Hit, error) {
 	return s.store.Session(ctx, id)

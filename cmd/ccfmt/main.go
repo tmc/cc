@@ -1010,12 +1010,8 @@ func parseDataImageURL(s string) ([]byte, string, bool) {
 	return data, rest[:semi], true
 }
 
-// redactImageData is a no-op by default. OCR-based redaction lived here
-// until 2026-04-20; it was removed along with the tmc/apple/x/vzkit/ocr
-// dependency that bloated the ccfmt binary by ~10 MB. Callers wanting
-// image redaction should pipe through an external redactor (for
-// example, imgredact in tmc/misc) before or after ccfmt. Tests may
-// override redactImageDataFunc to inject behavior.
+// redactImageData is a no-op by default. Tests may override
+// redactImageDataFunc to inject behavior.
 func redactImageData(data []byte) ([]byte, error) {
 	return data, nil
 }

@@ -706,25 +706,11 @@ func (s *Store) Meta(ctx context.Context, key string) (string, error) {
 	return value, err
 }
 
-// GetMeta retrieves a metadata value by key.
-//
-// Deprecated: use Meta.
-func (s *Store) GetMeta(ctx context.Context, key string) (string, error) {
-	return s.Meta(ctx, key)
-}
-
 // SourcePath returns the source file path for a session by its ID.
 func (s *Store) SourcePath(ctx context.Context, id string) (string, error) {
 	var path string
 	err := s.db.QueryRowContext(ctx, `SELECT source_path FROM sessions WHERE id = ?`, id).Scan(&path)
 	return path, err
-}
-
-// GetSourcePath returns the source file path for a session by its ID.
-//
-// Deprecated: use SourcePath.
-func (s *Store) GetSourcePath(ctx context.Context, id string) (string, error) {
-	return s.SourcePath(ctx, id)
 }
 
 // Session returns indexed metadata for a single session.
