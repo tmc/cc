@@ -26,7 +26,8 @@ var (
 	headerStyle    = lipgloss.NewStyle().Bold(true).Underline(true)
 )
 
-// noColor disables color when stdout is not a terminal or NO_COLOR is set.
+// noColor reports whether color should be disabled because stdout is not a
+// terminal or NO_COLOR is set.
 func noColor() bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return true
@@ -38,8 +39,11 @@ func noColor() bool {
 	return fi.Mode()&os.ModeCharDevice == 0
 }
 
-func init() {
-	if noColor() {
+// configureColor disables lipgloss color output when force is true or when
+// stdout is not a terminal. It must be called from main after flag parsing so
+// that library users of this package are unaffected.
+func configureColor(force bool) {
+	if force || noColor() {
 		lipgloss.SetColorProfile(0) // No color.
 	}
 }

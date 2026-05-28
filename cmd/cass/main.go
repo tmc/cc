@@ -29,7 +29,10 @@ func run() error {
 	jsonOutput := flag.Bool("json", false, "output in JSON format")
 	dbPath := flag.String("db", "", "path to SQLite database (default ~/.cache/cass/index.db)")
 	verbose := flag.Bool("v", false, "verbose output")
+	noColorFlag := flag.Bool("no-color", false, "disable colored output")
 	flag.Parse()
+
+	configureColor(*noColorFlag)
 
 	args := flag.Args()
 	if len(args) == 0 {
