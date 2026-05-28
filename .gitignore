@@ -25,7 +25,13 @@ screenshot-*.png
 # One-off scratch scripts
 /a.sh
 /output.har.jsonl
+/*.har.jsonl
 
+# Local working trees and scratch checkouts
+/.worktrees/
+/.test-input.ndjson
+/repos/
+/xterm-research/
 
 # beads issue-tracker working tree (local planning state)
 /.beads/
