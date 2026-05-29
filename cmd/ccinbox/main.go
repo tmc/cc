@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccteamcfg"
 )
 
 func main() {
@@ -138,7 +139,7 @@ func buildStructuredMessage(msgType, body, sender, taskID, subject, toolName str
 }
 
 func doBroadcast(team, sender, text string) error {
-	cfg, err := cc.ReadTeamConfig(team)
+	cfg, err := ccteamcfg.ReadTeamConfig(team)
 	if err != nil {
 		return err
 	}

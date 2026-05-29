@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccteamcfg"
 )
 
 func main() {
@@ -67,7 +67,7 @@ func doSpawn(team, agent, model, cwd, agentType, permMode, allowedTools, claudeB
 	}
 
 	// Register agent in team config.
-	member := cc.TeamMember{
+	member := ccteamcfg.TeamMember{
 		AgentID:   agent + "@" + team,
 		Name:      agent,
 		AgentType: agentType,
@@ -75,7 +75,7 @@ func doSpawn(team, agent, model, cwd, agentType, permMode, allowedTools, claudeB
 		JoinedAt:  time.Now().UnixMilli(),
 		CWD:       cwd,
 	}
-	if err := cc.AddTeamMember(team, member); err != nil {
+	if err := ccteamcfg.AddTeamMember(team, member); err != nil {
 		return fmt.Errorf("register agent: %w", err)
 	}
 
@@ -214,7 +214,7 @@ func doList(team string) error {
 }
 
 func pidsDir(team string) (string, error) {
-	dir, err := cc.TeamDir(team)
+	dir, err := ccteamcfg.TeamDir(team)
 	if err != nil {
 		return "", err
 	}

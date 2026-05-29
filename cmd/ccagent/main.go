@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccteamcfg"
 )
 
 func main() {
@@ -62,7 +63,7 @@ type agentInfo struct {
 }
 
 func doList(team, format string) error {
-	cfg, err := cc.ReadTeamConfig(team)
+	cfg, err := ccteamcfg.ReadTeamConfig(team)
 	if err != nil {
 		return err
 	}
@@ -104,11 +105,11 @@ func doList(team, format string) error {
 }
 
 func doStatus(team, agent, format string) error {
-	cfg, err := cc.ReadTeamConfig(team)
+	cfg, err := ccteamcfg.ReadTeamConfig(team)
 	if err != nil {
 		return err
 	}
-	var member *cc.TeamMember
+	var member *ccteamcfg.TeamMember
 	for i, m := range cfg.Members {
 		if m.Name == agent {
 			member = &cfg.Members[i]
@@ -151,7 +152,7 @@ func doStatus(team, agent, format string) error {
 }
 
 func doIdle(team, format string) error {
-	cfg, err := cc.ReadTeamConfig(team)
+	cfg, err := ccteamcfg.ReadTeamConfig(team)
 	if err != nil {
 		return err
 	}
@@ -199,7 +200,7 @@ func doWaitIdle(team, agent string, timeout time.Duration) error {
 }
 
 func checkPID(team, agent string) (int, bool) {
-	dir, err := cc.TeamDir(team)
+	dir, err := ccteamcfg.TeamDir(team)
 	if err != nil {
 		return 0, false
 	}

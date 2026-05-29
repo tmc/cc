@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccteamcfg"
 )
 
 func main() {
@@ -46,14 +47,14 @@ func main() {
 }
 
 func doCreate(name string) error {
-	cfg := &cc.TeamConfig{
+	cfg := &ccteamcfg.TeamConfig{
 		Name:          name,
 		CreatedAt:     time.Now().UnixMilli(),
 		LeadAgentID:   "controller@" + name,
 		LeadSessionID: "",
-		Members:       []cc.TeamMember{},
+		Members:       []ccteamcfg.TeamMember{},
 	}
-	if err := cc.WriteTeamConfig(name, cfg); err != nil {
+	if err := ccteamcfg.WriteTeamConfig(name, cfg); err != nil {
 		return err
 	}
 	// Create inboxes directory.
@@ -69,7 +70,7 @@ func doCreate(name string) error {
 }
 
 func doShow(name, format string) error {
-	cfg, err := cc.ReadTeamConfig(name)
+	cfg, err := ccteamcfg.ReadTeamConfig(name)
 	if err != nil {
 		return err
 	}
@@ -94,7 +95,7 @@ func doShow(name, format string) error {
 }
 
 func doDelete(name string) error {
-	if err := cc.DeleteTeam(name); err != nil {
+	if err := ccteamcfg.DeleteTeam(name); err != nil {
 		return err
 	}
 	fmt.Printf("deleted team %q\n", name)
@@ -112,7 +113,7 @@ func doAdd(teamName, agentName, model, cwd string) error {
 			return fmt.Errorf("get cwd: %w", err)
 		}
 	}
-	member := cc.TeamMember{
+	member := ccteamcfg.TeamMember{
 		AgentID:   agentName + "@" + teamName,
 		Name:      agentName,
 		AgentType: "general-purpose",
@@ -120,7 +121,7 @@ func doAdd(teamName, agentName, model, cwd string) error {
 		JoinedAt:  time.Now().UnixMilli(),
 		CWD:       cwd,
 	}
-	if err := cc.AddTeamMember(teamName, member); err != nil {
+	if err := ccteamcfg.AddTeamMember(teamName, member); err != nil {
 		return err
 	}
 	fmt.Printf("added agent %q to team %q\n", agentName, teamName)
@@ -132,7 +133,7 @@ func doRemove(teamName, agentName string) error {
 		return fmt.Errorf("-agent is required with -remove")
 	}
 	agentID := agentName + "@" + teamName
-	if err := cc.RemoveTeamMember(teamName, agentID); err != nil {
+	if err := ccteamcfg.RemoveTeamMember(teamName, agentID); err != nil {
 		return err
 	}
 	fmt.Printf("removed agent %q from team %q\n", agentName, teamName)
@@ -140,7 +141,7 @@ func doRemove(teamName, agentName string) error {
 }
 
 func doList(format string) error {
-	names, err := cc.ListTeams()
+	names, err := ccteamcfg.ListTeams()
 	if err != nil {
 		return err
 	}
@@ -153,9 +154,9 @@ func doList(format string) error {
 		return nil
 	}
 	if format == "json" {
-		var configs []*cc.TeamConfig
+		var configs []*ccteamcfg.TeamConfig
 		for _, name := range names {
-			cfg, err := cc.ReadTeamConfig(name)
+			cfg, err := ccteamcfg.ReadTeamConfig(name)
 			if err != nil {
 				continue
 			}
@@ -164,7 +165,7 @@ func doList(format string) error {
 		return json.NewEncoder(os.Stdout).Encode(configs)
 	}
 	for _, name := range names {
-		cfg, err := cc.ReadTeamConfig(name)
+		cfg, err := ccteamcfg.ReadTeamConfig(name)
 		if err != nil {
 			fmt.Printf("%-20s (error reading config)\n", name)
 			continue

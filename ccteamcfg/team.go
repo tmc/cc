@@ -1,4 +1,4 @@
-package cc
+package ccteamcfg
 
 import (
 	"encoding/json"

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc/ccfs"
+	"github.com/tmc/cc/ccteamcfg"
 )
 
 // InboxMessage is a single message in an agent's inbox file.
@@ -62,7 +63,7 @@ type StructuredMessage struct {
 
 // InboxDir returns the path to a team's inboxes directory.
 func InboxDir(teamName string) (string, error) {
-	dir, err := TeamDir(teamName)
+	dir, err := ccteamcfg.TeamDir(teamName)
 	if err != nil {
 		return "", err
 	}

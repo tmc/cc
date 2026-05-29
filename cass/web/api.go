@@ -15,6 +15,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/ccteamcfg"
 )
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -636,7 +637,7 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
-	teams, err := cc.ListTeams()
+	teams, err := ccteamcfg.ListTeams()
 	if err != nil {
 		writeError(w, err, http.StatusInternalServerError)
 		return
@@ -659,7 +660,7 @@ func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
 
 	var result []teamInfo
 	for _, name := range teams {
-		cfg, err := cc.ReadTeamConfig(name)
+		cfg, err := ccteamcfg.ReadTeamConfig(name)
 		if err != nil {
 			continue
 		}
@@ -690,7 +691,7 @@ func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, err := cc.ReadTeamConfig(name)
+	cfg, err := ccteamcfg.ReadTeamConfig(name)
 	if err != nil {
 		writeError(w, fmt.Errorf("team %q: %w", name, err), http.StatusNotFound)
 		return
