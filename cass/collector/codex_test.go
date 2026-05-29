@@ -428,66 +428,130 @@ func TestCodexItermLinks(t *testing.T) {
 	}
 }
 
-func TestCodexSubagentRuns(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "spawner.jsonl")
-	writeCollectorJSONL(t, path,
-		map[string]any{
-			"timestamp": "2026-05-22T23:29:09Z",
-			"type":      "session_meta",
-			"payload": map[string]any{
-				"id":         "019e5385-parent",
-				"cwd":        "/work/apple",
-				"originator": "codex-tui",
-				"source":     "cli",
-			},
+// spawnRow / spawnOutputRow / notifRow build the three codex JSONL shapes that
+// make up a subagent lifecycle, for fixture authoring.
+func spawnRow(ts, callID, agentType, msg string) map[string]any {
+	return map[string]any{
+		"timestamp": ts,
+		"type":      "response_item",
+		"payload": map[string]any{
+			"type":      "function_call",
+			"name":      "spawn_agent",
+			"call_id":   callID,
+			"arguments": `{"agent_type":"` + agentType + `","message":"` + msg + `"}`,
 		},
-		map[string]any{
-			"timestamp": "2026-05-22T23:29:10Z",
-			"type":      "response_item",
-			"payload": map[string]any{
-				"type":      "function_call",
-				"name":      "spawn_agent",
-				"call_id":   "call-spawn-1",
-				"arguments": `{"agent_type":"worker","fork_context":true,"message":"do the baseline"}`,
-			},
-		},
-		map[string]any{
-			"timestamp": "2026-05-25T05:40:00Z",
-			"type":      "response_item",
-			"payload": map[string]any{
-				"type": "message",
-				"role": "user",
-				"content": []map[string]any{
-					{"type": "input_text", "text": "<subagent_notification>\n{\"agent_path\":\"019e5d9d-child\",\"status\":{\"completed\":\"Done. Commit made.\"}}\n</subagent_notification>"},
-				},
-			},
-		},
-	)
+	}
+}
 
-	sess, err := (&Codex{}).parseSession(context.Background(), path)
-	if err != nil {
-		t.Fatalf("parseSession: %v", err)
+func spawnOutputRow(ts, callID, output string) map[string]any {
+	return map[string]any{
+		"timestamp": ts,
+		"type":      "response_item",
+		"payload":   map[string]any{"type": "function_call_output", "call_id": callID, "output": output},
 	}
-	if len(sess.Subagents) != 1 {
-		t.Fatalf("subagents = %d, want 1: %#v", len(sess.Subagents), sess.Subagents)
+}
+
+func notifRow(ts, agentPath, status, detail string) map[string]any {
+	return map[string]any{
+		"timestamp": ts,
+		"type":      "response_item",
+		"payload": map[string]any{
+			"type": "message", "role": "user",
+			"content": []map[string]any{
+				{"type": "input_text", "text": "<subagent_notification>\n{\"agent_path\":\"" + agentPath + "\",\"status\":{\"" + status + "\":\"" + detail + "\"}}\n</subagent_notification>"},
+			},
+		},
 	}
-	r := sess.Subagents[0]
-	if r.AgentID != "019e5d9d-child" {
-		t.Errorf("agent id = %q, want 019e5d9d-child (the spawned session id)", r.AgentID)
+}
+
+func codexMetaRow() map[string]any {
+	return map[string]any{
+		"timestamp": "2026-05-22T23:29:09Z",
+		"type":      "session_meta",
+		"payload":   map[string]any{"id": "019e5385-parent", "cwd": "/work/apple", "originator": "codex-tui", "source": "cli"},
 	}
-	if r.ParentSessionID != "019e5385-parent" {
-		t.Errorf("parent session id = %q, want 019e5385-parent", r.ParentSessionID)
+}
+
+func TestCodexSubagentRuns(t *testing.T) {
+	runsByID := func(t *testing.T, rows ...map[string]any) map[string]cass.SubagentRun {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "spawner.jsonl")
+		writeCollectorJSONL(t, path, append([]map[string]any{codexMetaRow()}, rows...)...)
+		sess, err := (&Codex{}).parseSession(context.Background(), path)
+		if err != nil {
+			t.Fatalf("parseSession: %v", err)
+		}
+		m := map[string]cass.SubagentRun{}
+		for _, r := range sess.Subagents {
+			m[r.AgentID] = r
+		}
+		return m
 	}
-	if r.AgentType != "worker" {
-		t.Errorf("agent type = %q, want worker", r.AgentType)
-	}
-	if r.Status != "completed" {
-		t.Errorf("status = %q, want completed", r.Status)
-	}
-	if r.Workspace != "/work/apple" {
-		t.Errorf("workspace = %q, want /work/apple", r.Workspace)
-	}
+
+	t.Run("single spawn completes", func(t *testing.T) {
+		m := runsByID(t,
+			spawnRow("2026-05-22T23:29:10Z", "call-1", "worker", "do the baseline"),
+			spawnOutputRow("2026-05-22T23:29:11Z", "call-1", `{"agent_id":"019e5d9d-child","nickname":"Peirce"}`),
+			notifRow("2026-05-25T05:40:00Z", "019e5d9d-child", "completed", "Done."),
+		)
+		if len(m) != 1 {
+			t.Fatalf("runs = %d, want 1: %#v", len(m), m)
+		}
+		r := m["019e5d9d-child"]
+		if r.ParentSessionID != "019e5385-parent" || r.AgentType != "worker" || r.Status != "completed" {
+			t.Errorf("run wrong: %+v", r)
+		}
+		if r.Description != "Peirce" {
+			t.Errorf("nickname = %q, want Peirce", r.Description)
+		}
+		if r.Workspace != "/work/apple" {
+			t.Errorf("workspace = %q", r.Workspace)
+		}
+	})
+
+	t.Run("two spawns, notifications reversed, joined by id not order", func(t *testing.T) {
+		m := runsByID(t,
+			spawnRow("2026-05-22T23:29:10Z", "call-w", "worker", "build"),
+			spawnOutputRow("2026-05-22T23:29:11Z", "call-w", `{"agent_id":"agent-worker","nickname":"W"}`),
+			spawnRow("2026-05-22T23:29:12Z", "call-r", "reviewer", "review"),
+			spawnOutputRow("2026-05-22T23:29:13Z", "call-r", `{"agent_id":"agent-reviewer","nickname":"R"}`),
+			// Completions arrive in the opposite order to the spawns.
+			notifRow("2026-05-22T23:50:00Z", "agent-reviewer", "completed", "review done"),
+			notifRow("2026-05-22T23:55:00Z", "agent-worker", "completed", "build done"),
+		)
+		if len(m) != 2 {
+			t.Fatalf("runs = %d, want 2: %#v", len(m), m)
+		}
+		if m["agent-worker"].AgentType != "worker" {
+			t.Errorf("worker run type = %q, want worker (id-join, not order)", m["agent-worker"].AgentType)
+		}
+		if m["agent-reviewer"].AgentType != "reviewer" {
+			t.Errorf("reviewer run type = %q, want reviewer", m["agent-reviewer"].AgentType)
+		}
+	})
+
+	t.Run("rejected spawn produces no run", func(t *testing.T) {
+		m := runsByID(t,
+			spawnRow("2026-05-22T23:29:10Z", "call-bad", "worker", "fork"),
+			// Codex rejects the fork: output is a plain error string, no agent_id.
+			spawnOutputRow("2026-05-22T23:29:11Z", "call-bad", "Full-history forked agents inherit the parent agent type; omit agent_type."),
+		)
+		if len(m) != 0 {
+			t.Fatalf("rejected spawn should yield no runs, got %#v", m)
+		}
+	})
+
+	t.Run("notification without spawn output still recorded", func(t *testing.T) {
+		m := runsByID(t,
+			notifRow("2026-05-22T23:50:00Z", "orphan-agent", "completed", "done"),
+		)
+		if len(m) != 1 {
+			t.Fatalf("runs = %d, want 1", len(m))
+		}
+		if r := m["orphan-agent"]; r.Status != "completed" || r.AgentType != "" {
+			t.Errorf("orphan run = %+v, want completed status and empty type", r)
+		}
+	})
 }
 
 func TestCodexNoSubagentsWhenNoSpawns(t *testing.T) {
