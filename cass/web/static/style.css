@@ -14,6 +14,9 @@
   --orange: #a50;
   --magenta: #639;
   --danger: #a22;
+  /* Graph node fills, kept distinct from --bg so nodes read against the canvas. */
+  --node-bg: #f3f3f3;
+  --node-wf-bg: #eef0fb;
   --mono: "Go Mono", "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -32,6 +35,8 @@
     --orange: #fa6;
     --magenta: #c9f;
     --danger: #f66;
+    --node-bg: #2a2a2a;
+    --node-wf-bg: #2b2d3a;
   }
 }
 
@@ -374,25 +379,46 @@ input::placeholder { color: var(--faint); }
   height: 100%;
   position: relative;
   overflow: hidden;
-  transition: filter 0.15s ease, opacity 0.15s ease;
+  transition: opacity 0.15s ease;
   min-width: 2px;
 }
 .tool-bar-seg:first-child { border-radius: 0 0 0 2px; }
 .tool-bar-seg:last-child { border-radius: 0 0 2px 0; }
-.tool-bar-container:hover .tool-bar-seg { filter: brightness(1.16); }
+/* Hover highlight is a translucent white overlay (::after) rather than a
+   brightness filter, so it lightens only the segment fill and never touches the
+   label's own dark backing — keeping label contrast stable on hover. */
+.tool-bar-seg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.tool-bar-container:hover .tool-bar-seg::after { opacity: 0.14; }
 .tool-bar-container.clickable .tool-bar-seg { cursor: pointer; }
-.tool-bar-container.clickable .tool-bar-seg:hover { filter: brightness(1.38); opacity: 0.95; }
+.tool-bar-container.clickable .tool-bar-seg:hover::after { opacity: 0.28; }
 .tool-bar-label {
   font-size: 9px;
-  line-height: 18px;
-  color: var(--bg);
-  padding: 0 4px;
+  line-height: 16px;
+  /* A fixed near-white label over a translucent dark backing reads on every
+     segment color (orange/cyan/green/yellow). var(--bg)+mix-blend-mode used to
+     invert against bright fills and washed out in dark mode. */
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  margin: 1px 0 0 1px;
+  padding: 0 3px;
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
-  display: block;
+  display: inline-block;
+  max-width: calc(100% - 2px);
   font-weight: 600;
-  mix-blend-mode: difference;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
+  position: relative;
+  z-index: 1;
 }
 /* Rich hover flyout for tool bar. JS clamps it inside the viewport. */
 .tool-bar-flyout {
@@ -1124,18 +1150,40 @@ mark.search-hl {
 .graph-inner { transform-origin: 0 0; flex: 1; min-height: 0; display: flex; }
 .graph-container:not(:active) .graph-inner { transition: transform 0.15s ease; }
 .graph-container svg { width: 100%; flex: 1; min-height: 200px; }
-.graph-node rect { fill: var(--bg); stroke: var(--border); stroke-width: 1; rx: 2; }
+/* Subdued node fill distinct from the page background, with a controlled
+   border. Selection is signalled by a status dot + a thin accent border rather
+   than a heavy bright outline (which previously swamped the fill and labels). */
+.graph-node rect { fill: var(--node-bg); stroke: var(--border); stroke-width: 1; rx: 2; }
 .graph-node text { font-family: var(--mono); font-size: 9px; fill: var(--fg); }
-.graph-node:hover rect, .graph-node.hovered rect { stroke: var(--accent); stroke-width: 2; z-index: 10; }
+.graph-node text.node-info { fill: var(--dim); font-size: 8px; }
+.graph-node:hover rect, .graph-node.hovered rect { stroke: var(--accent); stroke-width: 1.5; }
+.graph-node.selected rect { stroke: var(--accent); stroke-width: 1.5; }
+/* Status dot replaces the old oversized active border. */
+.graph-node .node-dot { fill: var(--green); }
+.graph-node.active rect { stroke: color-mix(in srgb, var(--green) 60%, var(--border)); stroke-width: 1; }
 /* Team agent nodes (source/target = "name@team") get a magenta border */
-.graph-node.team-agent rect { stroke: var(--magenta); stroke-width: 1.5; stroke-dasharray: 3,2; }
-.graph-node.team-agent:hover rect, .graph-node.team-agent.hovered rect { stroke: var(--magenta); stroke-width: 2; }
-.graph-edge-msg { stroke: var(--accent); stroke-width: 1.5; fill: none; }
-.graph-edge-obs { stroke: var(--faint); stroke-width: 0.75; fill: none; stroke-dasharray: 4,3; opacity: 0.4; }
-.graph-edge-split { stroke: var(--green); stroke-width: 1; fill: none; stroke-dasharray: 2,3; }
-.graph-edge-team { stroke: var(--magenta); stroke-width: 1.5; fill: none; }
+.graph-node.team-agent rect { stroke: var(--magenta); stroke-width: 1.25; stroke-dasharray: 3,2; }
+.graph-node.team-agent:hover rect, .graph-node.team-agent.hovered rect { stroke: var(--magenta); stroke-width: 1.5; }
+/* Workflow-graph node kinds. */
+.graph-node.node-session rect { fill: var(--node-bg); stroke: var(--border); stroke-width: 1.25; }
+.graph-node.node-workflow rect { fill: var(--node-wf-bg); stroke: var(--accent); stroke-width: 1.25; }
+.graph-node.node-workflow-agent rect { fill: var(--node-bg); stroke: var(--faint); stroke-width: 1; }
+.graph-node.node-status-completed .node-dot { fill: var(--green); }
+.graph-node.node-status-running .node-dot { fill: var(--cyan); }
+.graph-node.node-status-failed .node-dot { fill: var(--danger); }
+.graph-node.node-status-async_launched .node-dot { fill: var(--yellow); }
+/* Edge opacity hierarchy: primary (workflow/team messages) > secondary
+   (split/spawn) > quiet (observations). Set on a per-class base opacity so the
+   hover-highlight/dimmed overrides still compose. */
+.graph-edge-msg { stroke: var(--accent); stroke-width: 1.5; fill: none; opacity: 0.9; }
+.graph-edge-obs { stroke: var(--faint); stroke-width: 0.75; fill: none; stroke-dasharray: 4,3; opacity: 0.3; }
+.graph-edge-split { stroke: var(--green); stroke-width: 1; fill: none; stroke-dasharray: 2,3; opacity: 0.6; }
+.graph-edge-team { stroke: var(--magenta); stroke-width: 1.5; fill: none; opacity: 0.9; }
 /* Team spawn edges are dashed (relationship), team messages are solid (communication) */
-.graph-edge-team-spawn { stroke: var(--magenta); stroke-width: 1; fill: none; stroke-dasharray: 4,3; opacity: 0.7; }
+.graph-edge-team-spawn { stroke: var(--magenta); stroke-width: 1; fill: none; stroke-dasharray: 4,3; opacity: 0.6; }
+/* Workflow containment (session->workflow->agent) is primary; fan-out spawn is secondary. */
+.graph-edge-workflow { stroke: var(--accent); stroke-width: 1.5; fill: none; opacity: 0.85; }
+.graph-edge-spawn { stroke: var(--cyan); stroke-width: 1; fill: none; stroke-dasharray: 3,2; opacity: 0.55; }
 .graph-zoom {
   position: absolute;
   bottom: 8px;
@@ -1218,16 +1266,6 @@ mark.search-hl {
   color: var(--dim);
   padding: 4px 0;
   flex-shrink: 0;
-}
-
-/* graph: node info + active indicator */
-.graph-node .node-info {
-  font-size: 7px;
-  fill: var(--faint);
-}
-.graph-node.active rect { stroke: var(--green); stroke-width: 2; }
-.graph-node.active .node-dot {
-  fill: var(--green);
 }
 
 /* graph: tooltip */
@@ -1744,13 +1782,19 @@ mark.search-hl {
 }
 .ctx-seg-label {
   font-size: 9px;
-  line-height: 20px;
-  padding: 0 4px;
+  line-height: 18px;
+  margin: 1px 0 0 1px;
+  padding: 0 3px;
   white-space: nowrap;
   overflow: hidden;
-  color: var(--bg);
+  /* Same readable-label treatment as the tool micro-bar: fixed light text on a
+     translucent dark backing instead of var(--bg)+mix-blend-mode. */
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  display: inline-block;
   font-weight: 600;
-  mix-blend-mode: difference;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
 }
 .ctx-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; font-size: 10px; }
 .ctx-legend-item { display: flex; align-items: center; gap: 4px; }
