@@ -277,6 +277,89 @@ func TestGraphSubagentNodes(t *testing.T) {
 	}
 }
 
+func TestGraphCodexSubagentCollapsesPeerSession(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	start := time.Unix(1_700_000_000, 0).UTC()
+	// A codex parent whose subagent AgentID is a separately-indexed peer session.
+	parent := cass.Session{
+		ID:        "codex-parent",
+		Agent:     "codex-cli",
+		Title:     "spawner",
+		Workspace: "tmc/cc",
+		StartedAt: start,
+		EndedAt:   start.Add(time.Hour),
+		Subagents: []cass.SubagentRun{{
+			AgentID:         "peer-uuid",
+			ParentSessionID: "codex-parent",
+			AgentType:       "worker",
+			Status:          "completed",
+			StartedAt:       start.Add(time.Minute),
+		}},
+	}
+	peer := cass.Session{
+		ID:        "peer-uuid",
+		Agent:     "codex-cli",
+		Title:     "the spawned agent",
+		Workspace: "tmc/cc",
+		StartedAt: start.Add(time.Minute),
+		EndedAt:   start.Add(20 * time.Minute),
+		// The peer itself spawns nothing, but is a real indexed session.
+		Subagents: []cass.SubagentRun{{
+			AgentID:         "grandchild",
+			ParentSessionID: "peer-uuid",
+			Status:          "unknown",
+			StartedAt:       start.Add(2 * time.Minute),
+		}},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{parent, peer}); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := s.GraphDataOpts(ctx, time.Time{}, cass.GraphOptions{Workflow: cass.WorkflowCollapsed})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// "peer-uuid" must appear exactly once — as a session node, not also a stub.
+	var peerNodes, peerSessionNodes, peerSubNodes int
+	for _, n := range g.Nodes {
+		if n.ID != "peer-uuid" {
+			continue
+		}
+		peerNodes++
+		if n.NodeType == cass.NodeTypeSession {
+			peerSessionNodes++
+		}
+		if n.NodeType == cass.NodeTypeSubagent {
+			peerSubNodes++
+		}
+	}
+	if peerNodes != 1 || peerSessionNodes != 1 || peerSubNodes != 0 {
+		t.Errorf("peer-uuid nodes: total=%d session=%d subagent-stub=%d, want 1/1/0", peerNodes, peerSessionNodes, peerSubNodes)
+	}
+	// The spawn edge from the parent to the peer must still exist.
+	var edge int
+	for _, l := range g.Links {
+		if l.EdgeType == cass.EdgeSubagentSpawn && l.SourceSession == "codex-parent" && l.TargetSession == "peer-uuid" {
+			edge++
+		}
+	}
+	if edge != 1 {
+		t.Errorf("parent->peer subagent_spawn edges = %d, want 1", edge)
+	}
+	// "grandchild" is not an indexed session, so it stays a stub node.
+	var grandStub int
+	for _, n := range g.Nodes {
+		if n.ID == "grandchild" && n.NodeType == cass.NodeTypeSubagent {
+			grandStub++
+		}
+	}
+	if grandStub != 1 {
+		t.Errorf("grandchild stub nodes = %d, want 1 (non-indexed agent keeps its stub)", grandStub)
+	}
+}
+
 func TestGraphNodeTypeFilter(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

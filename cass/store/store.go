@@ -1588,6 +1588,19 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 		return nil, fmt.Errorf("graph subagents: %w", err)
 	}
 
+	// Set of all indexed session ids, so a codex subagent whose AgentID is its
+	// own peer session can collapse onto that session node instead of a stub.
+	indexedSessions := map[string]bool{}
+	if idRows, err := s.db.QueryContext(ctx, `SELECT id FROM sessions`); err == nil {
+		for idRows.Next() {
+			var id string
+			if idRows.Scan(&id) == nil {
+				indexedSessions[id] = true
+			}
+		}
+		idRows.Close()
+	}
+
 	// Group fan-out by parent session, filtering by the parent session's start
 	// time against the since cutoff.
 	parentIDs := map[string]bool{}
@@ -1745,21 +1758,26 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 		}
 
 		// Subagent runs spawned directly by the session (Task or codex
-		// spawn_agent), as session -> subagent nodes and edges.
+		// spawn_agent), as session -> subagent nodes and edges. When the
+		// AgentID is itself an indexed session (codex spawned agents are peer
+		// rollout sessions), emit only the edge and let the real session node
+		// stand in, rather than a duplicate stub.
 		if opts.IncludeNode(cass.NodeTypeSubagent) {
 			for _, r := range subBySession[sid] {
-				nodes = append(nodes, cass.GraphNode{
-					ID:              r.AgentID,
-					NodeType:        cass.NodeTypeSubagent,
-					ParentSessionID: sid,
-					Workspace:       sm.workspace,
-					Title:           firstNonEmptyStr(r.Description, r.AgentType, r.AgentID),
-					Name:            r.AgentType,
-					Description:     r.Description,
-					Status:          r.Status,
-					StartedAt:       posOrZero(r.StartedAt),
-					Tokens:          r.TotalTokens,
-				})
+				if !indexedSessions[r.AgentID] {
+					nodes = append(nodes, cass.GraphNode{
+						ID:              r.AgentID,
+						NodeType:        cass.NodeTypeSubagent,
+						ParentSessionID: sid,
+						Workspace:       sm.workspace,
+						Title:           firstNonEmptyStr(r.Description, r.AgentType, r.AgentID),
+						Name:            r.AgentType,
+						Description:     r.Description,
+						Status:          r.Status,
+						StartedAt:       posOrZero(r.StartedAt),
+						Tokens:          r.TotalTokens,
+					})
+				}
 				links = append(links, cass.SessionLink{
 					SourceSession: sid,
 					TargetSession: r.AgentID,
