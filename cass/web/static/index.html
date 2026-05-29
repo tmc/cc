@@ -2097,8 +2097,14 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   const dragStart = useRef(null);
   const [graphQuery, setGraphQueryRaw] = useState(urlParams.q || '');
   const [wsFilter, setWsFilterRaw] = useState(urlParams.ws || '');
-  const [edgeFilter, setEdgeFilter] = useState({ message: true, observation: true, split: true, team: true });
+  const [edgeFilter, setEdgeFilter] = useState({ message: true, observation: true, split: true, team: true, workflow: true });
   const [activeOnly, setActiveOnly] = useState(false);
+  // Graph layout mode: workflow | sessions | teams | network. '' means auto.
+  const [graphMode, setGraphMode] = useState(urlParams.mode || '');
+  // Set of workflow run ids whose child agents are expanded (workflow mode).
+  const [expandedWorkflows, setExpandedWorkflows] = useState(() => new Set());
+  // True once the loaded graph contains at least one workflow node.
+  const [hasWorkflows, setHasWorkflows] = useState(false);
 
   function setGraphQuery(v) { setGraphQueryRaw(v); updateParams({ since, q: v, ws: wsFilter }); }
   function setSince(v) { setSinceRaw(v); updateParams({ since: v, q: graphQuery, ws: wsFilter }); }
@@ -2126,18 +2132,30 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      // Normalize link: ensure .source and .target are short IDs.
+      // Workflow nodes/agents keep their full ids; only iTerm2/session prefixes
+      // are shortened to 8 chars for display. Detect those by '#'/'wf_' shape.
+      function normID(raw) {
+        const id = raw || '?';
+        if (id.startsWith('wf_') || id.includes('#') || id.includes('@')) return id;
+        return id.slice(0, 8);
+      }
+      // Normalize link: keep edge_type so workflow/team edges render distinctly.
       function normLink(lk) {
         return {
-          source: (lk.source || lk.source_session || '?').slice(0, 8),
-          target: (lk.target || lk.target_session || '?').slice(0, 8),
-          kind: lk.kind, action: lk.action, text: lk.text, timestamp: lk.timestamp,
+          source: normID(lk.source || lk.source_session),
+          target: normID(lk.target || lk.target_session),
+          kind: lk.kind, action: lk.action, edge_type: lk.edge_type,
+          text: lk.text, timestamp: lk.timestamp,
         };
       }
 
+      // Request workflow nodes unless an explicit non-workflow mode is active.
+      const wfParam = (graphMode === 'sessions' || graphMode === 'teams' || graphMode === 'network')
+        ? 'none' : 'expanded';
+
       let nodes = [], links = [], tRange = null;
       try {
-        const g = await api('graph?' + qs({ since }));
+        const g = await api('graph?' + qs({ since, workflow: wfParam }));
         nodes = g.nodes || [];
         links = (g.links || []).map(normLink);
         tRange = g.time_range;
@@ -2156,9 +2174,16 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
         }
       }
 
-      // Build node lookup.
+      // Build node lookup, normalizing ids to match link endpoints. Keep the
+      // full id for parent/run references used by workflow layout.
       const nd = {};
-      nodes.forEach(n => { nd[n.id] = n; });
+      let sawWorkflow = false;
+      nodes.forEach(n => {
+        const nid = normID(n.id);
+        nd[nid] = { ...n, id: nid, full_id: n.id, parent_session_id: n.parent_session_id ? normID(n.parent_session_id) : undefined };
+        if (n.node_type === 'workflow') sawWorkflow = true;
+      });
+      setHasWorkflows(sawWorkflow);
 
       // Ensure all link endpoints have a node entry.
       links.forEach(l => {
@@ -2192,7 +2217,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       prevVisibleCount.current = links.length;
     } catch (e) { console.error('graph:', e); }
     setLoading(false);
-  }, [since]);
+  }, [since, graphMode]);
 
   useEffect(() => { load(); }, [load]);
   // Graph does NOT auto-refresh on SSE — layout is expensive and causes visual jumps.
@@ -2259,6 +2284,32 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     setPanOffset({ x: 0, y: 0 });
   }
 
+  // Effective layout mode: explicit choice, else auto (workflow when the data
+  // has workflow runs, otherwise the inter-session view).
+  const effectiveMode = graphMode || (hasWorkflows ? 'workflow' : 'sessions');
+
+  function selectMode(m) {
+    setGraphMode(m);
+    updateParams({ since, q: graphQuery, ws: wsFilter, mode: m });
+    resetView();
+  }
+
+  // Fit recomputes pan/zoom to frame the current node bounds. The SVG viewBox
+  // already frames all nodes, so fit resets the overlay transform to 1:1 —
+  // distinct from a manual zoom level the user dialed in.
+  function fitView() {
+    setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
+  }
+
+  function toggleWorkflow(runID) {
+    setExpandedWorkflows(prev => {
+      const next = new Set(prev);
+      if (next.has(runID)) next.delete(runID); else next.add(runID);
+      return next;
+    });
+  }
+
   // Unique workspaces from node data for filter chips.
   const workspaces = useMemo(() => {
     const ws = new Set();
@@ -2266,21 +2317,25 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     return [...ws].sort();
   }, [nodeData]);
 
-  // Filter nodes by search query and workspace.
+  // Filter nodes by search query and workspace. In workflow mode, child agents
+  // of collapsed workflows are hidden until their workflow is expanded.
   const filteredNodeIds = useMemo(() => {
     const all = Object.keys(nodeData);
     const q = graphQuery.toLowerCase();
     return all.filter(id => {
       const n = nodeData[id];
+      if (effectiveMode === 'workflow' && n.node_type === 'workflow_agent') {
+        if (!expandedWorkflows.has(n.workflow_run_id)) return false;
+      }
       if (wsFilter && (!n.workspace || n.workspace !== wsFilter)) return false;
       if (activeOnly && !n.is_active) return false;
       if (q) {
-        const haystack = [id, n.title || '', n.workspace || ''].join(' ').toLowerCase();
+        const haystack = [id, n.title || '', n.workspace || '', n.name || ''].join(' ').toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
     });
-  }, [nodeData, graphQuery, wsFilter, activeOnly]);
+  }, [nodeData, graphQuery, wsFilter, activeOnly, effectiveMode, expandedWorkflows]);
 
   // Only show links where both endpoints are visible.
   const filteredNodeSet = useMemo(() => new Set(filteredNodeIds), [filteredNodeIds]);
@@ -2290,6 +2345,8 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
 
   // Classify a link's edge type for filtering.
   function edgeType(l) {
+    const et = l.edge_type || '';
+    if (et === 'workflow_contains' || et === 'workflow_spawn') return 'workflow';
     const act = l.action || '';
     const kind = l.kind || '';
     if (kind === 'team' || act === 'team-spawn' || act === 'team-message') return 'team';
@@ -2335,7 +2392,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   if (loading) return html`<div class="loading">loading graph...</div>`;
 
   const allNodeIds = Object.keys(nodeData);
-  if (allNodeIds.length === 0) return html`<div class="empty">no inter-session links found</div>`;
+  if (allNodeIds.length === 0) return html`<div class="empty">no graph data for this range</div>`;
 
   // Group nodes by workspace for clustered layout.
   const wsGroups = useMemo(() => {
@@ -2361,8 +2418,69 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     return groups;
   }, [filteredNodeIds, nodeData]);
 
+  // Deterministic hierarchical layout for workflow mode: parent sessions as
+  // roots, workflows in a row beneath each, child agents in a grid beneath an
+  // expanded workflow. Ordered by started_at then id; no overlap.
+  const workflowPos = useMemo(() => {
+    if (effectiveMode !== 'workflow') return null;
+    const pos = {};
+    const visible = new Set(filteredNodeIds);
+    const sessionsList = filteredNodeIds.filter(id => nodeData[id].node_type === 'session');
+    const wfBySession = {};
+    filteredNodeIds.forEach(id => {
+      const nn = nodeData[id];
+      if (nn.node_type === 'workflow' && visible.has(nn.parent_session_id)) {
+        (wfBySession[nn.parent_session_id] ||= []).push(id);
+      }
+    });
+    const agentsByWf = {};
+    filteredNodeIds.forEach(id => {
+      const nn = nodeData[id];
+      if (nn.node_type === 'workflow_agent') {
+        (agentsByWf[nn.workflow_run_id] ||= []).push(id);
+      }
+    });
+    const byStart = (a, b) => {
+      const sa = nodeData[a].started_at || 0, sb = nodeData[b].started_at || 0;
+      return sa !== sb ? sa - sb : (a < b ? -1 : 1);
+    };
+    sessionsList.sort(byStart);
+
+    const COL_W = 240, SESS_Y = 0, WF_Y = 90, WF_H = 60, AGENT_W = 70, AGENT_H = 34, AGENT_GAP = 8;
+    let colX = 0;
+    sessionsList.forEach(sid => {
+      const wfs = (wfBySession[sid] || []).sort(byStart);
+      // Width this session column needs: max of its own box and its workflows row.
+      const wfRowW = Math.max(1, wfs.length) * (COL_W - 20);
+      const colWidth = Math.max(COL_W, wfRowW);
+      pos[sid] = { x: colX + colWidth / 2, y: SESS_Y, vx: 0, vy: 0 };
+      let wx = colX + (colWidth - wfRowW) / 2;
+      wfs.forEach(wfid => {
+        const cx = wx + (COL_W - 20) / 2;
+        pos[wfid] = { x: cx, y: WF_Y, vx: 0, vy: 0 };
+        const agents = (agentsByWf[nodeData[wfid].full_id] || agentsByWf[wfid] || []).slice().sort(byStart);
+        if (agents.length) {
+          // Grid the agents below the workflow node.
+          const perRow = Math.max(1, Math.min(agents.length, Math.ceil(Math.sqrt(agents.length))));
+          const gridW = perRow * (AGENT_W + AGENT_GAP);
+          agents.forEach((aid, i) => {
+            const r = Math.floor(i / perRow), c = i % perRow;
+            pos[aid] = {
+              x: cx - gridW / 2 + AGENT_W / 2 + c * (AGENT_W + AGENT_GAP),
+              y: WF_Y + WF_H + 10 + r * (AGENT_H + AGENT_GAP),
+              vx: 0, vy: 0,
+            };
+          });
+        }
+        wx += COL_W - 20;
+      });
+      colX += colWidth + 40;
+    });
+    return pos;
+  }, [effectiveMode, filteredNodeIds, nodeData, expandedWorkflows]);
+
   // Force-directed layout: initialize from workspace clusters, then simulate.
-  const nodePos = useMemo(() => {
+  const forcePos = useMemo(() => {
     const pos = {};
     const wsKeys = Object.keys(wsGroups);
     const n = filteredNodeIds.length;
@@ -2468,6 +2586,9 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     return pos;
   }, [filteredNodeIds, wsGroups, visibleLinks, nodeData]);
 
+  // Active positions: deterministic workflow layout, else the force layout.
+  const nodePos = workflowPos || forcePos;
+
   // Dynamic viewBox from node positions.
   const viewBox = useMemo(() => {
     const ids = Object.keys(nodePos);
@@ -2530,20 +2651,32 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     return result;
   }, [visibleLinks]);
 
-  // Node label: short ID + project.
+  // Node label: workflow name / agent name for workflow nodes, else short ID + project.
   function nodeLabel(id) {
     const n = nodeData[id];
-    if (n && n.workspace) return id.slice(0, 8) + ' ' + shortProject(n.workspace);
+    if (!n) return id.slice(0, 8);
+    if (n.node_type === 'workflow') return n.name || id;
+    if (n.node_type === 'workflow_agent') return n.title || n.name || id;
+    if (n.workspace) return id.slice(0, 8) + ' ' + shortProject(n.workspace);
     return id.slice(0, 8);
   }
 
-  // Node sub-info: tool_calls + last activity.
+  // Node sub-info: workflow status/agent count for workflow nodes, else stats.
   function nodeInfo(id) {
     const n = nodeData[id];
     if (!n) return '';
+    if (n.node_type === 'workflow') {
+      const parts = [];
+      if (n.status) parts.push(n.status);
+      parts.push((n.agent_count || 0) + ' agents');
+      if (n.journal_event_count) parts.push(n.journal_event_count + ' events');
+      return parts.join(' · ');
+    }
+    if (n.node_type === 'workflow_agent') return n.status || '';
     const parts = [];
     if (n.tool_calls) parts.push(n.tool_calls + ' tools');
     if (n.turns) parts.push(n.turns + ' turns');
+    if (n.node_type === 'session' && n.workflow_count) parts.push(n.workflow_count + ' wf');
     if (n.started_at) {
       // started_at may be unix seconds (number) or RFC3339 string.
       const ts = typeof n.started_at === 'number' ? new Date(n.started_at * 1000).toISOString() : n.started_at;
@@ -2558,14 +2691,20 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     return !!n.is_active;
   }
 
-  // Node box size scales with link count — compact by default.
+  // Node box size scales with label and link count. Workflow nodes are wider;
+  // child agents are compact.
   function nodeWidth(id) {
+    const n = nodeData[id];
     const label = nodeLabel(id);
-    const base = Math.max(70, label.length * 6.5 + 12);
+    if (n && n.node_type === 'workflow_agent') return 70;
+    const min = n && n.node_type === 'workflow' ? 150 : 70;
+    const base = Math.max(min, label.length * 6.5 + 16);
     const links = nodeLinkCount[id] || 0;
     return base + Math.min(links * 3, 24);
   }
   function nodeHeight(id) {
+    const n = nodeData[id];
+    if (n && n.node_type === 'workflow_agent') return 30;
     const info = nodeInfo(id);
     return info ? 36 : 24;
   }
@@ -2587,9 +2726,19 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   }
   function onNodeLeave() { setTooltip(null); setHoveredNode(null); }
 
-  // Node click → navigate to search with that session ID.
+  // Node click → workflow nodes toggle their child agents; session/agent nodes
+  // navigate to search.
   function onNodeClick(id) {
     if (didDrag.current) return;
+    const n = nodeData[id];
+    if (n && n.node_type === 'workflow') {
+      toggleWorkflow(n.full_id || id);
+      return;
+    }
+    if (n && n.node_type === 'workflow_agent') {
+      if (onNavigate) onNavigate('search', { q: n.parent_session_id || id });
+      return;
+    }
     if (onNavigate) onNavigate('search', { q: id });
   }
 
@@ -2678,6 +2827,29 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
         </div>
         <button class="btn btn-sm" onClick=${load}>refresh</button>
       </div>
+      <div class="filters" style="margin-bottom:4px">
+        <span style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">layout</span>
+        <div class="filter-chips">
+          ${[
+            { v: 'workflow', label: 'workflow' },
+            { v: 'sessions', label: 'sessions' },
+            { v: 'teams', label: 'teams' },
+            { v: 'network', label: 'network' },
+          ].map(m => html`
+            <button class="filter-chip ${effectiveMode === m.v ? 'active' : ''}"
+              onClick=${() => selectMode(m.v)}
+              title=${m.v === 'network' ? 'force-directed (debug)' : ''}>${m.label}</button>
+          `)}
+        </div>
+        ${effectiveMode === 'workflow' && hasWorkflows && html`
+          <button class="filter-chip" style="margin-left:8px"
+            onClick=${() => {
+              const allWf = Object.values(nodeData).filter(x => x.node_type === 'workflow');
+              const anyCollapsed = allWf.some(x => !expandedWorkflows.has(x.full_id || x.id));
+              setExpandedWorkflows(anyCollapsed ? new Set(allWf.map(x => x.full_id || x.id)) : new Set());
+            }}>expand/collapse all</button>
+        `}
+      </div>
       ${workspaces.length > 1 && html`
         <div class="filters" style="margin-bottom:4px">
           <span style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">workspace</span>
@@ -2707,6 +2879,11 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           <button class="filter-chip ${edgeFilter.team ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, team: !f.team }))}>
             <span style="color:var(--magenta)">—</span> team msg <span style="color:var(--magenta);opacity:0.7">··</span> spawn</button>
+          ${hasWorkflows && html`
+            <button class="filter-chip ${edgeFilter.workflow ? 'active' : ''}"
+              onClick=${() => setEdgeFilter(f => ({ ...f, workflow: !f.workflow }))}>
+              <span style="color:var(--accent)">—</span> workflow <span style="color:var(--cyan);opacity:0.8">··</span> spawn</button>
+          `}
         </div>
         <button class="filter-chip ${activeOnly ? 'active' : ''}"
           onClick=${() => setActiveOnly(a => !a)} style="margin-left:8px">
@@ -2731,7 +2908,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
                 <path d="M0,0 L8,3 L0,6" fill="var(--magenta)" />
               </marker>
             </defs>
-            ${wsRegions.length > 1 && wsRegions.map((r, i) => html`
+            ${effectiveMode !== 'workflow' && wsRegions.length > 1 && wsRegions.map((r, i) => html`
               <g key=${'ws' + i} class="graph-ws-group">
                 <rect x=${r.x - r.r} y=${r.y - r.r} width=${r.r * 2} height=${r.r * 2}
                   rx="4" fill="none" stroke="var(--border)" stroke-width="1" stroke-dasharray="4,4" />
@@ -2739,7 +2916,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
                   font-size="9" fill="var(--faint)" font-family="var(--mono)">${shortProject(r.ws)}</text>
               </g>
             `)}
-            ${Object.entries(teamGroups).map(([tn, ids]) => {
+            ${effectiveMode !== 'workflow' && Object.entries(teamGroups).map(([tn, ids]) => {
               if (ids.length < 2) return null;
               // Compute bounding box of team nodes + padding.
               let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -2770,11 +2947,20 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
               const fallback = { x: viewBox.x + viewBox.w / 2, y: viewBox.y + viewBox.h / 2 };
               const p1 = nodePos[src] || fallback;
               const p2 = nodePos[dst] || fallback;
-              // Determine edge class and arrow by action/kind type.
+              // Determine edge class and arrow by edge_type, then action/kind.
               const act = l.action || '';
               const kind = l.kind || '';
+              const et = l.edge_type || '';
               let cls, marker, dotColor, isObs = false;
-              if (act === 'team-spawn') {
+              if (et === 'workflow_contains') {
+                cls = 'graph-edge-workflow';
+                marker = 'url(#arrowMsg)';
+                dotColor = 'var(--accent)';
+              } else if (et === 'workflow_spawn') {
+                cls = 'graph-edge-spawn';
+                marker = 'url(#arrowSplit)';
+                dotColor = 'var(--cyan)';
+              } else if (act === 'team-spawn') {
                 cls = 'graph-edge-team-spawn';
                 marker = 'url(#arrowTeam)';
                 dotColor = 'var(--magenta)';
@@ -2831,19 +3017,31 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
             ${filteredNodeIds.map(n => {
               const p = nodePos[n];
               if (!p) return null;
+              const nn = nodeData[n];
+              const nt = nn && nn.node_type;
               const w = nodeWidth(n);
               const h = nodeHeight(n);
               const label = nodeLabel(n);
               const info = nodeInfo(n);
               const active = isActive(n);
+              const typeCls = nt === 'workflow' ? 'node-workflow'
+                : nt === 'workflow_agent' ? 'node-workflow-agent'
+                : nt === 'session' ? 'node-session' : '';
+              const statusCls = nt === 'workflow' && nn.status ? 'node-status-' + nn.status : '';
+              const isWf = nt === 'workflow';
+              const expanded = isWf && expandedWorkflows.has(nn.full_id || n);
+              const showDot = active || (isWf && nn.status);
               return html`
-                <g class="graph-node ${n.includes('@') ? 'team-agent' : ''} ${active ? 'active' : ''} ${hoveredNode === n ? 'hovered' : ''}" transform="translate(${p.x - w/2},${p.y - h/2})" key=${n}
+                <g class="graph-node ${typeCls} ${statusCls} ${n.includes('@') && !nt ? 'team-agent' : ''} ${active ? 'active' : ''} ${hoveredNode === n ? 'hovered' : ''}" transform="translate(${p.x - w/2},${p.y - h/2})" key=${n}
                   onMouseEnter=${(e) => onNodeEnter(n, e)} onMouseLeave=${onNodeLeave}
                   onClick=${() => onNodeClick(n)} style="cursor:pointer">
                   <rect width=${w} height=${h} />
-                  ${active && html`<rect class="node-dot" x="2" y=${h/2 - 3} width="3" height="6" rx="1" />`}
+                  ${showDot && html`<circle class="node-dot" cx="6" cy="6" r="3" />`}
                   <text x=${w/2} y=${info ? 12 : 15} text-anchor="middle" font-size="9">${label}</text>
                   ${info && html`<text class="node-info" x=${w/2} y="24" text-anchor="middle">${info}</text>`}
+                  ${isWf && (nn.agent_count > 0) && html`
+                    <text x=${w - 9} y=${h - 6} text-anchor="middle" font-size="10" fill="var(--dim)">${expanded ? '−' : '+'}</text>
+                  `}
                 </g>
               `;
             })}
@@ -2854,7 +3052,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           <button onClick=${() => setZoom(z => Math.min(3, z + 0.2))}>+</button>
           <button onClick=${resetView} title="Reset zoom and pan">1:1</button>
           <button onClick=${() => setZoom(z => Math.max(0.3, z - 0.2))}>-</button>
-          <button onClick=${resetView} title="Fit all nodes" style="margin-left:2px;font-size:10px">fit</button>
+          <button onClick=${fitView} title="Fit all nodes" style="margin-left:2px;font-size:10px">fit</button>
         </div>
       </div>
       <div class="graph-scrubber">
