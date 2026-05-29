@@ -74,7 +74,7 @@ func (c *Codex) Scan(ctx context.Context, config cass.ScanConfig, out chan<- cas
 		if !config.Since.IsZero() && info.ModTime().Before(config.Since) {
 			continue
 		}
-		sess, err := c.parseSession(ctx, root)
+		sess, err := c.parseSession(ctx, config, root)
 		if err != nil {
 			continue
 		}
@@ -108,7 +108,7 @@ func (c *Codex) scanDir(ctx context.Context, root string, config cass.ScanConfig
 			return nil
 		}
 
-		sess, err := c.parseSession(ctx, path)
+		sess, err := c.parseSession(ctx, config, path)
 		if err != nil {
 			return nil
 		}
@@ -125,8 +125,8 @@ func (c *Codex) scanDir(ctx context.Context, root string, config cass.ScanConfig
 	})
 }
 
-func (c *Codex) parseSession(ctx context.Context, path string) (cass.Session, error) {
-	entries, err := cc.ReadFile(ctx, path)
+func (c *Codex) parseSession(ctx context.Context, config cass.ScanConfig, path string) (cass.Session, error) {
+	entries, err := readSessionFile(ctx, config, path)
 	if err != nil {
 		return cass.Session{}, err
 	}

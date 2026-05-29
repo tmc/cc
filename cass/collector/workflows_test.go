@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/tmc/cc/cass"
 )
 
 func TestExtractWorkflowsFromClaudeSession(t *testing.T) {
@@ -44,7 +46,7 @@ func TestExtractWorkflowsFromClaudeSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sess, err := (&ClaudeCode{}).parseSession(context.Background(), sessionPath)
+	sess, err := (&ClaudeCode{}).parseSession(context.Background(), cass.ScanConfig{}, sessionPath)
 	if err != nil {
 		t.Fatal(err)
 	}

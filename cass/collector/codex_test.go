@@ -182,7 +182,7 @@ func TestCodexGoals(t *testing.T) {
 		},
 	)
 
-	sess, err := (&Codex{}).parseSession(context.Background(), path)
+	sess, err := (&Codex{}).parseSession(context.Background(), cass.ScanConfig{}, path)
 	if err != nil {
 		t.Fatalf("parseSession: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestCodexGoalCompletionGatesMultipleObjectives(t *testing.T) {
 		},
 	)
 
-	sess, err := (&Codex{}).parseSession(context.Background(), path)
+	sess, err := (&Codex{}).parseSession(context.Background(), cass.ScanConfig{}, path)
 	if err != nil {
 		t.Fatalf("parseSession: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestCodexItermLinks(t *testing.T) {
 		},
 	)
 
-	sess, err := (&Codex{}).parseSession(context.Background(), path)
+	sess, err := (&Codex{}).parseSession(context.Background(), cass.ScanConfig{}, path)
 	if err != nil {
 		t.Fatalf("parseSession: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestCodexSubagentRuns(t *testing.T) {
 		t.Helper()
 		path := filepath.Join(t.TempDir(), "spawner.jsonl")
 		writeCollectorJSONL(t, path, append([]map[string]any{codexMetaRow()}, rows...)...)
-		sess, err := (&Codex{}).parseSession(context.Background(), path)
+		sess, err := (&Codex{}).parseSession(context.Background(), cass.ScanConfig{}, path)
 		if err != nil {
 			t.Fatalf("parseSession: %v", err)
 		}
@@ -573,7 +573,7 @@ func TestCodexNoSubagentsWhenNoSpawns(t *testing.T) {
 			},
 		},
 	)
-	sess, err := (&Codex{}).parseSession(context.Background(), path)
+	sess, err := (&Codex{}).parseSession(context.Background(), cass.ScanConfig{}, path)
 	if err != nil {
 		t.Fatalf("parseSession: %v", err)
 	}

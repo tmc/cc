@@ -74,7 +74,7 @@ func (c *GeminiCLI) Scan(ctx context.Context, config cass.ScanConfig, out chan<-
 		if !config.Since.IsZero() && info.ModTime().Before(config.Since) {
 			continue
 		}
-		session, err := c.parseSession(ctx, root)
+		session, err := c.parseSession(ctx, config, root)
 		if err != nil {
 			continue
 		}
@@ -112,7 +112,7 @@ func (c *GeminiCLI) scanDir(ctx context.Context, root string, config cass.ScanCo
 			return nil
 		}
 
-		session, err := c.parseSession(ctx, path)
+		session, err := c.parseSession(ctx, config, path)
 		if err != nil {
 			return nil
 		}
@@ -146,8 +146,8 @@ func isGeminiSessionFile(path string) bool {
 	return false
 }
 
-func (c *GeminiCLI) parseSession(ctx context.Context, path string) (cass.Session, error) {
-	entries, workspace, err := c.readEntries(ctx, path)
+func (c *GeminiCLI) parseSession(ctx context.Context, config cass.ScanConfig, path string) (cass.Session, error) {
+	entries, workspace, err := c.readEntries(ctx, config, path)
 	if err != nil {
 		return cass.Session{}, err
 	}
@@ -226,12 +226,12 @@ func (c *GeminiCLI) parseSession(ctx context.Context, path string) (cass.Session
 	}, nil
 }
 
-func (c *GeminiCLI) readEntries(ctx context.Context, path string) ([]cc.Entry, string, error) {
+func (c *GeminiCLI) readEntries(ctx context.Context, config cass.ScanConfig, path string) ([]cc.Entry, string, error) {
 	if strings.HasSuffix(path, ".json") {
 		return c.readJSONSession(path)
 	}
 
-	entries, err := cc.ReadFile(ctx, path)
+	entries, err := readSessionFile(ctx, config, path)
 	if err != nil {
 		return nil, "", err
 	}
@@ -247,7 +247,7 @@ func (c *GeminiCLI) readEntries(ctx context.Context, path string) ([]cc.Entry, s
 			if strings.HasPrefix(name, "agent-acompact") {
 				continue
 			}
-			sub, err := cc.ReadFile(ctx, filepath.Join(subagentDir, name))
+			sub, err := readSessionFile(ctx, config, filepath.Join(subagentDir, name))
 			if err == nil {
 				entries = append(entries, sub...)
 			}

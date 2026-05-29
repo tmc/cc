@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/tmc/cc/cass"
 )
 
 func TestGeminiParseSession_ContentFormats(t *testing.T) {
@@ -81,7 +83,7 @@ func TestGeminiParseSession_ContentFormats(t *testing.T) {
 			}
 
 			c := &GeminiCLI{}
-			sess, err := c.parseSession(context.Background(), sessionPath)
+			sess, err := c.parseSession(context.Background(), cass.ScanConfig{}, sessionPath)
 			if err != nil {
 				t.Fatalf("parseSession: %v", err)
 			}
