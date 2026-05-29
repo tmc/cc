@@ -149,6 +149,15 @@ type FileWatcher struct {
 	log     *slog.Logger
 	w       *fsnotify.Watcher
 	reindex ReindexFunc
+
+	// Single-flight reindex state. Only one processPending runs at a time;
+	// files arriving while one is in flight are merged into queued and drained
+	// in a trailing run, so a constantly-written session (e.g. an active
+	// Workflow appending agent files every few seconds) cannot stack dozens of
+	// overlapping whole-session reparses across cores.
+	mu      sync.Mutex
+	running bool
+	queued  map[string]struct{}
 }
 
 // NewFileWatcher creates a watcher for Claude Code session files.
@@ -253,9 +262,51 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 			debounce.Stop()
 			debounce = nil
 			debounceC = nil
-			go fw.processPending(ctx, files)
+			fw.schedule(ctx, files)
 		}
 	}
+}
+
+// schedule runs processPending under a single-flight guard. If a run is
+// already in flight, the files are merged into the queued set and drained by
+// a trailing run when the current one finishes, so reindex parallelism is
+// capped at one regardless of how fast files change.
+func (fw *FileWatcher) schedule(ctx context.Context, files map[string]struct{}) {
+	fw.mu.Lock()
+	if fw.running {
+		if fw.queued == nil {
+			fw.queued = make(map[string]struct{})
+		}
+		for f := range files {
+			fw.queued[f] = struct{}{}
+		}
+		fw.mu.Unlock()
+		return
+	}
+	fw.running = true
+	fw.mu.Unlock()
+
+	go func() {
+		batch := files
+		for {
+			fw.processPending(ctx, batch)
+			fw.mu.Lock()
+			if len(fw.queued) == 0 {
+				fw.running = false
+				fw.mu.Unlock()
+				return
+			}
+			batch = fw.queued
+			fw.queued = nil
+			fw.mu.Unlock()
+			if ctx.Err() != nil {
+				fw.mu.Lock()
+				fw.running = false
+				fw.mu.Unlock()
+				return
+			}
+		}
+	}()
 }
 
 // parentSessionPath maps a subagent JSONL path back to its parent session JSONL.

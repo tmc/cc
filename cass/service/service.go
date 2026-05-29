@@ -326,6 +326,13 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 		g.dirs[filepath.Dir(path)] = struct{}{}
 	}
 
+	// Scan walks each changed file's whole project directory, so without a
+	// modified-since floor it re-parses every session in that directory on
+	// every change. Bound it to the oldest changed file's mtime (less a small
+	// margin for clock skew and parent-vs-subagent write ordering) so the walk
+	// skips sessions untouched by this batch.
+	since := changedFilesSince(filePaths)
+
 	total := 0
 	for _, g := range groups {
 		dirList := make([]string, 0, len(g.dirs))
@@ -336,7 +343,7 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 		ch := make(chan cass.Session, 64)
 		errCh := make(chan error, 1)
 		go func(col cass.Collector, paths []string) {
-			errCh <- col.Scan(ctx, cass.ScanConfig{Paths: paths}, ch)
+			errCh <- col.Scan(ctx, cass.ScanConfig{Paths: paths, Since: since}, ch)
 		}(g.collector, dirList)
 
 		var batch []cass.Session
@@ -356,6 +363,30 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 	}
 
 	return total, nil
+}
+
+// changedFilesSince returns a modified-since floor for re-indexing: the oldest
+// mtime among the changed files, less a 5s margin to tolerate clock skew and
+// the parent session being flushed slightly before or after the subagent file
+// that triggered the change. Returns the zero time (no filter) if no mtime can
+// be read, preserving the previous full-walk behavior as a safe fallback.
+func changedFilesSince(filePaths []string) time.Time {
+	var oldest time.Time
+	for _, p := range filePaths {
+		fi, err := os.Stat(p)
+		if err != nil {
+			// A path we cannot stat may still be reindex-worthy (e.g. a parent
+			// derived from a subagent path); fall back to no floor.
+			return time.Time{}
+		}
+		if oldest.IsZero() || fi.ModTime().Before(oldest) {
+			oldest = fi.ModTime()
+		}
+	}
+	if oldest.IsZero() {
+		return time.Time{}
+	}
+	return oldest.Add(-5 * time.Second)
 }
 
 func collectorForPath(path string) cass.Collector {
