@@ -16,11 +16,9 @@ import (
 var (
 	listFlag       = flag.Bool("list", false, "List all configuration")
 	lFlag          = flag.Bool("l", false, "List all configuration (short)")
-	getFlag        = flag.Bool("get", false, "Get value for key")
 	unsetFlag      = flag.Bool("unset", false, "Remove a key")
 	localFlag      = flag.Bool("local", false, "Use local config")
 	projectFlag    = flag.Bool("project", false, "Use project config")
-	globalFlag     = flag.Bool("global", false, "Use global config")
 	showOriginFlag = flag.Bool("show-origin", false, "Show config file source")
 	editFlag       = flag.Bool("edit", false, "Open config file in editor")
 	fileFlag       = flag.String("file", "", "Use specific config file")

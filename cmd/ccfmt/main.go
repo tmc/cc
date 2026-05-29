@@ -361,10 +361,21 @@ func markdownLabel(e cc.Entry) string {
 	case isToolResultEntry(e):
 		return decorateMarkdownLabel("Tool Result", e)
 	case e.Message != nil && e.Message.Role != "":
-		return decorateMarkdownLabel(strings.Title(e.Message.Role), e)
+		return decorateMarkdownLabel(titleCase(e.Message.Role), e)
 	default:
-		return decorateMarkdownLabel(strings.Title(e.Type), e)
+		return decorateMarkdownLabel(titleCase(e.Type), e)
 	}
+}
+
+// titleCase upper-cases the first letter of each space-separated word. The role
+// and type values it formats are simple ASCII identifiers, so this avoids the
+// deprecated strings.Title and a golang.org/x/text dependency.
+func titleCase(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		words[i] = strings.ToUpper(w[:1]) + w[1:]
+	}
+	return strings.Join(words, " ")
 }
 
 func decorateTextLabel(base string, e cc.Entry) string {

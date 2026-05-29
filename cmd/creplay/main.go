@@ -161,8 +161,6 @@ type model struct {
 }
 
 type tickMsg time.Time
-type newMessageMsg Message
-type fileEndMsg struct{}
 
 func tickCmd(speed float64) tea.Cmd {
 	interval := time.Duration(float64(time.Second) / speed)
@@ -225,27 +223,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, keys.up):
-			m.viewport.LineUp(1)
+			m.viewport.ScrollUp(1)
 			return m, nil
 
 		case key.Matches(msg, keys.down):
-			m.viewport.LineDown(1)
+			m.viewport.ScrollDown(1)
 			return m, nil
 
 		case key.Matches(msg, keys.pageUp):
-			m.viewport.ViewUp()
+			m.viewport.PageUp()
 			return m, nil
 
 		case key.Matches(msg, keys.pageDown):
-			m.viewport.ViewDown()
+			m.viewport.PageDown()
 			return m, nil
 
 		case key.Matches(msg, keys.halfPageUp):
-			m.viewport.HalfViewUp()
+			m.viewport.HalfPageUp()
 			return m, nil
 
 		case key.Matches(msg, keys.halfPageDown):
-			m.viewport.HalfViewDown()
+			m.viewport.HalfPageDown()
 			return m, nil
 		}
 

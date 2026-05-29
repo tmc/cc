@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"embed"
-	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -275,13 +274,4 @@ func (s *Server) serveFromDisk(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, r, fullPath)
-}
-
-// addr returns the formatted listen URL.
-func listenURL(addr string) string {
-	host, port, _ := net.SplitHostPort(addr)
-	if host == "" {
-		host = "localhost"
-	}
-	return fmt.Sprintf("http://%s:%s", host, port)
 }

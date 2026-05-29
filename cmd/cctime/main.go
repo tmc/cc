@@ -170,11 +170,7 @@ func printEntry(e cc.Entry, prevTime *time.Time) {
 			}
 			toolStr := ""
 			if len(tools) > 0 {
-				names := make([]string, len(tools))
-				for i, t := range tools {
-					names[i] = t
-				}
-				toolStr = fmt.Sprintf(" [%s]", strings.Join(names, ", "))
+				toolStr = fmt.Sprintf(" [%s]", strings.Join(tools, ", "))
 			}
 			fmt.Printf("\033[33m%s\033[0m%s  \033[1mASST\033[0m  %s%s\n", ts, gap, parts, toolStr)
 		} else {
