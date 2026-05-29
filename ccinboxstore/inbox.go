@@ -1,4 +1,4 @@
-package cc
+package ccinboxstore
 
 import (
 	"context"

@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccinboxstore"
 	"github.com/tmc/cc/ccteamcfg"
 )
 
@@ -73,12 +73,12 @@ func doSend(team, to, sender, msgType, taskID, subject, toolName string) error {
 		}
 	}
 
-	msg := cc.InboxMessage{
+	msg := ccinboxstore.InboxMessage{
 		From: sender,
 		Text: text,
 		Read: false,
 	}
-	return cc.AppendInbox(context.Background(), team, to, msg)
+	return ccinboxstore.AppendInbox(context.Background(), team, to, msg)
 }
 
 func buildStructuredMessage(msgType, body, sender, taskID, subject, toolName string) (string, error) {
@@ -143,13 +143,13 @@ func doBroadcast(team, sender, text string) error {
 	if err != nil {
 		return err
 	}
-	msg := cc.InboxMessage{
+	msg := ccinboxstore.InboxMessage{
 		From: sender,
 		Text: text,
 		Read: false,
 	}
 	for _, m := range cfg.Members {
-		if err := cc.AppendInbox(context.Background(), team, m.Name, msg); err != nil {
+		if err := ccinboxstore.AppendInbox(context.Background(), team, m.Name, msg); err != nil {
 			fmt.Fprintf(os.Stderr, "ccinbox: error sending to %s: %v\n", m.Name, err)
 		}
 	}
@@ -157,7 +157,7 @@ func doBroadcast(team, sender, text string) error {
 }
 
 func doRead(team, agent, format string) error {
-	msgs, err := cc.ReadInbox(context.Background(), team, agent)
+	msgs, err := ccinboxstore.ReadInbox(context.Background(), team, agent)
 	if err != nil {
 		return err
 	}
@@ -165,7 +165,7 @@ func doRead(team, agent, format string) error {
 }
 
 func doReadUnread(team, agent, format string) error {
-	msgs, err := cc.ReadUnread(context.Background(), team, agent)
+	msgs, err := ccinboxstore.ReadUnread(context.Background(), team, agent)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func doReadUnread(team, agent, format string) error {
 func doFollow(team, agent, format string) error {
 	seen := 0
 	for {
-		msgs, err := cc.ReadInbox(context.Background(), team, agent)
+		msgs, err := ccinboxstore.ReadInbox(context.Background(), team, agent)
 		if err != nil {
 			return err
 		}
@@ -189,7 +189,7 @@ func doFollow(team, agent, format string) error {
 	}
 }
 
-func printMessages(msgs []cc.InboxMessage, format string) error {
+func printMessages(msgs []ccinboxstore.InboxMessage, format string) error {
 	if len(msgs) == 0 {
 		return nil
 	}
@@ -202,7 +202,7 @@ func printMessages(msgs []cc.InboxMessage, format string) error {
 			readMark = "*"
 		}
 		fmt.Printf("[%s] %s from=%s\n", readMark, m.Timestamp, m.From)
-		if sm := cc.ParseMessage(m); sm != nil {
+		if sm := ccinboxstore.ParseMessage(m); sm != nil {
 			fmt.Printf("  type=%s\n", sm.Type)
 		}
 		fmt.Printf("  %s\n", m.Text)

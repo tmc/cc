@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccinboxstore"
 	"github.com/tmc/cc/ccteamcfg"
 )
 
@@ -58,7 +58,7 @@ func doCreate(name string) error {
 		return err
 	}
 	// Create inboxes directory.
-	dir, err := cc.InboxDir(name)
+	dir, err := ccinboxstore.InboxDir(name)
 	if err != nil {
 		return err
 	}

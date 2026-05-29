@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccinboxstore"
 )
 
 func main() {
@@ -60,7 +60,7 @@ type pendingApproval struct {
 }
 
 func findPending(team, inboxName string) ([]pendingApproval, error) {
-	msgs, err := cc.ReadInbox(context.Background(), team, inboxName)
+	msgs, err := ccinboxstore.ReadInbox(context.Background(), team, inboxName)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func findPending(team, inboxName string) ([]pendingApproval, error) {
 	// Track which request IDs have been responded to.
 	responded := map[string]bool{}
 	for _, m := range msgs {
-		sm := cc.ParseMessage(m)
+		sm := ccinboxstore.ParseMessage(m)
 		if sm == nil {
 			continue
 		}
@@ -77,7 +77,7 @@ func findPending(team, inboxName string) ([]pendingApproval, error) {
 		}
 	}
 	for _, m := range msgs {
-		sm := cc.ParseMessage(m)
+		sm := ccinboxstore.ParseMessage(m)
 		if sm == nil {
 			continue
 		}
@@ -202,16 +202,16 @@ func sendResponse(team, inboxName, agent string, p pendingApproval, approved boo
 	}
 
 	// Write response to both the controller inbox (for tracking) and the agent inbox.
-	msg := cc.InboxMessage{
+	msg := ccinboxstore.InboxMessage{
 		From:      inboxName,
 		Text:      text,
 		Timestamp: now,
 		Read:      false,
 	}
-	if err := cc.AppendInbox(context.Background(), team, inboxName, msg); err != nil {
+	if err := ccinboxstore.AppendInbox(context.Background(), team, inboxName, msg); err != nil {
 		return fmt.Errorf("record response: %w", err)
 	}
-	return cc.AppendInbox(context.Background(), team, agent, msg)
+	return ccinboxstore.AppendInbox(context.Background(), team, agent, msg)
 }
 
 func doAuto(team, inboxName string) error {

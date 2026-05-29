@@ -15,6 +15,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/ccinboxstore"
 	"github.com/tmc/cc/ccteamcfg"
 )
 
@@ -698,9 +699,9 @@ func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read last N messages from each inbox.
-	inboxes := map[string][]cc.InboxMessage{}
+	inboxes := map[string][]ccinboxstore.InboxMessage{}
 	for _, m := range cfg.Members {
-		msgs, err := cc.ReadInbox(r.Context(), name, m.Name)
+		msgs, err := ccinboxstore.ReadInbox(r.Context(), name, m.Name)
 		if err != nil {
 			continue
 		}
@@ -747,11 +748,11 @@ func (s *Server) handleTeamInbox(w http.ResponseWriter, r *http.Request) {
 		if body.From == "" {
 			body.From = "web"
 		}
-		msg := cc.InboxMessage{
+		msg := ccinboxstore.InboxMessage{
 			From: body.From,
 			Text: body.Text,
 		}
-		if err := cc.AppendInbox(r.Context(), name, agent, msg); err != nil {
+		if err := ccinboxstore.AppendInbox(r.Context(), name, agent, msg); err != nil {
 			writeError(w, err, http.StatusInternalServerError)
 			return
 		}
@@ -767,7 +768,7 @@ func (s *Server) handleTeamInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgs, err := cc.ReadInbox(r.Context(), name, agent)
+	msgs, err := ccinboxstore.ReadInbox(r.Context(), name, agent)
 	if err != nil {
 		writeError(w, err, http.StatusInternalServerError)
 		return

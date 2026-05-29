@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccinboxstore"
 	"github.com/tmc/cc/ccteamcfg"
 )
 
@@ -221,13 +221,13 @@ func checkPID(team, agent string) (int, bool) {
 }
 
 func checkIdle(team, agent string) (bool, string) {
-	msgs, err := cc.ReadInbox(context.Background(), team, agent)
+	msgs, err := ccinboxstore.ReadInbox(context.Background(), team, agent)
 	if err != nil {
 		return false, ""
 	}
 	// Look for most recent idle notification (scan backwards).
 	for i := len(msgs) - 1; i >= 0; i-- {
-		sm := cc.ParseMessage(msgs[i])
+		sm := ccinboxstore.ParseMessage(msgs[i])
 		if sm == nil {
 			continue
 		}
