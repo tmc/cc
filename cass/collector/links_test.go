@@ -169,8 +169,8 @@ func TestExtractLinks(t *testing.T) {
 			},
 		},
 		{
-			name: "empty entries",
-			entries: nil,
+			name:      "empty entries",
+			entries:   nil,
 			wantCount: 0,
 		},
 		{
@@ -378,7 +378,7 @@ func TestExtractItermSessionID(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "empty entries",
+			name:    "empty entries",
 			entries: nil,
 			want:    "",
 		},

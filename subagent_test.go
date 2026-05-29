@@ -8,10 +8,10 @@ import (
 
 func TestParseTaskNotification(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		want    TaskNotification
-		wantOK  bool
+		name   string
+		input  string
+		want   TaskNotification
+		wantOK bool
 	}{
 		{
 			name: "full",

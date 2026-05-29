@@ -98,7 +98,7 @@ func taskNotificationXML(taskID, toolUseID, status string, totalTokens, toolUses
 	return out
 }
 
-func itoa(n int) string   { return formatInt(int64(n)) }
+func itoa(n int) string     { return formatInt(int64(n)) }
 func itoa64(n int64) string { return formatInt(n) }
 
 func formatInt(n int64) string {

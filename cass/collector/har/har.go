@@ -12,13 +12,13 @@ type File struct {
 
 // Request is the HTTP request portion of a HAR entry.
 type Request struct {
-	Method      string       `json:"method"`
-	URL         string       `json:"url"`
-	HTTPVersion string       `json:"httpVersion"`
-	Headers     []Header     `json:"headers"`
-	PostData    *PostData    `json:"postData,omitempty"`
-	HeadersSize int          `json:"headersSize"`
-	BodySize    int          `json:"bodySize"`
+	Method      string    `json:"method"`
+	URL         string    `json:"url"`
+	HTTPVersion string    `json:"httpVersion"`
+	Headers     []Header  `json:"headers"`
+	PostData    *PostData `json:"postData,omitempty"`
+	HeadersSize int       `json:"headersSize"`
+	BodySize    int       `json:"bodySize"`
 }
 
 // Response is the HTTP response portion of a HAR entry.
@@ -52,11 +52,11 @@ type Content struct {
 // messagesAPIRequest is the subset of an Anthropic Messages API request body
 // needed for context breakdown analysis.
 type messagesAPIRequest struct {
-	Model    string            `json:"model"`
-	System   json.RawMessage   `json:"system"`
-	Tools    json.RawMessage   `json:"tools"`
-	Messages json.RawMessage   `json:"messages"`
-	Metadata *requestMetadata  `json:"metadata,omitempty"`
+	Model    string           `json:"model"`
+	System   json.RawMessage  `json:"system"`
+	Tools    json.RawMessage  `json:"tools"`
+	Messages json.RawMessage  `json:"messages"`
+	Metadata *requestMetadata `json:"metadata,omitempty"`
 }
 
 // requestMetadata extracts the user_id field which contains the session ID.

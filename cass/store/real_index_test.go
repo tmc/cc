@@ -51,9 +51,9 @@ func TestRealIndexSizes(t *testing.T) {
 		len(sessions), float64(rawBytes)/1e6)
 
 	for _, tc := range []struct {
-		kind    cassstore.BackendKind
-		maxFTS  int
-		name    string
+		kind   cassstore.BackendKind
+		maxFTS int
+		name   string
 	}{
 		{cassstore.BackendSQLite, 0, "sqlite/unicode61 uncapped"},
 		{cassstore.BackendSQLite, 32 * 1024, "sqlite/unicode61 32KB cap (current)"},

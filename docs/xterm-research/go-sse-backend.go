@@ -15,7 +15,7 @@ import (
 
 // SessionEvent represents a single Claude Code session event
 type SessionEvent struct {
-	Type      string                 `json:"type"`      // "user", "assistant", "tool_use", "tool_result"
+	Type      string                 `json:"type"` // "user", "assistant", "tool_use", "tool_result"
 	Timestamp time.Time              `json:"timestamp"`
 	Content   string                 `json:"content"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`

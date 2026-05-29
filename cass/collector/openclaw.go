@@ -108,18 +108,18 @@ func (c *OpenClaw) scanAgentsDir(ctx context.Context, agentsRoot string, config 
 
 // openclawEvent mirrors the JSONL event format written by the OpenClaw gateway.
 type openclawEvent struct {
-	Type      string         `json:"type"`
-	ID        string         `json:"id"`
-	Timestamp string         `json:"timestamp"`
-	CWD       string         `json:"cwd,omitempty"`
-	Provider  string         `json:"provider,omitempty"`
-	ModelID   string         `json:"modelId,omitempty"`
-	Message   *openclawMsg   `json:"message,omitempty"`
+	Type      string       `json:"type"`
+	ID        string       `json:"id"`
+	Timestamp string       `json:"timestamp"`
+	CWD       string       `json:"cwd,omitempty"`
+	Provider  string       `json:"provider,omitempty"`
+	ModelID   string       `json:"modelId,omitempty"`
+	Message   *openclawMsg `json:"message,omitempty"`
 }
 
 type openclawMsg struct {
-	Role    string           `json:"role"`
-	Content []openclawBlock  `json:"content"`
+	Role    string          `json:"role"`
+	Content []openclawBlock `json:"content"`
 }
 
 type openclawBlock struct {
