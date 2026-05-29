@@ -428,6 +428,96 @@ func TestCodexItermLinks(t *testing.T) {
 	}
 }
 
+func TestCodexSubagentRuns(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "spawner.jsonl")
+	writeCollectorJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-22T23:29:09Z",
+			"type":      "session_meta",
+			"payload": map[string]any{
+				"id":         "019e5385-parent",
+				"cwd":        "/work/apple",
+				"originator": "codex-tui",
+				"source":     "cli",
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-22T23:29:10Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":      "function_call",
+				"name":      "spawn_agent",
+				"call_id":   "call-spawn-1",
+				"arguments": `{"agent_type":"worker","fork_context":true,"message":"do the baseline"}`,
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-25T05:40:00Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "<subagent_notification>\n{\"agent_path\":\"019e5d9d-child\",\"status\":{\"completed\":\"Done. Commit made.\"}}\n</subagent_notification>"},
+				},
+			},
+		},
+	)
+
+	sess, err := (&Codex{}).parseSession(context.Background(), path)
+	if err != nil {
+		t.Fatalf("parseSession: %v", err)
+	}
+	if len(sess.Subagents) != 1 {
+		t.Fatalf("subagents = %d, want 1: %#v", len(sess.Subagents), sess.Subagents)
+	}
+	r := sess.Subagents[0]
+	if r.AgentID != "019e5d9d-child" {
+		t.Errorf("agent id = %q, want 019e5d9d-child (the spawned session id)", r.AgentID)
+	}
+	if r.ParentSessionID != "019e5385-parent" {
+		t.Errorf("parent session id = %q, want 019e5385-parent", r.ParentSessionID)
+	}
+	if r.AgentType != "worker" {
+		t.Errorf("agent type = %q, want worker", r.AgentType)
+	}
+	if r.Status != "completed" {
+		t.Errorf("status = %q, want completed", r.Status)
+	}
+	if r.Workspace != "/work/apple" {
+		t.Errorf("workspace = %q, want /work/apple", r.Workspace)
+	}
+}
+
+func TestCodexNoSubagentsWhenNoSpawns(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "plain.jsonl")
+	writeCollectorJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-22T23:29:09Z",
+			"type":      "session_meta",
+			"payload":   map[string]any{"id": "plain", "cwd": "/work", "source": "cli"},
+		},
+		map[string]any{
+			"timestamp": "2026-05-22T23:29:10Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "hello"}},
+			},
+		},
+	)
+	sess, err := (&Codex{}).parseSession(context.Background(), path)
+	if err != nil {
+		t.Fatalf("parseSession: %v", err)
+	}
+	if len(sess.Subagents) != 0 {
+		t.Fatalf("subagents = %d, want 0", len(sess.Subagents))
+	}
+}
+
 func writeCollectorJSONL(t *testing.T, path string, rows ...map[string]any) {
 	t.Helper()
 	f, err := os.Create(path)

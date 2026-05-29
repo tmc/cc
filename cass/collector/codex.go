@@ -186,7 +186,7 @@ func (c *Codex) parseSession(ctx context.Context, path string) (cass.Session, er
 		id = sessionID(path)
 	}
 
-	return cass.Session{
+	session := cass.Session{
 		ID:         id,
 		Agent:      agent,
 		Title:      titleFromSummary(sum),
@@ -199,7 +199,9 @@ func (c *Codex) parseSession(ctx context.Context, path string) (cass.Session, er
 		Skills:     skills,
 		Stats:      stats,
 		Metadata:   meta,
-	}, nil
+	}
+	session.Subagents = extractCodexSubagentRuns(entries, session)
+	return session, nil
 }
 
 func (c *Codex) root() (string, error) {
