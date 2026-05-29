@@ -48,6 +48,13 @@ type Entry struct {
 	// Subagent fields (entries inside subagents/<uuid>/ directories).
 	AgentID string `json:"agentId,omitempty"` // UUID of the subagent instance.
 
+	// Codex subagent linkage, captured from a spawned session's session_meta
+	// (source.subagent.thread_spawn). ParentThreadID is the spawning session's
+	// id; AgentNickname and AgentRole describe the spawned agent.
+	ParentThreadID string `json:"parentThreadId,omitempty"`
+	AgentNickname  string `json:"agentNickname,omitempty"`
+	AgentRole      string `json:"agentRole,omitempty"`
+
 	// Permission mode for the turn (e.g. "plan", "default").
 	PermissionMode string `json:"permissionMode,omitempty"`
 

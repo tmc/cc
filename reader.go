@@ -118,13 +118,18 @@ func isCodexEnvelopeType(t string) bool {
 }
 
 func decodeCodexSessionMeta(env codexEnvelope) (Entry, bool) {
+	// source is a plain string for top-level sessions ("cli", "vscode") but an
+	// object for spawned subagent sessions; decode it as raw JSON so neither
+	// shape fails the whole entry.
 	var payload struct {
-		ID         string `json:"id"`
-		Timestamp  string `json:"timestamp"`
-		CWD        string `json:"cwd"`
-		Originator string `json:"originator"`
-		Source     string `json:"source"`
-		CLIVersion string `json:"cli_version"`
+		ID            string          `json:"id"`
+		Timestamp     string          `json:"timestamp"`
+		CWD           string          `json:"cwd"`
+		Originator    string          `json:"originator"`
+		Source        json.RawMessage `json:"source"`
+		CLIVersion    string          `json:"cli_version"`
+		AgentNickname string          `json:"agent_nickname"`
+		AgentRole     string          `json:"agent_role"`
 	}
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
 		return Entry{}, false
@@ -137,16 +142,59 @@ func decodeCodexSessionMeta(env codexEnvelope) (Entry, bool) {
 		}
 	}
 
+	source, spawn := codexSource(payload.Source)
+	nickname := firstNonEmptyString(payload.AgentNickname, spawn.AgentNickname)
+	role := firstNonEmptyString(payload.AgentRole, spawn.AgentRole)
+
 	return Entry{
-		Type:       "system",
-		Subtype:    "session_meta",
-		SessionID:  payload.ID,
-		Timestamp:  ts,
-		CWD:        payload.CWD,
-		Version:    payload.CLIVersion,
-		Originator: payload.Originator,
-		Source:     payload.Source,
+		Type:           "system",
+		Subtype:        "session_meta",
+		SessionID:      payload.ID,
+		Timestamp:      ts,
+		CWD:            payload.CWD,
+		Version:        payload.CLIVersion,
+		Originator:     payload.Originator,
+		Source:         source,
+		ParentThreadID: spawn.ParentThreadID,
+		AgentNickname:  nickname,
+		AgentRole:      role,
 	}, true
+}
+
+// codexThreadSpawn is the spawn metadata carried by a codex subagent session's
+// session_meta at source.subagent.thread_spawn.
+type codexThreadSpawn struct {
+	ParentThreadID string `json:"parent_thread_id"`
+	AgentNickname  string `json:"agent_nickname"`
+	AgentRole      string `json:"agent_role"`
+}
+
+// codexSource decodes the session_meta "source" field, which is a JSON string
+// for top-level sessions and an object for spawned subagents. It returns the
+// string form (empty when source is an object) and any thread-spawn metadata.
+func codexSource(raw json.RawMessage) (source string, spawn codexThreadSpawn) {
+	if len(raw) == 0 {
+		return "", spawn
+	}
+	if err := json.Unmarshal(raw, &source); err == nil {
+		return source, spawn
+	}
+	var obj struct {
+		Subagent struct {
+			ThreadSpawn codexThreadSpawn `json:"thread_spawn"`
+		} `json:"subagent"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return "", obj.Subagent.ThreadSpawn
+	}
+	return "", spawn
+}
+
+func firstNonEmptyString(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func decodeCodexTurnContext(env codexEnvelope) (Entry, bool) {

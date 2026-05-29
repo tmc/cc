@@ -550,6 +550,80 @@ func TestReadFileCodexToolSearch(t *testing.T) {
 	}
 }
 
+func TestReadFileCodexSubagentSessionMeta(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "session.jsonl")
+
+	// A spawned codex subagent's session_meta carries source as an object
+	// (source.subagent.thread_spawn) rather than a plain string.
+	writeJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-25T05:31:12Z",
+			"type":      "session_meta",
+			"payload": map[string]any{
+				"id":          "019e5d9d-child",
+				"cwd":         "/work/apple",
+				"originator":  "codex-tui",
+				"cli_version": "0.128.0",
+				"source": map[string]any{
+					"subagent": map[string]any{
+						"thread_spawn": map[string]any{
+							"parent_thread_id": "019e5385-parent",
+							"depth":            1,
+							"agent_nickname":   "Peirce",
+							"agent_role":       "worker",
+						},
+					},
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-25T05:31:13Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "do the work"},
+				},
+			},
+		},
+	)
+
+	entries, err := ReadFile(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2 (session_meta must not be dropped)", len(entries))
+	}
+	meta := entries[0]
+	if meta.Subtype != "session_meta" {
+		t.Fatalf("subtype = %q, want session_meta", meta.Subtype)
+	}
+	if meta.SessionID != "019e5d9d-child" {
+		t.Fatalf("session id = %q, want 019e5d9d-child", meta.SessionID)
+	}
+	if meta.CWD != "/work/apple" {
+		t.Fatalf("cwd = %q, want /work/apple", meta.CWD)
+	}
+	if meta.Source != "" {
+		t.Fatalf("object source should yield empty Source string, got %q", meta.Source)
+	}
+	if meta.ParentThreadID != "019e5385-parent" {
+		t.Fatalf("parent thread id = %q, want 019e5385-parent", meta.ParentThreadID)
+	}
+	if meta.AgentNickname != "Peirce" || meta.AgentRole != "worker" {
+		t.Fatalf("agent nickname/role = %q/%q, want Peirce/worker", meta.AgentNickname, meta.AgentRole)
+	}
+
+	// String-form source (top-level session) still decodes and carries no spawn.
+	sum := Summarize(path, entries)
+	if sum.SessionID != "019e5d9d-child" {
+		t.Fatalf("summary session id = %q, want 019e5d9d-child", sum.SessionID)
+	}
+}
+
 func roleOf(m *Message) string {
 	if m == nil {
 		return ""
