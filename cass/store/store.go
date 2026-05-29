@@ -999,7 +999,17 @@ func (s *DB) SourcePath(ctx context.Context, id string) (string, error) {
 // Session returns indexed metadata for a single session.
 func (s *DB) Session(ctx context.Context, id string) (cass.Hit, error) {
 	query := `SELECT id, agent, title, substr(content, 1, 200) as snip, 0.0 as score, workspace, source_path, started_at, ` + hitStatsCols + ` FROM sessions WHERE id = ?`
-	return scanHit(s.db.QueryRowContext(ctx, query, id))
+	hit, err := scanHit(s.db.QueryRowContext(ctx, query, id))
+	if err != nil {
+		return cass.Hit{}, err
+	}
+	// Attach workflow runs (with per-agent metadata) so the detail panel can
+	// render the workflow tree. Empty query: attach only, no match badge.
+	hits := []cass.Hit{hit}
+	if err := s.foldWorkflows(ctx, hits, ""); err != nil {
+		return hit, nil // best-effort: the base hit is still useful.
+	}
+	return hits[0], nil
 }
 
 func scanHit(row hitScanner) (cass.Hit, error) {

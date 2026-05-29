@@ -92,7 +92,7 @@ function shortSessionID(id) {
 }
 
 function normalizeDetailTab(tab) {
-  return tab === 'agents' || tab === 'requests' ? tab : 'conversation';
+  return tab === 'agents' || tab === 'requests' || tab === 'workflows' ? tab : 'conversation';
 }
 
 // claudeResumeID extracts the Claude session UUID a `claude --resume <id>`
@@ -1449,6 +1449,99 @@ function AgentsTab({ agentData }) {
   `;
 }
 
+// WorkflowAgentTranscript lazily fetches and renders one workflow agent's
+// transcript by source_path. Workflow agents are not sessions, so they are
+// fetched via the dedicated /api/workflow-agent endpoint.
+function WorkflowAgentTranscript({ sourcePath }) {
+  const [entries, setEntries] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEntries(null);
+    setError(null);
+    fetch('api/workflow-agent?source_path=' + encodeURIComponent(sourcePath))
+      .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t || r.status))))
+      .then(data => { if (!cancelled) setEntries(data || []); })
+      .catch(e => { if (!cancelled) setError(String(e)); });
+    return () => { cancelled = true; };
+  }, [sourcePath]);
+
+  if (error) return html`<div class="detail-error" style="margin:6px 0">${error}</div>`;
+  if (entries === null) return html`<div class="loading" style="margin:6px 0">loading transcript...</div>`;
+  if (entries.length === 0) return html`<div class="empty" style="margin:6px 0">empty transcript</div>`;
+
+  return html`
+    <div class="wf-agent-transcript">
+      ${entries.map((e, i) => {
+        const msg = e.message;
+        if (!msg) return null;
+        const text = typeof msg.content === 'string'
+          ? msg.content
+          : (Array.isArray(msg.content)
+              ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n')
+              : '');
+        if (!text) return null;
+        return html`
+          <div class="wf-agent-msg" key=${i}>
+            <span class="wf-agent-role ${msg.role}">${msg.role}</span>
+            ${renderAnsiContent(text, 1200, '')}
+          </div>
+        `;
+      })}
+    </div>
+  `;
+}
+
+// WorkflowsTab renders each workflow run on the parent session as a tree of its
+// fan-out agents; expanding an agent streams its transcript inline. The agents
+// come from hit.workflows[].agents[] (attributed to the parent, never top-level).
+function WorkflowsTab({ workflows }) {
+  const [expanded, setExpanded] = useState(null); // "<runIdx>:<agentId>"
+
+  if (!workflows || workflows.length === 0) {
+    return html`<div class="empty" style="margin-top:20px">no workflow runs in this session</div>`;
+  }
+
+  return html`
+    <div class="wf-tab">
+      ${workflows.map((wf, ri) => html`
+        <div class="wf-run" key=${wf.run_id || ri}>
+          <div class="wf-run-head">
+            <span class="wf-run-name">${wf.name || wf.run_id || 'workflow'}</span>
+            ${wf.status && html`<span class="wf-run-status ${wf.status}">${wf.status}</span>`}
+            <span class="wf-run-meta">${(wf.agents || []).length || wf.agent_count || 0} agents${wf.journal_event_count ? ' · ' + wf.journal_event_count + ' events' : ''}</span>
+          </div>
+          ${wf.description && html`<div class="wf-run-desc">${wf.description}</div>`}
+          <div class="wf-agent-list">
+            ${(wf.agents || []).map((a, ai) => {
+              const key = ri + ':' + a.id;
+              const isOpen = expanded === key;
+              const isLast = ai === (wf.agents.length - 1);
+              return html`
+                <div class="wf-agent" key=${a.id}>
+                  <div class="wf-agent-row ${isOpen ? 'expanded' : ''}"
+                       onClick=${() => setExpanded(prev => prev === key ? null : key)}>
+                    <span class="agent-tree-connector">${isLast ? '└─' : '├─'}</span>
+                    <span class="wf-agent-name">@${a.title || a.id}</span>
+                    <span class="wf-agent-stats">
+                      ${a.tool_calls ? a.tool_calls + ' tools' : ''}
+                      ${a.tokens ? ' · ' + fmtNum(a.tokens) + ' tok' : ''}
+                    </span>
+                  </div>
+                  ${isOpen && a.source_path && html`
+                    <${WorkflowAgentTranscript} sourcePath=${a.source_path} />
+                  `}
+                </div>
+              `;
+            })}
+          </div>
+        </div>
+      `)}
+    </div>
+  `;
+}
+
 function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterChange, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2086,6 +2179,12 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
                   : agentData.totalAgents})
               </button>
             `}
+            ${(hit.workflows || []).length > 0 && html`
+              <button class="detail-tab ${activeTab === 'workflows' ? 'active' : ''}"
+                      onClick=${() => setActiveTab('workflows')}>
+                Workflows (${hit.workflows.length})
+              </button>
+            `}
             <button class="detail-tab ${activeTab === 'requests' ? 'active' : ''}"
                     onClick=${() => setActiveTab('requests')}>
               API Requests
@@ -2123,6 +2222,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
             ${!detailError && html`<div class="conversation">${renderConversation()}</div>`}
           ` : activeTab === 'agents' ? html`
             <${AgentsTab} agentData=${agentData} />
+          ` : activeTab === 'workflows' ? html`
+            <${WorkflowsTab} workflows=${hit.workflows} />
           ` : renderRequestsTab()}
         </div>
       `}

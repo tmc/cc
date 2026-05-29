@@ -2139,3 +2139,25 @@ mark.search-hl {
 .swatch.tool { background: #6ab04c; }
 .swatch.sys { background: #7ab8d4; }
 .swatch.conv { background: #e87d3e; }
+
+/* Workflows tab: per-run tree of fan-out agents with inline transcripts. */
+.wf-tab { padding: 8px 4px; }
+.wf-run { margin-bottom: 14px; border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; }
+.wf-run-head { display: flex; align-items: center; gap: 8px; }
+.wf-run-name { font-weight: 600; color: var(--magenta); }
+.wf-run-status { font-size: 10px; text-transform: uppercase; color: var(--dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
+.wf-run-status.completed { color: var(--green, #2a7); }
+.wf-run-status.failed, .wf-run-status.killed { color: var(--red, #c33); }
+.wf-run-meta { font-size: 11px; color: var(--dim); margin-left: auto; }
+.wf-run-desc { font-size: 11px; color: var(--dim); margin: 4px 0 6px; }
+.wf-agent-list { margin-top: 4px; }
+.wf-agent-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; cursor: pointer; border-radius: 3px; font-size: 12px; }
+.wf-agent-row:hover { background: var(--border); }
+.wf-agent-row.expanded { background: var(--border); }
+.wf-agent-name { color: var(--cyan); }
+.wf-agent-stats { font-size: 11px; color: var(--dim); margin-left: auto; }
+.wf-agent-transcript { margin: 4px 0 8px 18px; border-left: 2px solid var(--border); padding-left: 10px; }
+.wf-agent-msg { margin: 6px 0; font-size: 12px; }
+.wf-agent-role { display: inline-block; font-size: 10px; text-transform: uppercase; color: var(--dim); margin-right: 6px; }
+.wf-agent-role.user { color: var(--cyan); }
+.wf-agent-role.assistant { color: var(--magenta); }
