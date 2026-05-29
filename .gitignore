@@ -19,6 +19,11 @@
 # Build output tree
 /bin/
 
+# Local module vendor tree. The build uses the module cache (valid go.sum);
+# vendoring is not committed. The DuckDB backend (//go:build duckdb) pulls in
+# ~200MB of arrow-go and needs CGO, so it is opt-in and not vendored.
+/vendor/
+
 # Ephemeral screenshots captured during dev
 screenshot-*.png
 
