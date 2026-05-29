@@ -166,9 +166,16 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 		}
 	}
 
-	// Debounce timer.
+	// Debounce timer. Keep all access to pending on this goroutine; the timer
+	// only signals through debounceC.
 	var debounce *time.Timer
+	var debounceC <-chan time.Time
 	pending := make(map[string]struct{})
+	defer func() {
+		if debounce != nil {
+			debounce.Stop()
+		}
+	}()
 
 	for {
 		select {
@@ -192,19 +199,31 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 			}
 
 			pending[event.Name] = struct{}{}
-			if debounce != nil {
-				debounce.Stop()
+			if debounce == nil {
+				debounce = time.NewTimer(500 * time.Millisecond)
+				debounceC = debounce.C
+			} else {
+				if !debounce.Stop() {
+					select {
+					case <-debounce.C:
+					default:
+					}
+				}
+				debounce.Reset(500 * time.Millisecond)
 			}
-			debounce = time.AfterFunc(500*time.Millisecond, func() {
-				fw.processPending(ctx, pending)
-				pending = make(map[string]struct{})
-			})
 
 		case err, ok := <-fw.w.Errors:
 			if !ok {
 				return
 			}
 			fw.log.Warn("watcher error", "err", err)
+		case <-debounceC:
+			files := pending
+			pending = make(map[string]struct{})
+			debounce.Stop()
+			debounce = nil
+			debounceC = nil
+			go fw.processPending(ctx, files)
 		}
 	}
 }
