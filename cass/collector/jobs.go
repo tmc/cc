@@ -3,8 +3,8 @@ package collector
 import (
 	"fmt"
 
-	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass/store"
+	"github.com/tmc/cc/ccjobstore"
 )
 
 // ScanJobs reads ~/.claude/jobs/<shortId>/state.json + timeline.jsonl files
@@ -22,23 +22,23 @@ func ScanJobs(root string) ([]store.Job, error) {
 	return out, nil
 }
 
-func listJobs(root string) ([]*cc.Job, error) {
+func listJobs(root string) ([]*ccjobstore.Job, error) {
 	if root == "" {
-		return cc.ListJobs()
+		return ccjobstore.ListJobs()
 	}
-	return cc.ListJobsIn(root)
+	return ccjobstore.ListJobsIn(root)
 }
 
-func readTimelineFor(root, shortID string) ([]cc.JobTimelineEvent, error) {
+func readTimelineFor(root, shortID string) ([]ccjobstore.JobTimelineEvent, error) {
 	if root == "" {
-		return cc.ReadJobTimeline(shortID)
+		return ccjobstore.ReadJobTimeline(shortID)
 	}
-	return cc.ReadJobTimelineFrom(joinJob(root, shortID))
+	return ccjobstore.ReadJobTimelineFrom(joinJob(root, shortID))
 }
 
 func joinJob(root, shortID string) string { return root + "/" + shortID }
 
-func toStoreJob(j *cc.Job, events []cc.JobTimelineEvent) store.Job {
+func toStoreJob(j *ccjobstore.Job, events []ccjobstore.JobTimelineEvent) store.Job {
 	if j == nil {
 		return store.Job{}
 	}

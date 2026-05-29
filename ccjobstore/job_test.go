@@ -1,4 +1,4 @@
-package cc
+package ccjobstore
 
 import (
 	"encoding/json"
