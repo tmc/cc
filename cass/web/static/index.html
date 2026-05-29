@@ -2132,6 +2132,19 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
           </div>
         `;
       }
+      if (n.node_type === 'subagent') {
+        const tok = (n.tokens || 0);
+        return html`
+          <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
+            <div class="graph-tooltip-title">${n.title || n.name || tooltip.id}</div>
+            <div class="graph-tooltip-stat">
+              ${[n.name || 'subagent', n.status, tok >= 1000 && fmtNum(tok) + ' tok'].filter(Boolean).join(' · ')}
+            </div>
+            ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
+            <div class="graph-tooltip-hint">click to open spawned session</div>
+          </div>
+        `;
+      }
       const tok = (n.tokens || 0);
       return html`
         <div class="graph-tooltip visible"
@@ -2525,10 +2538,13 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       }
     });
     const agentsByWf = {};
+    const subBySession = {};
     filteredNodeIds.forEach(id => {
       const nn = nodeData[id];
       if (nn.node_type === 'workflow_agent') {
         (agentsByWf[nn.workflow_run_id] ||= []).push(id);
+      } else if (nn.node_type === 'subagent' && visible.has(nn.parent_session_id)) {
+        (subBySession[nn.parent_session_id] ||= []).push(id);
       }
     });
     const byStart = (a, b) => {
@@ -2565,6 +2581,23 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
         }
         wx += COL_W - 20;
       });
+      // Subagents the session spawned directly: a grid below the workflow row
+      // (or below the session node when there are no workflows).
+      const subs = (subBySession[sid] || []).slice().sort(byStart);
+      if (subs.length) {
+        const baseY = wfs.length ? WF_Y + WF_H + 60 : SESS_Y + 70;
+        const perRow = Math.max(1, Math.min(subs.length, Math.ceil(Math.sqrt(subs.length))));
+        const gridW = perRow * (AGENT_W + AGENT_GAP);
+        const cx = colX + colWidth / 2;
+        subs.forEach((aid, i) => {
+          const r = Math.floor(i / perRow), c = i % perRow;
+          pos[aid] = {
+            x: cx - gridW / 2 + AGENT_W / 2 + c * (AGENT_W + AGENT_GAP),
+            y: baseY + r * (AGENT_H + AGENT_GAP),
+            vx: 0, vy: 0,
+          };
+        });
+      }
       colX += colWidth + 40;
     });
     return pos;
@@ -2748,6 +2781,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     if (!n) return id.slice(0, 8);
     if (n.node_type === 'workflow') return n.name || id;
     if (n.node_type === 'workflow_agent') return n.title || n.name || id;
+    if (n.node_type === 'subagent') return n.name || n.title || id.slice(0, 8);
     if (n.workspace) return id.slice(0, 8) + ' ' + shortProject(n.workspace);
     return id.slice(0, 8);
   }
@@ -2764,6 +2798,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       return parts.join(' · ');
     }
     if (n.node_type === 'workflow_agent') return n.status || '';
+    if (n.node_type === 'subagent') return n.status || 'subagent';
     const parts = [];
     if (n.tool_calls) parts.push(n.tool_calls + ' tools');
     if (n.turns) parts.push(n.turns + ' turns');
@@ -2788,6 +2823,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     const n = nodeData[id];
     const label = nodeLabel(id);
     if (n && n.node_type === 'workflow_agent') return 70;
+    if (n && n.node_type === 'subagent') return Math.max(80, label.length * 6.5 + 16);
     const min = n && n.node_type === 'workflow' ? 150 : 70;
     const base = Math.max(min, label.length * 6.5 + 16);
     const links = nodeLinkCount[id] || 0;
@@ -2828,6 +2864,11 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     }
     if (n && n.node_type === 'workflow_agent') {
       if (onNavigate) onNavigate('search', { q: n.parent_session_id || id });
+      return;
+    }
+    if (n && n.node_type === 'subagent') {
+      // The subagent id is the spawned session's own id; search for it.
+      if (onNavigate) onNavigate('search', { q: id });
       return;
     }
     if (onNavigate) onNavigate('search', { q: id });
@@ -3005,6 +3046,10 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
                 cls = 'graph-edge-spawn';
                 marker = 'url(#arrowSplit)';
                 dotColor = 'var(--cyan)';
+              } else if (et === 'subagent_spawn') {
+                cls = 'graph-edge-subagent';
+                marker = 'url(#arrowSplit)';
+                dotColor = 'var(--yellow)';
               } else if (act === 'team-spawn') {
                 cls = 'graph-edge-team-spawn';
                 marker = 'url(#arrowTeam)';
@@ -3071,11 +3116,12 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
               const active = isActive(n);
               const typeCls = nt === 'workflow' ? 'node-workflow'
                 : nt === 'workflow_agent' ? 'node-workflow-agent'
+                : nt === 'subagent' ? 'node-subagent'
                 : nt === 'session' ? 'node-session' : '';
-              const statusCls = nt === 'workflow' && nn.status ? 'node-status-' + nn.status : '';
+              const statusCls = (nt === 'workflow' || nt === 'subagent') && nn.status ? 'node-status-' + nn.status : '';
               const isWf = nt === 'workflow';
               const expanded = isWf && isExpanded(nn.full_id || n);
-              const showDot = active || (isWf && nn.status);
+              const showDot = active || (isWf && nn.status) || (nt === 'subagent' && nn.status);
               return html`
                 <g class="graph-node ${typeCls} ${statusCls} ${n.includes('@') && !nt ? 'team-agent' : ''} ${active ? 'active' : ''} ${hoveredNode === n ? 'hovered' : ''}" transform="translate(${p.x - w/2},${p.y - h/2})" key=${n}
                   onMouseEnter=${(e) => onNodeEnter(n, e)} onMouseLeave=${onNodeLeave}
@@ -3106,9 +3152,11 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           <span class="graph-legend-item"><span class="graph-legend-node node-session"></span>session</span>
           <span class="graph-legend-item"><span class="graph-legend-node node-workflow"></span>workflow</span>
           <span class="graph-legend-item"><span class="graph-legend-node node-workflow-agent"></span>agent</span>
+          <span class="graph-legend-item"><span class="graph-legend-node node-subagent"></span>subagent</span>
           <span class="graph-legend-sep"></span>
           <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--accent)"></span>contains</span>
           <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--cyan)"></span>spawn</span>
+          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--yellow)"></span>subagent</span>
           <span class="graph-legend-sep"></span>
           <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--green)"></span>completed</span>
           <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--cyan)"></span>running</span>

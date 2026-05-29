@@ -1177,10 +1177,12 @@ mark.search-hl {
 .graph-node.node-session rect { fill: var(--node-bg); stroke: var(--border); stroke-width: 1.25; }
 .graph-node.node-workflow rect { fill: var(--node-wf-bg); stroke: var(--accent); stroke-width: 1.25; }
 .graph-node.node-workflow-agent rect { fill: var(--node-bg); stroke: var(--faint); stroke-width: 1; }
+.graph-node.node-subagent rect { fill: var(--node-bg); stroke: var(--yellow); stroke-width: 1; }
 .graph-node.node-status-completed .node-dot { fill: var(--green); }
 .graph-node.node-status-running .node-dot { fill: var(--cyan); }
 .graph-node.node-status-failed .node-dot { fill: var(--danger); }
 .graph-node.node-status-async_launched .node-dot { fill: var(--yellow); }
+.graph-node.node-status-unknown .node-dot { fill: var(--faint); }
 /* Edge opacity hierarchy: primary (workflow/team messages) > secondary
    (split/spawn) > quiet (observations). Set on a per-class base opacity so the
    hover-highlight/dimmed overrides still compose. */
@@ -1193,6 +1195,8 @@ mark.search-hl {
 /* Workflow containment (session->workflow->agent) is primary; fan-out spawn is secondary. */
 .graph-edge-workflow { stroke: var(--accent); stroke-width: 1.5; fill: none; opacity: 0.85; }
 .graph-edge-spawn { stroke: var(--cyan); stroke-width: 1; fill: none; stroke-dasharray: 3,2; opacity: 0.55; }
+/* Subagent spawn (session->subagent run) — distinct from workflow fan-out. */
+.graph-edge-subagent { stroke: var(--yellow); stroke-width: 1; fill: none; stroke-dasharray: 3,2; opacity: 0.6; }
 .graph-zoom {
   position: absolute;
   bottom: 8px;
@@ -1234,6 +1238,7 @@ mark.search-hl {
 .graph-legend-node.node-session { background: var(--node-bg); }
 .graph-legend-node.node-workflow { background: var(--node-wf-bg); border-color: var(--accent); }
 .graph-legend-node.node-workflow-agent { background: var(--node-bg); border-color: var(--faint); }
+.graph-legend-node.node-subagent { background: var(--node-bg); border-color: var(--yellow); }
 .graph-legend-line { width: 16px; height: 2px; display: inline-block; border-radius: 1px; }
 /* Dashed variant keeps the inline background color but breaks it into dashes
    via a mask, so legend lines match the SVG edge dash styles. */
