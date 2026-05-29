@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/cctaskstore"
 )
 
 func main() {
@@ -36,7 +36,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	store, err := cc.NewTaskStore(context.Background(), *team)
+	store, err := cctaskstore.NewTaskStore(context.Background(), *team)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cctask: %v\n", err)
 		os.Exit(1)
@@ -64,11 +64,11 @@ func main() {
 	}
 }
 
-func doCreate(store *cc.TaskStore, subject, desc, owner string) error {
+func doCreate(store *cctaskstore.TaskStore, subject, desc, owner string) error {
 	if subject == "" {
 		return fmt.Errorf("-subject is required for -create")
 	}
-	t := cc.TeamTask{
+	t := cctaskstore.TeamTask{
 		Subject:     subject,
 		Description: desc,
 		Owner:       owner,
@@ -81,7 +81,7 @@ func doCreate(store *cc.TaskStore, subject, desc, owner string) error {
 	return nil
 }
 
-func doShow(store *cc.TaskStore, id, format string) error {
+func doShow(store *cctaskstore.TaskStore, id, format string) error {
 	t, err := store.Get(id)
 	if err != nil {
 		return err
@@ -93,7 +93,7 @@ func doShow(store *cc.TaskStore, id, format string) error {
 	return nil
 }
 
-func doUpdate(store *cc.TaskStore, id, status, owner, blocks, subject, desc string) error {
+func doUpdate(store *cctaskstore.TaskStore, id, status, owner, blocks, subject, desc string) error {
 	t, err := store.Get(id)
 	if err != nil {
 		return err
@@ -120,7 +120,7 @@ func doUpdate(store *cc.TaskStore, id, status, owner, blocks, subject, desc stri
 	return nil
 }
 
-func doDelete(store *cc.TaskStore, id string) error {
+func doDelete(store *cctaskstore.TaskStore, id string) error {
 	if err := store.Delete(id); err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func doDelete(store *cc.TaskStore, id string) error {
 	return nil
 }
 
-func doWait(store *cc.TaskStore, id string, timeout time.Duration) error {
+func doWait(store *cctaskstore.TaskStore, id string, timeout time.Duration) error {
 	deadline := time.Time{}
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
@@ -149,7 +149,7 @@ func doWait(store *cc.TaskStore, id string, timeout time.Duration) error {
 	}
 }
 
-func doList(store *cc.TaskStore, format string) error {
+func doList(store *cctaskstore.TaskStore, format string) error {
 	tasks, err := store.List()
 	if err != nil {
 		return err
@@ -175,7 +175,7 @@ func doList(store *cc.TaskStore, format string) error {
 	return nil
 }
 
-func printTask(t cc.TeamTask) {
+func printTask(t cctaskstore.TeamTask) {
 	fmt.Printf("ID:          %s\n", t.ID)
 	fmt.Printf("Subject:     %s\n", t.Subject)
 	fmt.Printf("Status:      %s\n", t.Status)
