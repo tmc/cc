@@ -2091,6 +2091,88 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
 // --- Graph Panel ---
 
+// Normalize a node's started_at (unix seconds or RFC3339) to an ISO string.
+function nodeStartISO(n) {
+  if (!n || !n.started_at) return null;
+  return typeof n.started_at === 'number' ? new Date(n.started_at * 1000).toISOString() : n.started_at;
+}
+
+// GraphTooltip renders the floating node/edge tooltip. Content varies by
+// node_type; edges show the normalized edge_type label.
+function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, isActive }) {
+  if (tooltip) {
+    const n = nodeData[tooltip.id];
+    if (n) {
+      const startTs = nodeStartISO(n);
+      if (n.node_type === 'workflow') {
+        const dur = (n.started_at && n.completed_at) ? fmtDuration(n.completed_at - n.started_at) : null;
+        return html`
+          <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
+            <div class="graph-tooltip-title">${n.name || tooltip.id}</div>
+            ${n.description && html`<div class="graph-tooltip-stat" style="white-space:normal;max-width:240px">${n.description}</div>`}
+            <div class="graph-tooltip-stat">
+              ${[
+                n.status,
+                (n.agent_count || 0) + ' agents',
+                n.journal_event_count && n.journal_event_count + ' events',
+                dur && dur,
+              ].filter(Boolean).join(' · ')}
+            </div>
+            ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
+            <div class="graph-tooltip-hint">click to ${isExpanded(n.full_id || n.id) ? 'collapse' : 'expand'} agents</div>
+          </div>
+        `;
+      }
+      if (n.node_type === 'workflow_agent') {
+        return html`
+          <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
+            <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
+            <div class="graph-tooltip-stat">${n.status || 'agent'} · ${n.workflow_run_id || ''}</div>
+            <div class="graph-tooltip-hint">click to open parent session</div>
+          </div>
+        `;
+      }
+      const tok = (n.tokens || 0);
+      return html`
+        <div class="graph-tooltip visible"
+          style="left:${tooltip.x}px;top:${tooltip.y}px">
+          <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
+          ${n.workspace && html`<div class="graph-tooltip-stat graph-tooltip-ws"
+            onClick=${(e) => { e.stopPropagation(); if (onNavigate) onNavigate('search', { q: shortProject(n.workspace) }); }}
+            style="cursor:pointer;text-decoration:underline">${shortProject(n.workspace)}</div>`}
+          <div class="graph-tooltip-stat">
+            ${[
+              n.tool_calls && n.tool_calls + ' tools',
+              n.turns && n.turns + ' turns',
+              tok >= 1000 && fmtNum(tok) + ' tok',
+              n.workflow_count && n.workflow_count + ' workflows',
+            ].filter(Boolean).join(' · ') || 'no stats'}
+          </div>
+          ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
+          ${isActive(tooltip.id) && html`<div style="color:var(--green);margin-top:2px">active</div>`}
+          <div class="graph-tooltip-hint">click node to search</div>
+        </div>
+      `;
+    }
+  }
+  if (edgeTooltip) {
+    const l = edgeTooltip.link;
+    const label = (l.edge_type || l.kind || 'link').replace(/_/g, ' ');
+    const action = l.action && l.action !== l.edge_type ? l.action : '';
+    const ts = l.timestamp ? relTime(l.timestamp) : '';
+    return html`
+      <div class="graph-tooltip visible"
+        style="left:${edgeTooltip.x}px;top:${edgeTooltip.y}px">
+        <div class="graph-tooltip-title">${l.source} → ${l.target}</div>
+        <div class="graph-tooltip-stat">${label}${action ? ': ' + action : ''}</div>
+        ${l.text && html`<div class="graph-tooltip-stat" style="white-space:normal;max-width:240px;color:var(--dim)">${l.text.slice(0, 120)}</div>`}
+        ${ts && html`<div class="graph-tooltip-stat">${ts}</div>`}
+      </div>
+    `;
+  }
+  return null;
+}
+
 function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   const [allLinks, setAllLinks] = useState([]);
   const [nodeData, setNodeData] = useState({});  // id -> {workspace, title, started_at, ended_at, tool_calls, turns, tokens, is_active}
@@ -2107,8 +2189,11 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   const [activeOnly, setActiveOnly] = useState(false);
   // Graph layout mode: workflow | sessions | teams | network. '' means auto.
   const [graphMode, setGraphMode] = useState(urlParams.mode || '');
-  // Set of workflow run ids whose child agents are expanded (workflow mode).
-  const [expandedWorkflows, setExpandedWorkflows] = useState(() => new Set());
+  // Map of workflow run id -> true for workflows whose child agents are
+  // expanded (workflow mode). A plain object is more idiomatic for Preact state
+  // than a mutated Set.
+  const [expandedWorkflows, setExpandedWorkflows] = useState({});
+  const isExpanded = useCallback((runID) => !!expandedWorkflows[runID], [expandedWorkflows]);
   // True once the loaded graph contains at least one workflow node.
   const [hasWorkflows, setHasWorkflows] = useState(false);
 
@@ -2310,8 +2395,8 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
 
   function toggleWorkflow(runID) {
     setExpandedWorkflows(prev => {
-      const next = new Set(prev);
-      if (next.has(runID)) next.delete(runID); else next.add(runID);
+      const next = { ...prev };
+      if (next[runID]) delete next[runID]; else next[runID] = true;
       return next;
     });
   }
@@ -2331,7 +2416,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     return all.filter(id => {
       const n = nodeData[id];
       if (effectiveMode === 'workflow' && n.node_type === 'workflow_agent') {
-        if (!expandedWorkflows.has(n.workflow_run_id)) return false;
+        if (!isExpanded(n.workflow_run_id)) return false;
       }
       if (wsFilter && (!n.workspace || n.workspace !== wsFilter)) return false;
       if (activeOnly && !n.is_active) return false;
@@ -2762,88 +2847,6 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   }
   function onEdgeLeave() { setEdgeTooltip(null); }
 
-  // Normalize a node's started_at (unix seconds or RFC3339) to an ISO string.
-  function nodeStartISO(n) {
-    if (!n || !n.started_at) return null;
-    return typeof n.started_at === 'number' ? new Date(n.started_at * 1000).toISOString() : n.started_at;
-  }
-
-  function renderTooltip() {
-    // Node tooltip — content varies by node_type.
-    if (tooltip) {
-      const n = nodeData[tooltip.id];
-      if (n) {
-        const startTs = nodeStartISO(n);
-        if (n.node_type === 'workflow') {
-          const dur = (n.started_at && n.completed_at) ? fmtDuration(n.completed_at - n.started_at) : null;
-          return html`
-            <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
-              <div class="graph-tooltip-title">${n.name || tooltip.id}</div>
-              ${n.description && html`<div class="graph-tooltip-stat" style="white-space:normal;max-width:240px">${n.description}</div>`}
-              <div class="graph-tooltip-stat">
-                ${[
-                  n.status,
-                  (n.agent_count || 0) + ' agents',
-                  n.journal_event_count && n.journal_event_count + ' events',
-                  dur && dur,
-                ].filter(Boolean).join(' · ')}
-              </div>
-              ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
-              <div class="graph-tooltip-hint">click to ${expandedWorkflows.has(n.full_id || n.id) ? 'collapse' : 'expand'} agents</div>
-            </div>
-          `;
-        }
-        if (n.node_type === 'workflow_agent') {
-          return html`
-            <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
-              <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
-              <div class="graph-tooltip-stat">${n.status || 'agent'} · ${n.workflow_run_id || ''}</div>
-              <div class="graph-tooltip-hint">click to open parent session</div>
-            </div>
-          `;
-        }
-        const tok = (n.tokens || 0);
-        return html`
-          <div class="graph-tooltip visible"
-            style="left:${tooltip.x}px;top:${tooltip.y}px">
-            <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
-            ${n.workspace && html`<div class="graph-tooltip-stat graph-tooltip-ws"
-              onClick=${(e) => { e.stopPropagation(); if (onNavigate) onNavigate('search', { q: shortProject(n.workspace) }); }}
-              style="cursor:pointer;text-decoration:underline">${shortProject(n.workspace)}</div>`}
-            <div class="graph-tooltip-stat">
-              ${[
-                n.tool_calls && n.tool_calls + ' tools',
-                n.turns && n.turns + ' turns',
-                tok >= 1000 && fmtNum(tok) + ' tok',
-                n.workflow_count && n.workflow_count + ' workflows',
-              ].filter(Boolean).join(' · ') || 'no stats'}
-            </div>
-            ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
-            ${isActive(tooltip.id) && html`<div style="color:var(--green);margin-top:2px">active</div>`}
-            <div class="graph-tooltip-hint">click node to search</div>
-          </div>
-        `;
-      }
-    }
-    // Edge tooltip — prefer the normalized edge_type label.
-    if (edgeTooltip) {
-      const l = edgeTooltip.link;
-      const label = (l.edge_type || l.kind || 'link').replace(/_/g, ' ');
-      const action = l.action && l.action !== l.edge_type ? l.action : '';
-      const ts = l.timestamp ? relTime(l.timestamp) : '';
-      return html`
-        <div class="graph-tooltip visible"
-          style="left:${edgeTooltip.x}px;top:${edgeTooltip.y}px">
-          <div class="graph-tooltip-title">${l.source} → ${l.target}</div>
-          <div class="graph-tooltip-stat">${label}${action ? ': ' + action : ''}</div>
-          ${l.text && html`<div class="graph-tooltip-stat" style="white-space:normal;max-width:240px;color:var(--dim)">${l.text.slice(0, 120)}</div>`}
-          ${ts && html`<div class="graph-tooltip-stat">${ts}</div>`}
-        </div>
-      `;
-    }
-    return null;
-  }
-
   // Format scrubber time display.
   const scrubberLabel = new Date(cutoffTime).toLocaleString(undefined, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -2885,8 +2888,10 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           <button class="filter-chip" style="margin-left:8px"
             onClick=${() => {
               const allWf = Object.values(nodeData).filter(x => x.node_type === 'workflow');
-              const anyCollapsed = allWf.some(x => !expandedWorkflows.has(x.full_id || x.id));
-              setExpandedWorkflows(anyCollapsed ? new Set(allWf.map(x => x.full_id || x.id)) : new Set());
+              const anyCollapsed = allWf.some(x => !isExpanded(x.full_id || x.id));
+              const next = {};
+              if (anyCollapsed) allWf.forEach(x => { next[x.full_id || x.id] = true; });
+              setExpandedWorkflows(next);
             }}>expand/collapse all</button>
         `}
       </div>
@@ -3069,7 +3074,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
                 : nt === 'session' ? 'node-session' : '';
               const statusCls = nt === 'workflow' && nn.status ? 'node-status-' + nn.status : '';
               const isWf = nt === 'workflow';
-              const expanded = isWf && expandedWorkflows.has(nn.full_id || n);
+              const expanded = isWf && isExpanded(nn.full_id || n);
               const showDot = active || (isWf && nn.status);
               return html`
                 <g class="graph-node ${typeCls} ${statusCls} ${n.includes('@') && !nt ? 'team-agent' : ''} ${active ? 'active' : ''} ${hoveredNode === n ? 'hovered' : ''}" transform="translate(${p.x - w/2},${p.y - h/2})" key=${n}
@@ -3087,7 +3092,8 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
             })}
           </svg>
         </div>
-        ${renderTooltip()}
+        ${html`<${GraphTooltip} tooltip=${tooltip} edgeTooltip=${edgeTooltip} nodeData=${nodeData}
+          onNavigate=${onNavigate} isExpanded=${isExpanded} isActive=${isActive} />`}
         <div class="graph-zoom">
           <button onClick=${() => setZoom(z => Math.min(3, z + 0.2))}>+</button>
           <button onClick=${resetView} title="Reset zoom and pan">1:1</button>
