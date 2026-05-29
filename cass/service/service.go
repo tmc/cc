@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/cass/collector"
 	"github.com/tmc/cc/cass/collector/har"
@@ -41,6 +43,7 @@ type Service struct {
 	collectors []cass.Collector
 	log        *slog.Logger
 	cache      *ParseCache
+	statsSF    singleflight.Group // coalesces concurrent identical AggregateStats queries.
 }
 
 // New creates a new service with the given configuration.
@@ -234,8 +237,30 @@ func (s *Service) Stats(ctx context.Context) (map[string]any, error) {
 }
 
 // AggregateStats returns detailed aggregate statistics, optionally filtered by time range.
+// AggregateStats returns denormalized index-wide counters for the [after,
+// before] window. The query is a multi-column SUM over every session row, so it
+// is the single most expensive read in the API; the web UI fans out several
+// identical requests per refresh across panels. Concurrent calls for the same
+// window are coalesced through a singleflight group so only one query hits
+// SQLite and the rest share its result. Each caller still observes its own
+// context: a cancellation returns promptly without aborting the shared query
+// the other waiters depend on.
 func (s *Service) AggregateStats(ctx context.Context, after, before time.Time) (map[string]any, error) {
-	return s.store.AggregateStats(ctx, after, before)
+	key := after.UTC().Format(time.RFC3339Nano) + "|" + before.UTC().Format(time.RFC3339Nano)
+	ch := s.statsSF.DoChan(key, func() (any, error) {
+		// Use a detached context so the shared query is not bound to the first
+		// caller's request lifetime; waiters select on their own ctx below.
+		return s.store.AggregateStats(context.WithoutCancel(ctx), after, before)
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(map[string]any), nil
+	}
 }
 
 // Links returns session communication links.
