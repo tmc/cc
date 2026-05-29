@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -775,5 +776,45 @@ func TestSubagentRunsRemovedOnAgentDelete(t *testing.T) {
 	}
 	if cursorCount != 1 {
 		t.Errorf("cursor subagent_runs after delete (should be untouched): %d, want 1", cursorCount)
+	}
+}
+
+// TestResolveLabelsManyPrefixes guards against the SQLite expression-depth
+// overflow (SQLITE_MAX_EXPR_DEPTH, default 1000) that a single chained
+// "LIKE ? OR LIKE ? OR ..." hit once a busy graph produced thousands of unique
+// session prefixes — it returned "Expression tree is too large" and 500'd the
+// legacy workflow=none graph. ResolveLabels now batches the query.
+func TestResolveLabelsManyPrefixes(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	const n = 2500 // comfortably over the 1000-deep OR limit and the 500 batch size.
+	prefixes := make([]string, n)
+	for i := range prefixes {
+		sid := fmt.Sprintf("sess-%05d-full-iterm-id", i)
+		prefixes[i] = fmt.Sprintf("sess-%05d", i) // the prefix the graph collects.
+		if err := s.SaveMapping(ctx, sid, "", fmt.Sprintf("cass-%05d", i),
+			fmt.Sprintf("/ws/%d", i), fmt.Sprintf("title %d", i), 0); err != nil {
+			t.Fatalf("SaveMapping %d: %v", i, err)
+		}
+	}
+
+	labels, err := s.ResolveLabels(ctx, prefixes)
+	if err != nil {
+		t.Fatalf("ResolveLabels(%d prefixes): %v", n, err)
+	}
+	if len(labels) != n {
+		t.Fatalf("resolved %d labels, want %d", len(labels), n)
+	}
+	// Spot-check a label from each batch boundary resolves to the right row.
+	for _, i := range []int{0, 499, 500, 999, 1000, 2499} {
+		p := fmt.Sprintf("sess-%05d", i)
+		l, ok := labels[p]
+		if !ok {
+			t.Fatalf("prefix %q not resolved", p)
+		}
+		if want := fmt.Sprintf("/ws/%d", i); l.Workspace != want {
+			t.Errorf("prefix %q workspace = %q, want %q", p, l.Workspace, want)
+		}
 	}
 }

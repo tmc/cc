@@ -1376,35 +1376,47 @@ func (s *DB) ResolveLabels(ctx context.Context, prefixes []string) (map[string]S
 	}
 	result := make(map[string]SessionLabel, len(prefixes))
 
-	// Build a query that matches prefixes.
-	var where []string
-	var args []any
-	for _, p := range prefixes {
-		where = append(where, "iterm_session LIKE ?")
-		args = append(args, p+"%")
-	}
-	query := fmt.Sprintf(`SELECT iterm_session, workspace, title FROM session_mapping WHERE %s`, strings.Join(where, " OR "))
+	// Match prefixes in chunks. A single chained "LIKE ? OR LIKE ? OR ..." over
+	// thousands of prefixes overflows SQLite's expression-depth limit
+	// (SQLITE_MAX_EXPR_DEPTH, default 1000), so split into batches well under it.
+	const batch = 500
+	for start := 0; start < len(prefixes); start += batch {
+		end := min(start+batch, len(prefixes))
+		chunk := prefixes[start:end]
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+		where := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for i, p := range chunk {
+			where[i] = "iterm_session LIKE ?"
+			args[i] = p + "%"
+		}
+		query := fmt.Sprintf(`SELECT iterm_session, workspace, title FROM session_mapping WHERE %s`, strings.Join(where, " OR "))
 
-	for rows.Next() {
-		var l SessionLabel
-		if err := rows.Scan(&l.ItermSession, &l.Workspace, &l.Title); err != nil {
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
 			return nil, err
 		}
-		// Store by the prefix that matched.
-		for _, p := range prefixes {
-			if strings.HasPrefix(l.ItermSession, p) {
-				result[p] = l
-				break
+		for rows.Next() {
+			var l SessionLabel
+			if err := rows.Scan(&l.ItermSession, &l.Workspace, &l.Title); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			// Store by the prefix that matched (only consider this chunk).
+			for _, p := range chunk {
+				if strings.HasPrefix(l.ItermSession, p) {
+					result[p] = l
+					break
+				}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
 	}
-	return result, rows.Err()
+	return result, nil
 }
 
 // GraphData returns combined links and node metadata for the session graph.
