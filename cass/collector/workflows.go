@@ -2,10 +2,12 @@ package collector
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,7 +66,8 @@ func ExtractWorkflows(sessionPath string, entries []cc.Entry) []cass.WorkflowRun
 	out := make([]cass.WorkflowRun, 0, len(byRun))
 	for _, w := range byRun {
 		if w.TranscriptDir != "" {
-			w.AgentCount = countWorkflowAgents(w.TranscriptDir)
+			w.Agents = readWorkflowAgents(w.TranscriptDir)
+			w.AgentCount = len(w.Agents)
 			w.JournalEventCount = countWorkflowJournalLines(filepath.Join(w.TranscriptDir, "journal.jsonl"))
 		}
 		out = append(out, *w)
@@ -225,18 +228,62 @@ func readWorkflowState(sessionPath string, byRun map[string]*cass.WorkflowRun) {
 	}
 }
 
-func countWorkflowAgents(dir string) int {
+// readWorkflowAgents reads per-agent metadata for the fan-out transcripts in a
+// workflow run's transcript dir (agent-*.jsonl, excluding acompact-* compaction
+// helpers). Each agent's text is folded into the parent session's content
+// elsewhere; here we capture just the metadata for tree rendering and per-agent
+// search attribution. Sorted by id for stable ordering.
+func readWorkflowAgents(dir string) []cass.WorkflowAgent {
 	infos, err := os.ReadDir(dir)
 	if err != nil {
-		return 0
+		return nil
 	}
-	n := 0
+	var agents []cass.WorkflowAgent
 	for _, fi := range infos {
-		if !fi.IsDir() && strings.HasPrefix(fi.Name(), "agent-") && strings.HasSuffix(fi.Name(), ".jsonl") {
-			n++
+		name := fi.Name()
+		if fi.IsDir() || !strings.HasPrefix(name, "agent-") || !strings.HasSuffix(name, ".jsonl") {
+			continue
 		}
+		if strings.HasPrefix(name, "agent-acompact") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		id := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
+		a := cass.WorkflowAgent{ID: id, SourcePath: path, Title: id}
+
+		entries, err := cc.ReadFile(context.Background(), path)
+		if err == nil && len(entries) > 0 {
+			if t := workflowAgentTitle(cc.Summarize(path, entries)); t != "" {
+				a.Title = t
+			}
+			for _, e := range entries {
+				if e.Message == nil {
+					continue
+				}
+				a.ToolCalls += len(e.Message.ToolUses())
+				if e.Message.Usage != nil {
+					a.Tokens += e.Message.Usage.InputTokens + e.Message.Usage.OutputTokens
+				}
+			}
+			a.Status = "completed"
+		}
+		agents = append(agents, a)
 	}
-	return n
+	sort.Slice(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
+	return agents
+}
+
+// workflowAgentTitle derives a short title from a summary, matching
+// titleFromSummary's 80-char truncation.
+func workflowAgentTitle(s cc.SessionSummary) string {
+	t := s.CustomTitle
+	if t == "" {
+		t = s.FirstPrompt
+	}
+	if len(t) > 80 {
+		t = t[:80] + "..."
+	}
+	return t
 }
 
 func countWorkflowJournalLines(path string) int {

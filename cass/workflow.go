@@ -19,4 +19,22 @@ type WorkflowRun struct {
 	StartedAt         time.Time `json:"started_at,omitempty"`
 	CompletedAt       time.Time `json:"completed_at,omitempty"`
 	SourcePath        string    `json:"source_path,omitempty"`
+
+	// Agents are the fan-out agent transcripts of this run, for tree rendering
+	// and per-agent search attribution. They are never top-level sessions.
+	Agents []WorkflowAgent `json:"agents,omitempty"`
+}
+
+// WorkflowAgent is one fan-out agent transcript within a [WorkflowRun], living
+// at <parent-uuid>/subagents/workflows/<run_id>/agent-<id>.jsonl. Its text is
+// folded into the parent session's search content; its metadata hangs off the
+// parent's WorkflowRun so the UI can render a tree and reach the transcript.
+// Tokens reflect the JSONL streaming-start snapshot and are approximate.
+type WorkflowAgent struct {
+	ID         string `json:"id"`
+	Title      string `json:"title,omitempty"`
+	ToolCalls  int    `json:"tool_calls,omitempty"`
+	Tokens     int    `json:"tokens,omitempty"`
+	SourcePath string `json:"source_path,omitempty"`
+	Status     string `json:"status,omitempty"`
 }

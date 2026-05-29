@@ -85,7 +85,48 @@ func New(dbPath string, opts ...Option) (*DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// One-time cleanup of subagent/workflow-agent transcripts that older
+	// indexing emitted as standalone sessions. They are now folded into their
+	// parent; the collector no longer creates them, so this is a no-op once run.
+	if err := s.purgeSubagentSessions(context.Background()); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("purge subagent sessions: %w", err)
+	}
 	return s, nil
+}
+
+// purgeSubagentSessions deletes any session rows whose source_path lies under a
+// "subagents" segment — transcripts that should never have been top-level
+// sessions. It routes through Delete so the tx cascade (subagent_runs,
+// workflows) and the FTS delete trigger stay consistent. Idempotent: once the
+// collector stops emitting these, subsequent runs find nothing.
+func (s *DB) purgeSubagentSessions(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id FROM sessions WHERE source_path LIKE '%/subagents/%'`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := min(start+batch, len(ids))
+		if err := s.Delete(ctx, cass.DeleteFilter{IDs: ids[start:end]}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *DB) migrate() error {
@@ -336,6 +377,9 @@ func (s *DB) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN workflow_runs INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN workflow_agent_runs INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN workflow_task_ops INTEGER NOT NULL DEFAULT 0",
+		// Per-agent metadata for a workflow run (JSON []cass.WorkflowAgent), for
+		// tree rendering and per-agent search attribution.
+		"ALTER TABLE workflows ADD COLUMN agents_json TEXT NOT NULL DEFAULT '[]'",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -395,9 +439,10 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		INSERT OR REPLACE INTO workflows (
 			parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path,
-			agent_count, journal_event_count, started_at, completed_at, indexed_at
+			agent_count, journal_event_count, started_at, completed_at, indexed_at,
+			agents_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare workflows: %w", err)
@@ -510,6 +555,12 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			return fmt.Errorf("clear workflows %s: %w", sess.ID, err)
 		}
 		for _, wf := range sess.Workflows {
+			agentsJSON := "[]"
+			if len(wf.Agents) > 0 {
+				if b, err := json.Marshal(wf.Agents); err == nil {
+					agentsJSON = string(b)
+				}
+			}
 			if _, err := wfStmt.ExecContext(ctx,
 				sess.ID,
 				wf.RunID,
@@ -526,6 +577,7 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 				wf.StartedAt.Unix(),
 				wf.CompletedAt.Unix(),
 				now,
+				agentsJSON,
 			); err != nil {
 				return fmt.Errorf("insert workflow %s/%s: %w", sess.ID, wf.RunID, err)
 			}
@@ -745,7 +797,7 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path, agent_count, journal_event_count,
-			started_at, completed_at
+			started_at, completed_at, agents_json
 		FROM workflows WHERE parent_session_id IN (`+placeholders+`)
 		ORDER BY started_at, run_id`, args...)
 	if err != nil {
@@ -759,13 +811,17 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 		if err := rows.Scan(
 			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
 			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
-			&w.StartedAt, &w.CompletedAt,
+			&w.StartedAt, &w.CompletedAt, &w.AgentsJSON,
 		); err != nil {
 			return fmt.Errorf("scan folded workflow: %w", err)
 		}
 		h := byID[w.ParentSessionID]
 		if h == nil {
 			continue
+		}
+		var agents []cass.WorkflowAgent
+		if w.AgentsJSON != "" && w.AgentsJSON != "[]" {
+			_ = json.Unmarshal([]byte(w.AgentsJSON), &agents)
 		}
 		h.Workflows = append(h.Workflows, cass.WorkflowRun{
 			RunID:             w.RunID,
@@ -781,11 +837,30 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 			JournalEventCount: w.JournalEventCount,
 			StartedAt:         unixOrZero(w.StartedAt),
 			CompletedAt:       unixOrZero(w.CompletedAt),
+			Agents:            agents,
 		})
-		if len(terms) > 0 && workflowMatches(w, terms) {
+		if len(terms) == 0 {
+			continue
+		}
+		// Per-agent match: any agent whose title matches the query bubbles up to
+		// the parent (the parent already matched via FTS on folded agent text);
+		// this drives the "matched in N workflow agents" badge.
+		var matchedAgents int
+		for _, a := range agents {
+			if termsMatch(strings.ToLower(a.Title), terms) {
+				h.MatchedWorkflowAgentIDs = append(h.MatchedWorkflowAgentIDs, a.ID)
+				matchedAgents++
+			}
+		}
+		runMatched := workflowMatches(w, terms)
+		if runMatched || matchedAgents > 0 {
 			h.MatchedWorkflowIDs = append(h.MatchedWorkflowIDs, w.RunID)
-			h.WorkflowMatchCount += w.AgentCount
 			h.CollapsedChildren = true
+			if matchedAgents > 0 {
+				h.WorkflowMatchCount += matchedAgents
+			} else {
+				h.WorkflowMatchCount += w.AgentCount
+			}
 		}
 	}
 	return rows.Err()
@@ -817,12 +892,17 @@ func queryTerms(query string) []string {
 // searchable text (name, description, run id, status).
 func workflowMatches(w WorkflowRow, terms []string) bool {
 	hay := strings.ToLower(w.Name + " " + w.Description + " " + w.RunID + " " + w.Status)
+	return termsMatch(hay, terms)
+}
+
+// termsMatch reports whether every term appears in the already-lowercased hay.
+func termsMatch(hay string, terms []string) bool {
 	for _, t := range terms {
 		if !strings.Contains(hay, t) {
 			return false
 		}
 	}
-	return true
+	return len(terms) > 0
 }
 
 // Delete removes sessions matching the filter.

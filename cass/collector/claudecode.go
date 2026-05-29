@@ -72,10 +72,18 @@ func (c *ClaudeCode) scanDir(ctx context.Context, root string, config cass.ScanC
 		// Skip subagents/ directories during the Walk: subagent entries are
 		// merged into their parent session by parseSession instead of being
 		// emitted as separate sessions (they share the parent's sessionId).
+		// The SkipDir prune is the fast path for a full root scan.
 		if info.IsDir() && info.Name() == "subagents" {
 			return filepath.SkipDir
 		}
 		if !strings.HasSuffix(path, ".jsonl") {
+			return nil
+		}
+		// Belt-and-suspenders for the incremental path: IndexPaths can root the
+		// walk *inside* a subagents/ tree (e.g. a changed workflow-agent file),
+		// where the SkipDir prune above never fires. Any file under a subagents
+		// segment is a transcript folded into its parent, never its own session.
+		if underSubagents(path) {
 			return nil
 		}
 		if !config.Since.IsZero() && info.ModTime().Before(config.Since) {
@@ -134,6 +142,21 @@ func (c *ClaudeCode) parseSession(ctx context.Context, config cass.ScanConfig, p
 			if err == nil {
 				entries = append(entries, sub...)
 			}
+		}
+	}
+
+	// Fold workflow fan-out agent transcripts into the parent's content too, so
+	// a search matching only an agent's text surfaces this parent session. They
+	// nest a level deeper: subagents/workflows/<run_id>/agent-*.jsonl. Their
+	// per-agent metadata is captured separately by ExtractWorkflows.
+	wfAgents, _ := filepath.Glob(filepath.Join(subagentDir, "workflows", "*", "agent-*.jsonl"))
+	for _, wfPath := range wfAgents {
+		if strings.HasPrefix(filepath.Base(wfPath), "agent-acompact") {
+			continue
+		}
+		sub, err := readSessionFile(ctx, config, wfPath)
+		if err == nil {
+			entries = append(entries, sub...)
 		}
 	}
 
@@ -240,6 +263,21 @@ func (c *ClaudeCode) root() (string, error) {
 func sessionID(path string) string {
 	h := sha256.Sum256([]byte(path))
 	return fmt.Sprintf("%x", h[:16])
+}
+
+// underSubagents reports whether path lies under a "subagents" path segment.
+// Workflow-agent and plain-subagent transcripts live there; they are folded
+// into their parent session and must never be emitted as standalone sessions.
+// Segment-aware (not a substring match) so a project literally named e.g.
+// "my-subagents-tool" is unaffected, and robust to the walk root being below
+// subagents/ (as IndexPaths roots it when a workflow-agent file changes).
+func underSubagents(path string) bool {
+	for _, seg := range strings.Split(filepath.ToSlash(path), "/") {
+		if seg == "subagents" {
+			return true
+		}
+	}
+	return false
 }
 
 func titleFromSummary(s cc.SessionSummary) string {

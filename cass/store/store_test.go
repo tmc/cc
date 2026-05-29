@@ -818,3 +818,63 @@ func TestResolveLabelsManyPrefixes(t *testing.T) {
 		}
 	}
 }
+
+// TestPurgeSubagentSessions verifies the one-time cleanup removes session rows
+// whose source_path lies under a subagents/ segment (transcripts that older
+// indexing wrongly emitted as standalone sessions) while leaving real sessions
+// and their FTS rows intact.
+func TestPurgeSubagentSessions(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sessions := []cass.Session{
+		{ID: "real1", Agent: "claude-code", Title: "real session",
+			SourcePath: "/u/.claude/projects/-w/real1.jsonl",
+			Messages:   []cass.Message{{Role: "user", Content: "legitimate work"}}},
+		{ID: "wfagent1", Agent: "claude-code", Title: "leaked workflow agent",
+			SourcePath: "/u/.claude/projects/-w/real1/subagents/workflows/wf_x/agent-a.jsonl",
+			Messages:   []cass.Message{{Role: "user", Content: "agent transcript text"}}},
+		{ID: "subagent1", Agent: "claude-code", Title: "leaked plain subagent",
+			SourcePath: "/u/.claude/projects/-w/real1/subagents/agent-b.jsonl",
+			Messages:   []cass.Message{{Role: "user", Content: "subagent transcript text"}}},
+	}
+	if err := s.BatchIndex(ctx, sessions); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.purgeSubagentSessions(ctx); err != nil {
+		t.Fatalf("purgeSubagentSessions: %v", err)
+	}
+
+	// Only the real session remains.
+	var n int
+	s.db.QueryRowContext(ctx, `SELECT count(*) FROM sessions`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("sessions after purge = %d, want 1", n)
+	}
+	var leaked int
+	s.db.QueryRowContext(ctx, `SELECT count(*) FROM sessions WHERE source_path LIKE '%/subagents/%'`).Scan(&leaked)
+	if leaked != 0 {
+		t.Fatalf("subagent rows after purge = %d, want 0", leaked)
+	}
+	// FTS row for the purged content is gone; the real one is searchable.
+	res, err := s.Search(ctx, cass.SearchRequest{Query: "transcript", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 0 {
+		t.Errorf("purged agent text still searchable: %d hits", len(res.Hits))
+	}
+	res, err = s.Search(ctx, cass.SearchRequest{Query: "legitimate", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].SessionID != "real1" {
+		t.Errorf("real session not searchable after purge: %+v", res.Hits)
+	}
+
+	// Idempotent: a second purge is a no-op.
+	if err := s.purgeSubagentSessions(ctx); err != nil {
+		t.Fatalf("second purge: %v", err)
+	}
+}

@@ -188,3 +188,21 @@ func TestSessionID(t *testing.T) {
 		t.Errorf("sessionID length = %d, want 32", len(id1))
 	}
 }
+
+func TestUnderSubagents(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/p/-work/uuid/subagents/workflows/wf_x/agent-a.jsonl", true},
+		{"/p/-work/uuid/subagents/agent-a.jsonl", true},
+		{"/p/-work/uuid.jsonl", false},
+		{"/p/my-subagents-tool/uuid.jsonl", false}, // substring, not a segment
+		{"/p/subagents", true},                     // the dir itself
+	}
+	for _, c := range cases {
+		if got := underSubagents(c.path); got != c.want {
+			t.Errorf("underSubagents(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
+}

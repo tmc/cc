@@ -348,6 +348,23 @@ func (s *Service) IndexRoots(ctx context.Context, paths []string) (int, error) {
 
 // IndexPaths re-indexes session files by their parent directories.
 // Used by the file watcher for incremental updates without a full scan.
+// ParentSessionPath maps a subagent or workflow-agent transcript path back to
+// its parent session JSONL by collapsing from the first "subagents" path
+// segment. It handles both the flat layout
+// (<uuid>/subagents/agent-x.jsonl) and the nested workflow layout
+// (<uuid>/subagents/workflows/<run_id>/agent-x.jsonl). A parent session path is
+// returned unchanged. The two depths must collapse to the same parent, or the
+// watcher reindexes a directory the collector deliberately emits nothing from.
+func ParentSessionPath(p string) string {
+	parts := strings.Split(filepath.ToSlash(p), "/")
+	for i, seg := range parts {
+		if seg == "subagents" && i > 0 {
+			return filepath.FromSlash(strings.Join(parts[:i], "/")) + ".jsonl"
+		}
+	}
+	return p
+}
+
 func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, error) {
 	type pathGroup struct {
 		collector cass.Collector
@@ -356,6 +373,11 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 
 	groups := map[string]*pathGroup{}
 	for _, path := range filePaths {
+		// Map a subagent/workflow-agent transcript back to its parent session
+		// file: those are folded into the parent, never indexed standalone, and
+		// rooting the walk inside subagents/ would index nothing. This makes the
+		// parent's folded agent content refresh when only an agent file changes.
+		path = ParentSessionPath(path)
 		col := collectorForPath(path)
 		name := col.Name()
 		g := groups[name]
