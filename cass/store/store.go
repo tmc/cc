@@ -331,6 +331,11 @@ func (s *DB) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN selected_skill_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN loaded_skill_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'",
+		// Denormalized workflow counters so AggregateStats need not scan and
+		// JSON-parse stats_json for every session.
+		"ALTER TABLE sessions ADD COLUMN workflow_runs INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN workflow_agent_runs INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE sessions ADD COLUMN workflow_task_ops INTEGER NOT NULL DEFAULT 0",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -352,8 +357,9 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			team_inbox_reads, team_inbox_sends, team_task_ops, team_spawns,
 			goal_count, active_goal_count, completed_goal_count, goals_json,
 			skill_count, selected_skill_count, loaded_skill_count, skills_json, sparkline, stats_json,
-			team_name, agent_name, is_team_lead, git_common_dir, branch, subagent_run_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			team_name, agent_name, is_team_lead, git_common_dir, branch, subagent_run_count,
+			workflow_runs, workflow_agent_runs, workflow_task_ops)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare sessions: %w", err)
@@ -451,6 +457,9 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			sess.GitCommonDir,
 			sess.Branch,
 			len(sess.Subagents),
+			sess.Stats.WorkflowRuns,
+			sess.Stats.WorkflowAgentRuns,
+			sess.Stats.WorkflowTaskOps,
 		)
 		if err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
@@ -1005,7 +1014,10 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 			coalesce(sum(completed_goal_count), 0),
 			coalesce(sum(skill_count), 0),
 			coalesce(sum(selected_skill_count), 0),
-			coalesce(sum(loaded_skill_count), 0)
+			coalesce(sum(loaded_skill_count), 0),
+			coalesce(sum(workflow_runs), 0),
+			coalesce(sum(workflow_agent_runs), 0),
+			coalesce(sum(workflow_task_ops), 0)
 		FROM sessions `+where, args...)
 
 	var (
@@ -1017,6 +1029,7 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 		agents, workspaces                               int
 		goalCount, activeGoalCount, completedGoalCount   int
 		skillCount, selectedSkillCount, loadedSkillCount int
+		workflowRuns, workflowAgents, workflowTaskOps    int
 	)
 	if err := row.Scan(
 		&sessions, &tools, &inTok, &outTok,
@@ -1027,6 +1040,7 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 		&agents, &workspaces,
 		&goalCount, &activeGoalCount, &completedGoalCount,
 		&skillCount, &selectedSkillCount, &loadedSkillCount,
+		&workflowRuns, &workflowAgents, &workflowTaskOps,
 	); err != nil {
 		return nil, fmt.Errorf("aggregate stats: %w", err)
 	}
@@ -1071,7 +1085,6 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 	}
 	defer skillRows.Close()
 	topSkills := map[string]int{}
-	var workflowRuns, workflowAgents, workflowTaskOps int
 	for skillRows.Next() {
 		var skillsJSON string
 		if err := skillRows.Scan(&skillsJSON); err != nil {
@@ -1093,24 +1106,8 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 		}
 	}
 
-	statsRows, err := s.db.QueryContext(ctx, `SELECT stats_json FROM sessions `+where, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer statsRows.Close()
-	for statsRows.Next() {
-		var statsJSON string
-		if err := statsRows.Scan(&statsJSON); err != nil {
-			return nil, err
-		}
-		var stats cass.SessionStats
-		if json.Unmarshal([]byte(statsJSON), &stats) != nil {
-			continue
-		}
-		workflowRuns += stats.WorkflowRuns
-		workflowAgents += stats.WorkflowAgentRuns
-		workflowTaskOps += stats.WorkflowTaskOps
-	}
+	// Workflow counters now come from the main aggregate (denormalized columns),
+	// avoiding a full-table stats_json scan and per-row JSON unmarshal.
 
 	// Sessions per day (last 30 days).
 	dailyRows, err := s.db.QueryContext(ctx, `
