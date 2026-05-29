@@ -8,6 +8,27 @@ import (
 	"testing"
 )
 
+func TestSSEBrokerShutdown(t *testing.T) {
+	b := NewSSEBroker()
+	ch := b.Subscribe()
+
+	b.Shutdown()
+
+	// The subscribed channel must be closed so its read loop exits.
+	if _, ok := <-ch; ok {
+		t.Fatal("expected subscriber channel closed after Shutdown")
+	}
+	// Shutdown is idempotent.
+	b.Shutdown()
+	// Publish after shutdown is a no-op (must not panic).
+	b.Publish(Event{Type: "noop"})
+	// Subscribe after shutdown returns an already-closed channel.
+	ch2 := b.Subscribe()
+	if _, ok := <-ch2; ok {
+		t.Fatal("expected closed channel from Subscribe after Shutdown")
+	}
+}
+
 func TestPanicRecovery(t *testing.T) {
 	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	h := s.panicRecovery(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {

@@ -26,6 +26,7 @@ type Event struct {
 type SSEBroker struct {
 	mu      sync.Mutex
 	clients map[chan Event]struct{}
+	closed  bool
 }
 
 // NewSSEBroker creates a new broker.
@@ -35,10 +36,17 @@ func NewSSEBroker() *SSEBroker {
 	}
 }
 
-// Subscribe registers a new client and returns its event channel.
+// Subscribe registers a new client and returns its event channel. If the broker
+// is already shut down, the returned channel is closed so the caller's read
+// loop exits immediately.
 func (b *SSEBroker) Subscribe() chan Event {
 	ch := make(chan Event, 16)
 	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		close(ch)
+		return ch
+	}
 	b.clients[ch] = struct{}{}
 	b.mu.Unlock()
 	return ch
@@ -56,10 +64,32 @@ func (b *SSEBroker) Unsubscribe(ch chan Event) {
 	close(ch)
 }
 
+// Shutdown closes every client channel so their SSE read loops exit, and marks
+// the broker closed so later Subscribe/Publish calls are no-ops. Idempotent.
+func (b *SSEBroker) Shutdown() {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return
+	}
+	b.closed = true
+	chans := make([]chan Event, 0, len(b.clients))
+	for ch := range b.clients {
+		chans = append(chans, ch)
+	}
+	b.mu.Unlock()
+	for _, ch := range chans {
+		b.Unsubscribe(ch) // single close site, idempotent
+	}
+}
+
 // Publish sends an event to all connected clients.
 func (b *SSEBroker) Publish(e Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
 	for ch := range b.clients {
 		select {
 		case ch <- e:

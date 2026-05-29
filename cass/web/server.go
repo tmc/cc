@@ -197,6 +197,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
+		s.broker.Shutdown() // release SSE clients before draining connections
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return s.srv.Shutdown(shutCtx)
