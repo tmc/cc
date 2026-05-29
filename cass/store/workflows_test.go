@@ -190,6 +190,93 @@ func TestGraphExpandedMode(t *testing.T) {
 	}
 }
 
+func TestGraphSubagentNodes(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	start := time.Unix(1_700_000_000, 0).UTC()
+	sess := cass.Session{
+		ID:        "sub-parent",
+		Agent:     "codex-cli",
+		Title:     "spawner",
+		Workspace: "tmc/cc",
+		StartedAt: start,
+		EndedAt:   start.Add(time.Hour),
+		Subagents: []cass.SubagentRun{
+			{
+				AgentID:         "child-aaa",
+				ParentSessionID: "sub-parent",
+				AgentType:       "worker",
+				Status:          "completed",
+				StartedAt:       start.Add(time.Minute),
+				Workspace:       "tmc/cc",
+			},
+			{
+				AgentID:         "child-bbb",
+				ParentSessionID: "sub-parent",
+				AgentType:       "reviewer",
+				Status:          "unknown",
+				StartedAt:       start.Add(2 * time.Minute),
+				Workspace:       "tmc/cc",
+			},
+		},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := s.GraphDataOpts(ctx, time.Time{}, cass.GraphOptions{Workflow: cass.WorkflowCollapsed})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sessionNodes, subNodes, spawnEdges int
+	for _, n := range g.Nodes {
+		switch n.NodeType {
+		case cass.NodeTypeSession:
+			sessionNodes++
+		case cass.NodeTypeSubagent:
+			subNodes++
+			if n.ParentSessionID != "sub-parent" {
+				t.Errorf("subagent node parented to %q, want sub-parent", n.ParentSessionID)
+			}
+		}
+	}
+	for _, l := range g.Links {
+		if l.EdgeType == cass.EdgeSubagentSpawn {
+			spawnEdges++
+			if l.SourceSession != "sub-parent" {
+				t.Errorf("subagent edge from %q, want sub-parent", l.SourceSession)
+			}
+		}
+	}
+	if sessionNodes != 1 {
+		t.Errorf("session nodes = %d, want 1 (a subagent-only parent must still appear)", sessionNodes)
+	}
+	if subNodes != 2 {
+		t.Errorf("subagent nodes = %d, want 2", subNodes)
+	}
+	if spawnEdges != 2 {
+		t.Errorf("subagent_spawn edges = %d, want 2", spawnEdges)
+	}
+
+	// node_type filter to subagents only drops the session node.
+	g2, err := s.GraphDataOpts(ctx, time.Time{}, cass.GraphOptions{
+		Workflow:  cass.WorkflowCollapsed,
+		NodeTypes: []string{cass.NodeTypeSubagent},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range g2.Nodes {
+		if n.NodeType != cass.NodeTypeSubagent {
+			t.Errorf("node_type filter leaked %q", n.NodeType)
+		}
+	}
+	if len(g2.Nodes) != 2 {
+		t.Errorf("filtered nodes = %d, want 2", len(g2.Nodes))
+	}
+}
+
 func TestGraphNodeTypeFilter(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

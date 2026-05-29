@@ -9,6 +9,7 @@ const (
 	NodeTypeWorkflow      = "workflow"       // one native Claude Code workflow run.
 	NodeTypeWorkflowAgent = "workflow_agent" // a child agent within a workflow run.
 	NodeTypeTeamAgent     = "team_agent"     // a team member node from inter-session links.
+	NodeTypeSubagent      = "subagent"       // a subagent run spawned by a session (Task or spawn_agent).
 )
 
 // Edge types for graph links. They populate SessionLink.EdgeType. The legacy
@@ -16,6 +17,7 @@ const (
 const (
 	EdgeWorkflowContains = "workflow_contains" // session -> workflow, or workflow -> child agent.
 	EdgeWorkflowSpawn    = "workflow_spawn"    // workflow -> child agent fan-out.
+	EdgeSubagentSpawn    = "subagent_spawn"    // session -> subagent run it spawned.
 	EdgeTeamMessage      = "team_message"
 	EdgeTeamSpawn        = "team_spawn"
 	EdgeItermMessage     = "iterm_message"

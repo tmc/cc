@@ -1583,12 +1583,19 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 	if err != nil {
 		return nil, fmt.Errorf("graph workflows: %w", err)
 	}
+	subagents, err := s.GraphSubagents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("graph subagents: %w", err)
+	}
 
-	// Group workflows by parent session, filtering by the parent session's
-	// start time against the since cutoff.
+	// Group fan-out by parent session, filtering by the parent session's start
+	// time against the since cutoff.
 	parentIDs := map[string]bool{}
 	for _, w := range workflows {
 		parentIDs[w.ParentSessionID] = true
+	}
+	for _, r := range subagents {
+		parentIDs[r.ParentSessionID] = true
 	}
 	type sessMeta struct {
 		title, workspace, gitCommonDir string
@@ -1612,17 +1619,26 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 	var nodes []cass.GraphNode
 	var links []cass.SessionLink
 
-	// Bucket workflows under in-window sessions.
+	inWindow := func(id string) bool {
+		sm, ok := sessions[id]
+		if !ok {
+			return false
+		}
+		return !(cutoff > 0 && sm.startedAt > 0 && sm.startedAt < cutoff)
+	}
+
+	// Bucket workflows and subagent runs under in-window parent sessions.
 	bySession := map[string][]WorkflowRow{}
 	for _, w := range workflows {
-		sm, ok := sessions[w.ParentSessionID]
-		if !ok {
-			continue
+		if inWindow(w.ParentSessionID) {
+			bySession[w.ParentSessionID] = append(bySession[w.ParentSessionID], w)
 		}
-		if cutoff > 0 && sm.startedAt > 0 && sm.startedAt < cutoff {
-			continue
+	}
+	subBySession := map[string][]GraphSubagentRow{}
+	for _, r := range subagents {
+		if inWindow(r.ParentSessionID) {
+			subBySession[r.ParentSessionID] = append(subBySession[r.ParentSessionID], r)
 		}
-		bySession[w.ParentSessionID] = append(bySession[w.ParentSessionID], w)
 	}
 
 	var minTS, maxTS int64
@@ -1638,9 +1654,17 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 		}
 	}
 
-	// Stable ordering: sessions by start time then id.
-	sessIDs := make([]string, 0, len(bySession))
+	// Stable ordering: sessions (union of workflow and subagent parents) by
+	// start time then id.
+	sessSet := map[string]bool{}
 	for id := range bySession {
+		sessSet[id] = true
+	}
+	for id := range subBySession {
+		sessSet[id] = true
+	}
+	sessIDs := make([]string, 0, len(sessSet))
+	for id := range sessSet {
 		sessIDs = append(sessIDs, id)
 	}
 	sort.Slice(sessIDs, func(i, j int) bool {
@@ -1719,6 +1743,33 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 				}
 			}
 		}
+
+		// Subagent runs spawned directly by the session (Task or codex
+		// spawn_agent), as session -> subagent nodes and edges.
+		if opts.IncludeNode(cass.NodeTypeSubagent) {
+			for _, r := range subBySession[sid] {
+				nodes = append(nodes, cass.GraphNode{
+					ID:              r.AgentID,
+					NodeType:        cass.NodeTypeSubagent,
+					ParentSessionID: sid,
+					Workspace:       sm.workspace,
+					Title:           firstNonEmptyStr(r.Description, r.AgentType, r.AgentID),
+					Name:            r.AgentType,
+					Description:     r.Description,
+					Status:          r.Status,
+					StartedAt:       posOrZero(r.StartedAt),
+					Tokens:          r.TotalTokens,
+				})
+				links = append(links, cass.SessionLink{
+					SourceSession: sid,
+					TargetSession: r.AgentID,
+					EdgeType:      cass.EdgeSubagentSpawn,
+					Action:        "subagent_spawn",
+					Timestamp:     rfc3339OrEmpty(r.StartedAt),
+				})
+				track(posOrZero(r.StartedAt))
+			}
+		}
 	}
 
 	tr := cass.TimeRange{}
@@ -1752,11 +1803,13 @@ func filterGraphNodes(g *cass.GraphData, opts cass.GraphOptions) {
 	g.Links = links
 }
 
-func firstNonEmptyStr(a, b string) string {
-	if a != "" {
-		return a
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
 	}
-	return b
+	return ""
 }
 
 func posOrZero(u int64) int64 {

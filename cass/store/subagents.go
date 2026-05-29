@@ -80,9 +80,9 @@ func (s *DB) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentR
 	var out []SubagentRunListEntry
 	for rows.Next() {
 		var (
-			e                                              SubagentRunListEntry
-			enqUnix, deqUnix, startedUnix, endedUnix       int64
-			isCompaction                                   int
+			e                                        SubagentRunListEntry
+			enqUnix, deqUnix, startedUnix, endedUnix int64
+			isCompaction                             int
 		)
 		if err := rows.Scan(
 			&e.ParentSessionID, &e.AgentID, &e.ParentClaudeSID, &e.Workspace, &e.GitCommonDir,
@@ -107,11 +107,11 @@ func (s *DB) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentR
 
 // SubagentRunSummary aggregates run-level stats across the index.
 type SubagentRunSummary struct {
-	TotalRuns         int
-	SessionsWithRuns  int
-	TotalTokens       int64
-	TotalDurationMs   int64
-	ByAgentType       map[string]int
+	TotalRuns        int
+	SessionsWithRuns int
+	TotalTokens      int64
+	TotalDurationMs  int64
+	ByAgentType      map[string]int
 }
 
 // SubagentRunsSummary returns aggregate counts and per-agent-type
@@ -146,6 +146,48 @@ func (s *DB) SubagentRunsSummary(ctx context.Context) (SubagentRunSummary, error
 		sum.ByAgentType[k] = v
 	}
 	return sum, rows.Err()
+}
+
+// GraphSubagentRow is the lightweight form of a subagent run used to build
+// graph nodes and edges: just the parent link, identity, and display fields.
+type GraphSubagentRow struct {
+	ParentSessionID string
+	AgentID         string
+	AgentType       string
+	Description     string
+	Model           string
+	Status          string
+	StartedAt       int64
+	TotalTokens     int
+}
+
+// GraphSubagents returns every indexed subagent run as a graph row, ordered by
+// start time then agent id for deterministic output. Compaction subagents are
+// excluded; they are bookkeeping, not real fan-out.
+func (s *DB) GraphSubagents(ctx context.Context) ([]GraphSubagentRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT parent_session_id, agent_id, agent_type, description, model, status,
+			started_at, total_tokens
+		FROM subagent_runs
+		WHERE is_compaction = 0
+		ORDER BY started_at, agent_id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query graph subagents: %w", err)
+	}
+	defer rows.Close()
+	var out []GraphSubagentRow
+	for rows.Next() {
+		var r GraphSubagentRow
+		if err := rows.Scan(
+			&r.ParentSessionID, &r.AgentID, &r.AgentType, &r.Description, &r.Model,
+			&r.Status, &r.StartedAt, &r.TotalTokens,
+		); err != nil {
+			return nil, fmt.Errorf("scan graph subagent: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 func unixOrZero(u int64) time.Time {
