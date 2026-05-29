@@ -3,6 +3,8 @@ package cass
 import (
 	"context"
 	"time"
+
+	"github.com/tmc/cc"
 )
 
 // Session is the normalized representation of a coding session from any agent.
@@ -65,6 +67,13 @@ type ScanConfig struct {
 	Paths   []string  // Root paths to scan.
 	Since   time.Time // Only include sessions modified after this time.
 	Project string    // Filter to a specific project substring.
+
+	// Parse, when non-nil, reads a session or subagent JSONL file in place of
+	// cc.ReadFile. It lets a long-lived server inject an incremental,
+	// cache-backed reader (skip-if-unchanged, tail-if-grown) while one-shot
+	// scans leave it nil and read each file in full. It must return the same
+	// entries cc.ReadFile would for the file at path.
+	Parse func(ctx context.Context, path string) ([]cc.Entry, error)
 }
 
 // Collector discovers and parses session logs from an agent.
