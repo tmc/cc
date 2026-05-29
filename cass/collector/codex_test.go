@@ -366,6 +366,68 @@ func TestCodexGoalCompletionGatesMultipleObjectives(t *testing.T) {
 	}
 }
 
+func TestCodexItermLinks(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "iterm.jsonl")
+	writeCollectorJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-22T23:29:09Z",
+			"type":      "session_meta",
+			"payload": map[string]any{
+				"id":         "codex-iterm-session",
+				"cwd":        "/work/iterm",
+				"originator": "codex-tui",
+				"source":     "cli",
+			},
+		},
+		// A codex shell call carrying an it2 send-text — decoded to a Bash tool_use.
+		map[string]any{
+			"timestamp": "2026-05-22T23:29:10Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":      "function_call",
+				"name":      "exec_command",
+				"call_id":   "call-it2",
+				"arguments": `{"cmd":"it2 session send-text 941106FA 'hello there'"}`,
+			},
+		},
+		// Its output confirms this session's own iTerm id via the src marker.
+		map[string]any{
+			"timestamp": "2026-05-22T23:29:11Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type":    "function_call_output",
+				"call_id": "call-it2",
+				"output":  "[it2:send-text src=E063B6BA dst=941106FA]\n",
+			},
+		},
+	)
+
+	sess, err := (&Codex{}).parseSession(context.Background(), path)
+	if err != nil {
+		t.Fatalf("parseSession: %v", err)
+	}
+	if got := sess.Metadata["iterm_session"]; got != "E063B6BA" {
+		t.Fatalf("iterm_session = %v, want E063B6BA", got)
+	}
+	links, _ := sess.Metadata["session_links"].([]cass.SessionLink)
+	if len(links) == 0 {
+		t.Fatalf("session_links empty, want a send-text link to 941106FA")
+	}
+	var found bool
+	for _, l := range links {
+		if l.TargetSession == "941106FA" && l.Action == "send-text" {
+			found = true
+			if l.SourceSession != "E063B6BA" {
+				t.Errorf("link source = %q, want E063B6BA", l.SourceSession)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no send-text link to 941106FA: %#v", links)
+	}
+}
+
 func writeCollectorJSONL(t *testing.T, path string, rows ...map[string]any) {
 	t.Helper()
 	f, err := os.Create(path)

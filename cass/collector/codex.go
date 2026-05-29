@@ -177,6 +177,9 @@ func (c *Codex) parseSession(ctx context.Context, path string) (cass.Session, er
 			meta["source"] = source
 		}
 	}
+	if itermSID := extractItermSessionID(entries); itermSID != "" {
+		meta["iterm_session"] = itermSID
+	}
 
 	id := sum.SessionID
 	if id == "" {
