@@ -1,0 +1,1 @@
+claude-code: opus-4-8 | iterm:w2t8p5:683288C4-89F5-44D7-B2E6-7C6F6B6BBD1A | date:2026-05-29T14:17:03Z | incremental reindex (skip+tail) from stress-tested design (34 breaking scenarios neutralized); property test caught a prefix-rewrite bug -> 256B anchor guard
