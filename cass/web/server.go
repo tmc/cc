@@ -95,9 +95,23 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", s.serveStatic)
 
 	if s.verbose {
-		return s.requestLogger(mux)
+		return s.panicRecovery(s.requestLogger(mux))
 	}
-	return mux
+	return s.panicRecovery(mux)
+}
+
+// panicRecovery turns a panic in any handler into a 500 response and a log
+// line, so one bad request cannot take down the whole server.
+func (s *Server) panicRecovery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if v := recover(); v != nil {
+				s.log.Error("panic in handler", "method", r.Method, "path", r.URL.Path, "panic", v)
+				http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // requestLogger wraps a handler with request timing logs.
@@ -156,6 +170,12 @@ func (s *Server) Start(ctx context.Context) error {
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
+		// No WriteTimeout: the /events SSE stream is long-lived and a write
+		// deadline would kill it. ReadHeaderTimeout guards against Slowloris.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// Start file watcher.
