@@ -93,6 +93,98 @@ func TestSessionMeta(t *testing.T) {
 	}
 }
 
+func TestGraphWorkflowModes(t *testing.T) {
+	ctx := context.Background()
+	start := time.Unix(1_700_000_000, 0).UTC()
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: []cass.Session{{
+			ID:         "graph-sess-1",
+			Agent:      "claude-code",
+			Title:      "Workflow graph session",
+			Workspace:  "tmc/cc",
+			SourcePath: "/tmp/graph-sess.jsonl",
+			StartedAt:  start,
+			EndedAt:    start.Add(time.Hour),
+			Messages:   []cass.Message{{Role: "user", Content: "run the workflow"}},
+			Workflows: []cass.WorkflowRun{{
+				RunID:      "wf_graph",
+				Name:       "cc-go-team-review",
+				Status:     "completed",
+				AgentCount: 2,
+				StartedAt:  start.Add(time.Minute),
+			}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v; want 1, nil", n, err)
+	}
+	handler := New(Config{Service: svc}).Handler()
+
+	get := func(query string) cass.GraphData {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/graph"+query, nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+		}
+		var g cass.GraphData
+		if err := json.Unmarshal(rr.Body.Bytes(), &g); err != nil {
+			t.Fatalf("decode graph: %v", err)
+		}
+		return g
+	}
+
+	// Default (collapsed): one session node, one workflow node, no agents.
+	g := get("?workflow=collapsed")
+	var session, workflow, agent int
+	for _, n := range g.Nodes {
+		switch n.NodeType {
+		case cass.NodeTypeSession:
+			session++
+		case cass.NodeTypeWorkflow:
+			workflow++
+		case cass.NodeTypeWorkflowAgent:
+			agent++
+		}
+	}
+	if session != 1 || workflow != 1 || agent != 0 {
+		t.Fatalf("collapsed nodes: session=%d workflow=%d agent=%d, want 1/1/0", session, workflow, agent)
+	}
+	var contains int
+	for _, l := range g.Links {
+		if l.EdgeType == cass.EdgeWorkflowContains {
+			contains++
+		}
+	}
+	if contains != 1 {
+		t.Fatalf("collapsed workflow_contains edges = %d, want 1", contains)
+	}
+
+	// Expanded: 2 agent nodes (AgentCount) with workflow_spawn edges.
+	g = get("?workflow=expanded")
+	agent = 0
+	var spawn int
+	for _, n := range g.Nodes {
+		if n.NodeType == cass.NodeTypeWorkflowAgent {
+			agent++
+		}
+	}
+	for _, l := range g.Links {
+		if l.EdgeType == cass.EdgeWorkflowSpawn {
+			spawn++
+		}
+	}
+	if agent != 2 || spawn != 2 {
+		t.Fatalf("expanded: agents=%d spawn=%d, want 2/2", agent, spawn)
+	}
+}
+
 func TestSessionMetaNotFound(t *testing.T) {
 	svc, err := service.New(service.Config{
 		DBPath:     filepath.Join(t.TempDir(), "index.db"),

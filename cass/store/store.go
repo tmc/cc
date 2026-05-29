@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -269,6 +270,8 @@ func (s *DB) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_subagent_runs_model ON subagent_runs(model);
 		CREATE INDEX IF NOT EXISTS idx_subagent_runs_agent_type ON subagent_runs(agent_type);
 
+	` + workflowsSchema + `
+
 	` + jobsAgentsSchema + `
 
 		CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
@@ -382,6 +385,19 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 	}
 	defer runStmt.Close()
 
+	wfStmt, err := tx.PrepareContext(ctx, `
+		INSERT OR REPLACE INTO workflows (
+			parent_session_id, run_id, task_id, name, description, status, summary,
+			script_path, transcript_dir, source_path,
+			agent_count, journal_event_count, started_at, completed_at, indexed_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare workflows: %w", err)
+	}
+	defer wfStmt.Close()
+
 	now := time.Now().Unix()
 	for _, sess := range sessions {
 		sess.Goals = normalizeGoals(sess.Goals)
@@ -477,6 +493,32 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 				now,
 			); err != nil {
 				return fmt.Errorf("insert subagent_run %s/%s: %w", sess.ID, run.AgentID, err)
+			}
+		}
+
+		// Workflow runs: clear and reinsert for this session.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM workflows WHERE parent_session_id = ?", sess.ID); err != nil {
+			return fmt.Errorf("clear workflows %s: %w", sess.ID, err)
+		}
+		for _, wf := range sess.Workflows {
+			if _, err := wfStmt.ExecContext(ctx,
+				sess.ID,
+				wf.RunID,
+				wf.TaskID,
+				wf.Name,
+				wf.Description,
+				wf.Status,
+				wf.Summary,
+				wf.ScriptPath,
+				wf.TranscriptDir,
+				wf.SourcePath,
+				wf.AgentCount,
+				wf.JournalEventCount,
+				wf.StartedAt.Unix(),
+				wf.CompletedAt.Unix(),
+				now,
+			); err != nil {
+				return fmt.Errorf("insert workflow %s/%s: %w", sess.ID, wf.RunID, err)
 			}
 		}
 
@@ -679,10 +721,13 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 		for i, id := range filter.IDs {
 			args[i] = id
 		}
-		// Delete subagent_runs first; we don't rely on FK cascade because
+		// Delete child rows first; we don't rely on FK cascade because
 		// SQLite's foreign_keys pragma is off by default per connection.
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM subagent_runs WHERE parent_session_id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete subagent_runs by id: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM workflows WHERE parent_session_id IN (%s)", placeholders), args...); err != nil {
+			return fmt.Errorf("delete workflows by id: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM sessions WHERE id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete by id: %w", err)
@@ -695,6 +740,12 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 			agentFilterArgs(filter.Agent)...,
 		); err != nil {
 			return fmt.Errorf("delete subagent_runs by agent: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM workflows WHERE parent_session_id IN (SELECT id FROM sessions WHERE "+agentFilter("agent")+")",
+			agentFilterArgs(filter.Agent)...,
+		); err != nil {
+			return fmt.Errorf("delete workflows by agent: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE "+agentFilter("agent"), agentFilterArgs(filter.Agent)...); err != nil {
 			return fmt.Errorf("delete by agent: %w", err)
@@ -1269,6 +1320,7 @@ func (s *DB) GraphData(ctx context.Context, since time.Time) (*cass.GraphData, e
 		if cutoff != "" && l.Timestamp != "" && l.Timestamp < cutoff {
 			continue
 		}
+		l.EdgeType = edgeTypeForLink(l)
 		filtered = append(filtered, l)
 		if l.Timestamp != "" {
 			if minTS == "" || l.Timestamp < minTS {
@@ -1379,6 +1431,13 @@ func (s *DB) GraphData(ctx context.Context, since time.Time) (*cass.GraphData, e
 				}
 			}
 		}
+		// Team agent node IDs are agent names (often "name@team"); everything
+		// else is an iTerm2/session node.
+		if node.TeamName != "" || strings.Contains(id, "@") {
+			node.NodeType = cass.NodeTypeTeamAgent
+		} else {
+			node.NodeType = cass.NodeTypeSession
+		}
 		nodes = append(nodes, node)
 	}
 
@@ -1390,6 +1449,249 @@ func (s *DB) GraphData(ctx context.Context, since time.Time) (*cass.GraphData, e
 			Max: maxTS,
 		},
 	}, nil
+}
+
+// GraphDataOpts builds graph data honoring the workflow mode and node-type
+// filter in opts. WorkflowNone (the zero value) yields the legacy link-centric
+// graph. WorkflowCollapsed adds session and workflow nodes with workflow_contains
+// edges; WorkflowExpanded additionally adds per-child workflow_agent nodes with
+// workflow_spawn edges. The since cutoff filters by the parent session's start
+// time so async workflows with no own timestamp still appear.
+func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.GraphOptions) (*cass.GraphData, error) {
+	if opts.Workflow == "" || opts.Workflow == cass.WorkflowNone {
+		g, err := s.GraphData(ctx, since)
+		if err != nil {
+			return nil, err
+		}
+		if len(opts.NodeTypes) > 0 {
+			filterGraphNodes(g, opts)
+		}
+		return g, nil
+	}
+
+	workflows, err := s.Workflows(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("graph workflows: %w", err)
+	}
+
+	// Group workflows by parent session, filtering by the parent session's
+	// start time against the since cutoff.
+	parentIDs := map[string]bool{}
+	for _, w := range workflows {
+		parentIDs[w.ParentSessionID] = true
+	}
+	type sessMeta struct {
+		title, workspace, gitCommonDir string
+		startedAt, endedAt             int64
+	}
+	sessions := map[string]sessMeta{}
+	for id := range parentIDs {
+		var m sessMeta
+		row := s.db.QueryRowContext(ctx,
+			`SELECT title, workspace, git_common_dir, started_at, ended_at FROM sessions WHERE id = ?`, id)
+		if err := row.Scan(&m.title, &m.workspace, &m.gitCommonDir, &m.startedAt, &m.endedAt); err == nil {
+			sessions[id] = m
+		}
+	}
+
+	cutoff := int64(0)
+	if !since.IsZero() {
+		cutoff = since.Unix()
+	}
+
+	var nodes []cass.GraphNode
+	var links []cass.SessionLink
+
+	// Bucket workflows under in-window sessions.
+	bySession := map[string][]WorkflowRow{}
+	for _, w := range workflows {
+		sm, ok := sessions[w.ParentSessionID]
+		if !ok {
+			continue
+		}
+		if cutoff > 0 && sm.startedAt > 0 && sm.startedAt < cutoff {
+			continue
+		}
+		bySession[w.ParentSessionID] = append(bySession[w.ParentSessionID], w)
+	}
+
+	var minTS, maxTS int64
+	track := func(ts int64) {
+		if ts <= 0 {
+			return
+		}
+		if minTS == 0 || ts < minTS {
+			minTS = ts
+		}
+		if ts > maxTS {
+			maxTS = ts
+		}
+	}
+
+	// Stable ordering: sessions by start time then id.
+	sessIDs := make([]string, 0, len(bySession))
+	for id := range bySession {
+		sessIDs = append(sessIDs, id)
+	}
+	sort.Slice(sessIDs, func(i, j int) bool {
+		a, b := sessions[sessIDs[i]], sessions[sessIDs[j]]
+		if a.startedAt != b.startedAt {
+			return a.startedAt < b.startedAt
+		}
+		return sessIDs[i] < sessIDs[j]
+	})
+
+	for _, sid := range sessIDs {
+		sm := sessions[sid]
+		runs := bySession[sid]
+		if opts.IncludeNode(cass.NodeTypeSession) {
+			nodes = append(nodes, cass.GraphNode{
+				ID:            sid,
+				NodeType:      cass.NodeTypeSession,
+				Workspace:     sm.workspace,
+				GitCommonDir:  sm.gitCommonDir,
+				Title:         sm.title,
+				StartedAt:     sm.startedAt,
+				WorkflowCount: len(runs),
+			})
+		}
+		track(sm.startedAt)
+		track(sm.endedAt)
+
+		for _, w := range runs {
+			if opts.IncludeNode(cass.NodeTypeWorkflow) {
+				nodes = append(nodes, cass.GraphNode{
+					ID:                w.RunID,
+					NodeType:          cass.NodeTypeWorkflow,
+					ParentSessionID:   sid,
+					Workspace:         sm.workspace,
+					Title:             firstNonEmptyStr(w.Name, w.RunID),
+					Name:              w.Name,
+					Description:       w.Description,
+					Status:            w.Status,
+					AgentCount:        w.AgentCount,
+					JournalEventCount: w.JournalEventCount,
+					StartedAt:         posOrZero(w.StartedAt),
+					CompletedAt:       posOrZero(w.CompletedAt),
+				})
+				// session -> workflow containment edge.
+				links = append(links, cass.SessionLink{
+					SourceSession: sid,
+					TargetSession: w.RunID,
+					EdgeType:      cass.EdgeWorkflowContains,
+					Action:        "workflow_contains",
+					Timestamp:     rfc3339OrEmpty(w.StartedAt),
+				})
+			}
+			track(posOrZero(w.StartedAt))
+			track(posOrZero(w.CompletedAt))
+
+			if opts.Workflow == cass.WorkflowExpanded && opts.IncludeNode(cass.NodeTypeWorkflowAgent) {
+				// Per-child agent metadata is not yet indexed; synthesize one
+				// node per counted agent file so the fan-out is visible.
+				for i := 0; i < w.AgentCount; i++ {
+					childID := fmt.Sprintf("%s#%d", w.RunID, i)
+					nodes = append(nodes, cass.GraphNode{
+						ID:              childID,
+						NodeType:        cass.NodeTypeWorkflowAgent,
+						ParentSessionID: sid,
+						WorkflowRunID:   w.RunID,
+						Workspace:       sm.workspace,
+						Title:           fmt.Sprintf("agent %d", i+1),
+						Status:          w.Status,
+					})
+					links = append(links, cass.SessionLink{
+						SourceSession: w.RunID,
+						TargetSession: childID,
+						EdgeType:      cass.EdgeWorkflowSpawn,
+						Action:        "workflow_spawn",
+					})
+				}
+			}
+		}
+	}
+
+	tr := cass.TimeRange{}
+	if minTS > 0 {
+		tr.Min = time.Unix(minTS, 0).UTC().Format(time.RFC3339)
+	}
+	if maxTS > 0 {
+		tr.Max = time.Unix(maxTS, 0).UTC().Format(time.RFC3339)
+	}
+	return &cass.GraphData{Nodes: nodes, Links: links, TimeRange: tr}, nil
+}
+
+// filterGraphNodes drops nodes (and links touching them) whose node_type is not
+// in opts.NodeTypes. Used to apply the node_type filter to the legacy graph.
+func filterGraphNodes(g *cass.GraphData, opts cass.GraphOptions) {
+	keep := map[string]bool{}
+	var nodes []cass.GraphNode
+	for _, n := range g.Nodes {
+		if opts.IncludeNode(n.NodeType) {
+			keep[n.ID] = true
+			nodes = append(nodes, n)
+		}
+	}
+	var links []cass.SessionLink
+	for _, l := range g.Links {
+		if keep[l.SourceSession] && keep[l.TargetSession] {
+			links = append(links, l)
+		}
+	}
+	g.Nodes = nodes
+	g.Links = links
+}
+
+func firstNonEmptyStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func posOrZero(u int64) int64 {
+	if u <= 0 {
+		return 0
+	}
+	return u
+}
+
+func rfc3339OrEmpty(u int64) string {
+	if u <= 0 {
+		return ""
+	}
+	return time.Unix(u, 0).UTC().Format(time.RFC3339)
+}
+
+// edgeTypeForLink maps a legacy SessionLink (kind/action) to a normalized
+// EdgeType constant. iTerm2 splits are detected by action; team and
+// observation links map by kind.
+func edgeTypeForLink(l cass.SessionLink) string {
+	switch l.Kind {
+	case "team":
+		if strings.Contains(l.Action, "spawn") {
+			return cass.EdgeTeamSpawn
+		}
+		return cass.EdgeTeamMessage
+	case "observation":
+		return cass.EdgeItermObserve
+	case "message":
+		if strings.Contains(l.Action, "split") {
+			return cass.EdgeItermSplit
+		}
+		return cass.EdgeItermMessage
+	}
+	// Fall back on action when kind is unset.
+	switch {
+	case strings.Contains(l.Action, "split"):
+		return cass.EdgeItermSplit
+	case strings.Contains(l.Action, "spawn"):
+		return cass.EdgeTeamSpawn
+	case strings.HasPrefix(l.Action, "get-"):
+		return cass.EdgeItermObserve
+	default:
+		return cass.EdgeItermMessage
+	}
 }
 
 // BatchIndexRequests adds or updates API request records atomically.

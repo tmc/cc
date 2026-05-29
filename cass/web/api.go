@@ -629,7 +629,26 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	graph, err := s.svc.Graph(r.Context(), since)
+	// Workflow collapsing mode; default is collapsed.
+	opts := cass.GraphOptions{Workflow: cass.WorkflowCollapsed}
+	switch cass.WorkflowMode(q.Get("workflow")) {
+	case cass.WorkflowExpanded:
+		opts.Workflow = cass.WorkflowExpanded
+	case cass.WorkflowNone:
+		opts.Workflow = cass.WorkflowNone
+	case cass.WorkflowCollapsed:
+		opts.Workflow = cass.WorkflowCollapsed
+	}
+	// Optional node_type=a,b,c filter.
+	if v := q.Get("node_type"); v != "" {
+		for _, t := range strings.Split(v, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				opts.NodeTypes = append(opts.NodeTypes, t)
+			}
+		}
+	}
+
+	graph, err := s.svc.Graph(r.Context(), since, opts)
 	if err != nil {
 		writeError(w, err, http.StatusInternalServerError)
 		return

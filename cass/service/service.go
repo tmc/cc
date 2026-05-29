@@ -246,8 +246,9 @@ func (s *Service) ResolveLabels(ctx context.Context, prefixes []string) (map[str
 }
 
 // Graph returns combined node and link data for the session communication graph.
-func (s *Service) Graph(ctx context.Context, since time.Time) (*cass.GraphData, error) {
-	return s.store.GraphData(ctx, since)
+// The opts control workflow collapsing and node-type filtering.
+func (s *Service) Graph(ctx context.Context, since time.Time, opts cass.GraphOptions) (*cass.GraphData, error) {
+	return s.store.GraphDataOpts(ctx, since, opts)
 }
 
 // IndexRoots indexes explicit session roots without running agent detection.
