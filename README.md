@@ -77,19 +77,19 @@ the full API.
 
 | Command | Description |
 |---|---|
-| [`ccsessions`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccsessions) | List and summarize Claude Code sessions. |
+| [`ccsessions`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccsessions) | List and summarize coding-agent sessions. |
 | [`ccfmt`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccfmt) | Format coding session transcripts (text or markdown). |
-| [`creplay`](https://pkg.go.dev/github.com/tmc/cc/cmd/creplay) | Replay a Claude Code session in a terminal UI. |
-| [`cccat`](https://pkg.go.dev/github.com/tmc/cc/cmd/cccat) | Filter and display Claude Code session entries. |
+| [`creplay`](https://pkg.go.dev/github.com/tmc/cc/cmd/creplay) | Replay a coding-agent session in a terminal UI. |
+| [`cccat`](https://pkg.go.dev/github.com/tmc/cc/cmd/cccat) | Filter and display coding-agent session entries. |
 | [`cchistory`](https://pkg.go.dev/github.com/tmc/cc/cmd/cchistory) | Search through Claude Code session history. |
-| [`cctime`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctime) | Show a timeline of events in a Claude Code session. |
+| [`cctime`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctime) | Show a timeline of events in a coding-agent session. |
 
 ### Search, resume, indexing
 
 | Command | Description |
 |---|---|
 | [`cass`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | Index and search AI coding-agent session history (Claude Code, Codex, etc.). |
-| [`ccresume`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccresume) | Find a recent Claude Code session and resume it. |
+| [`ccresume`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccresume) | Find a recent coding-agent session and resume it. |
 | [`ccstats`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccstats) | Report token usage, tool counts, and timing for sessions. |
 | [`ccloc`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccloc) | Print the Claude Code agent cache location for a directory. |
 
@@ -97,10 +97,10 @@ the full API.
 
 | Command | Description |
 |---|---|
-| [`ccdiff`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccdiff) | Show file changes made during Claude Code sessions. |
-| [`ccfiles`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccfiles) | Extract file operations from Claude Code sessions. |
-| [`ccerr`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccerr) | Find errors, failures, and retries in Claude Code sessions. |
-| [`cctool`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctool) | Extract tool use details from Claude Code sessions. |
+| [`ccdiff`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccdiff) | Show file changes made during coding-agent sessions. |
+| [`ccfiles`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccfiles) | Extract file operations from coding-agent sessions. |
+| [`ccerr`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccerr) | Find errors, failures, and retries in coding-agent sessions. |
+| [`cctool`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctool) | Extract tool use details from coding-agent sessions. |
 
 ### Authoring and integration
 

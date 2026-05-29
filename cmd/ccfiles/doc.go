@@ -1,4 +1,4 @@
-// Command ccfiles extracts file operations from Claude Code sessions.
+// Command ccfiles extracts file operations from coding-agent sessions.
 //
 // It reports every file that was written, edited, read, or otherwise
 // touched during a session, including files modified by Bash commands

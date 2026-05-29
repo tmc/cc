@@ -1,4 +1,4 @@
-// Command ccdiff shows file changes made during Claude Code sessions.
+// Command ccdiff shows file changes made during coding-agent sessions.
 //
 // It reconstructs unified diffs from Edit tool uses (old_string to
 // new_string) and, with -writes, includes content produced by Write

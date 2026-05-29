@@ -1,4 +1,4 @@
-// Command creplay replays a Claude Code session NDJSON file in a TUI.
+// Command creplay replays a coding-agent session NDJSON file in a TUI.
 //
 // creplay loads the messages from a session file and animates them in
 // a Bubble Tea viewport. With -follow it tails the file for new

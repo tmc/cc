@@ -1,4 +1,4 @@
-// Command cctime shows a timeline of events in a Claude Code session.
+// Command cctime shows a timeline of events in a coding-agent session.
 //
 // It prints a chronological view of user messages, assistant actions,
 // tool uses, and errors with timestamps and inter-event gaps.

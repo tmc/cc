@@ -1,4 +1,4 @@
-// Command ccresume finds a recent Claude Code session and resumes it.
+// Command ccresume finds a recent coding-agent session and resumes it.
 //
 // ccresume searches recent sessions for a query (positional argument, or the
 // clipboard if -clip is set), groups results by git worktree, and prints the

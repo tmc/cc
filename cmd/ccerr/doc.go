@@ -1,4 +1,4 @@
-// Command ccerr finds errors, failures, and retries in Claude Code sessions.
+// Command ccerr finds errors, failures, and retries in coding-agent sessions.
 //
 // It scans session JSONL for tool errors, failed bash commands, API
 // errors, user rejections, and interruptions, and prints one record per

@@ -1,4 +1,4 @@
-// Command cctool extracts tool use details from Claude Code sessions.
+// Command cctool extracts tool use details from coding-agent sessions.
 //
 // It prints what tools were invoked and with what arguments, so bash
 // commands, file edits, searches, and other tool calls can be reviewed

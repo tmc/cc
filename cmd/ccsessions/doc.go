@@ -1,8 +1,9 @@
-// Command ccsessions lists recent Claude Code sessions.
+// Command ccsessions lists recent coding-agent sessions.
 //
-// ccsessions reads session JSONL files from ~/.claude/projects/ and
-// prints one row per session with timestamp, ID, project, message
-// counts, and (with -v) the first user prompt.
+// ccsessions reads session JSONL files from the Claude Code, Gemini CLI,
+// and Codex CLI session directories and prints one row per session with
+// timestamp, ID, project, message counts, and (with -v) the first user
+// prompt.
 //
 // # Usage
 //

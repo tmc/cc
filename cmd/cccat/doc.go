@@ -1,4 +1,4 @@
-// Command cccat filters and displays Claude Code session entries.
+// Command cccat filters and displays coding-agent session entries.
 //
 // It reads JSONL session files from stdin or file arguments and writes
 // matching entries to stdout. It works like grep but understands session
