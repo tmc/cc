@@ -1,0 +1,1 @@
+claude-code: opus-4-8 | pid:23550 | iterm:w2t8p5:683288C4-89F5-44D7-B2E6-7C6F6B6BBD1A | date:2026-05-29T12:51:31Z | perf: filewatcher reindex storm fix, root-caused via live net/http/pprof (filepath.Walk->parseSession 60%)
