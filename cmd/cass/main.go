@@ -848,7 +848,13 @@ func runWeb(ctx context.Context, svc *service.Service, args []string, logger *sl
 		Logger:  logger,
 	})
 
-	fmt.Fprintf(os.Stderr, "cass web → http://localhost%s\n", *addr)
+	// A bare ":port" addr binds all interfaces; show localhost so the printed
+	// URL is clickable. An explicit host:port is already complete.
+	host := *addr
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+	fmt.Fprintf(os.Stderr, "cass web → http://%s\n", host)
 	return srv.Start(ctx)
 }
 
