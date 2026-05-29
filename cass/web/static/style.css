@@ -328,6 +328,15 @@ input::placeholder { color: var(--faint); }
   color: var(--green);
   border-color: color-mix(in srgb, var(--green) 45%, transparent);
 }
+.hit-match-badge {
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: 3px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
 .hit-goal-badge.complete,
 .hit-goal-badge.completed {
   color: var(--green);
@@ -1205,6 +1214,34 @@ mark.search-hl {
   justify-content: center;
 }
 .graph-zoom button:hover { border-color: var(--accent); }
+
+/* graph: legend */
+.graph-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 2px 2px;
+  font-size: 10px;
+  color: var(--dim);
+}
+.graph-legend-item { display: flex; align-items: center; gap: 4px; }
+.graph-legend-sep { width: 1px; height: 12px; background: var(--border); }
+.graph-legend-node {
+  width: 14px; height: 9px; border-radius: 2px; display: inline-block;
+  border: 1px solid var(--border);
+}
+.graph-legend-node.node-session { background: var(--node-bg); }
+.graph-legend-node.node-workflow { background: var(--node-wf-bg); border-color: var(--accent); }
+.graph-legend-node.node-workflow-agent { background: var(--node-bg); border-color: var(--faint); }
+.graph-legend-line { width: 16px; height: 2px; display: inline-block; border-radius: 1px; }
+/* Dashed variant keeps the inline background color but breaks it into dashes
+   via a mask, so legend lines match the SVG edge dash styles. */
+.graph-legend-line.dashed {
+  -webkit-mask: repeating-linear-gradient(to right, #000 0 3px, transparent 3px 6px);
+  mask: repeating-linear-gradient(to right, #000 0 3px, transparent 3px 6px);
+}
+.graph-legend-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 
 /* graph: timeline scrubber */
 .graph-scrubber {
