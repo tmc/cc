@@ -700,10 +700,120 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		total = len(hits)
 	}
 
+	if err := s.foldWorkflows(ctx, hits, req.Query); err != nil {
+		return nil, err
+	}
+
 	return &cass.SearchResult{
 		Hits:       hits,
 		TotalCount: total,
 	}, nil
+}
+
+// foldWorkflows attaches each hit's workflow runs and, when a query is present,
+// bubbles workflow matches up to the parent row. A workflow is considered a
+// match when the query terms appear in its name, description, or run id. The
+// matched ids and count are recorded on the hit and CollapsedChildren is set,
+// so the UI can show "matched N agents" without listing child rows.
+func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) error {
+	if len(hits) == 0 {
+		return nil
+	}
+	byID := map[string]*cass.Hit{}
+	for i := range hits {
+		byID[hits[i].SessionID] = &hits[i]
+	}
+	ids := make([]string, 0, len(hits))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
+			script_path, transcript_dir, source_path, agent_count, journal_event_count,
+			started_at, completed_at
+		FROM workflows WHERE parent_session_id IN (`+placeholders+`)
+		ORDER BY started_at, run_id`, args...)
+	if err != nil {
+		return fmt.Errorf("fold workflows: %w", err)
+	}
+	defer rows.Close()
+
+	terms := queryTerms(query)
+	for rows.Next() {
+		var w WorkflowRow
+		if err := rows.Scan(
+			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
+			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
+			&w.StartedAt, &w.CompletedAt,
+		); err != nil {
+			return fmt.Errorf("scan folded workflow: %w", err)
+		}
+		h := byID[w.ParentSessionID]
+		if h == nil {
+			continue
+		}
+		h.Workflows = append(h.Workflows, cass.WorkflowRun{
+			RunID:             w.RunID,
+			TaskID:            w.TaskID,
+			Name:              w.Name,
+			Description:       w.Description,
+			Status:            w.Status,
+			Summary:           w.Summary,
+			ScriptPath:        w.ScriptPath,
+			TranscriptDir:     w.TranscriptDir,
+			SourcePath:        w.SourcePath,
+			AgentCount:        w.AgentCount,
+			JournalEventCount: w.JournalEventCount,
+			StartedAt:         unixOrZero(w.StartedAt),
+			CompletedAt:       unixOrZero(w.CompletedAt),
+		})
+		if len(terms) > 0 && workflowMatches(w, terms) {
+			h.MatchedWorkflowIDs = append(h.MatchedWorkflowIDs, w.RunID)
+			h.WorkflowMatchCount += w.AgentCount
+			h.CollapsedChildren = true
+		}
+	}
+	return rows.Err()
+}
+
+// queryTerms lowercases and splits a query into bare alphanumeric terms,
+// dropping FTS operators so matching is forgiving.
+func queryTerms(query string) []string {
+	if strings.TrimSpace(query) == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
+		return !(r == '-' || r == '_' || r == '.' || r == '/' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
+	})
+	var out []string
+	for _, f := range fields {
+		switch f {
+		case "and", "or", "not", "near":
+			continue
+		}
+		if f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// workflowMatches reports whether every query term appears in the workflow's
+// searchable text (name, description, run id, status).
+func workflowMatches(w WorkflowRow, terms []string) bool {
+	hay := strings.ToLower(w.Name + " " + w.Description + " " + w.RunID + " " + w.Status)
+	for _, t := range terms {
+		if !strings.Contains(hay, t) {
+			return false
+		}
+	}
+	return true
 }
 
 // Delete removes sessions matching the filter.
@@ -2025,6 +2135,26 @@ func buildContent(sess cass.Session) string {
 		if skill.Path != "" {
 			b.WriteByte(' ')
 			b.WriteString(skill.Path)
+		}
+		b.WriteByte('\n')
+	}
+	for _, wf := range sess.Workflows {
+		if wf.Name == "" && wf.Description == "" && wf.RunID == "" {
+			continue
+		}
+		b.WriteString("workflow ")
+		if wf.Status != "" {
+			b.WriteString(wf.Status)
+			b.WriteByte(' ')
+		}
+		b.WriteString(wf.RunID)
+		if wf.Name != "" {
+			b.WriteByte(' ')
+			b.WriteString(wf.Name)
+		}
+		if wf.Description != "" {
+			b.WriteByte(' ')
+			b.WriteString(wf.Description)
 		}
 		b.WriteByte('\n')
 	}

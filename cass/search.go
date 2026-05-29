@@ -28,14 +28,29 @@ const (
 	SortOldest SortMode = "oldest"
 )
 
+// ChildMode controls how workflow child-agent matches are presented in search
+// results.
+type ChildMode string
+
+const (
+	// ChildrenCollapsed folds child workflow-agent matches into the parent
+	// session row. It is the default.
+	ChildrenCollapsed ChildMode = "collapsed"
+	// ChildrenExpanded folds matches but marks them for inline child display.
+	ChildrenExpanded ChildMode = "expanded"
+	// ChildrenRaw is reserved for surfacing child sessions as top-level rows.
+	ChildrenRaw ChildMode = "raw"
+)
+
 // SearchRequest encapsulates query parameters.
 type SearchRequest struct {
-	Query   string
-	Mode    SearchMode
-	Sort    SortMode
-	Filters Filters
-	Limit   int
-	Offset  int
+	Query    string
+	Mode     SearchMode
+	Sort     SortMode
+	Filters  Filters
+	Children ChildMode // child-agent display mode; empty means collapsed.
+	Limit    int
+	Offset   int
 }
 
 // Filters constrains search results.
@@ -111,4 +126,12 @@ type Hit struct {
 	WorkflowCount       int           `json:"workflow_count,omitempty"`
 	WorkflowAgentCount  int           `json:"workflow_agent_count,omitempty"`
 	WorkflowTaskOpCount int           `json:"workflow_task_op_count,omitempty"`
+
+	// Folded child-workflow matches. When a query matches one or more workflow
+	// runs (or, in future, their child agents) the match is bubbled to this
+	// parent row rather than shown as separate child rows.
+	WorkflowMatchCount      int      `json:"workflow_match_count,omitempty"`
+	MatchedWorkflowIDs      []string `json:"matched_workflow_ids,omitempty"`
+	MatchedWorkflowAgentIDs []string `json:"matched_workflow_agent_ids,omitempty"`
+	CollapsedChildren       bool     `json:"collapsed_children,omitempty"`
 }

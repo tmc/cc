@@ -232,6 +232,94 @@ func TestGraphNoneModeIsLegacy(t *testing.T) {
 	}
 }
 
+func TestSearchFoldsWorkflowMatch(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Two sessions: one whose only relevance to the query is its workflow name,
+	// and a decoy whose messages do not mention it.
+	start := time.Unix(1_700_000_000, 0).UTC()
+	sessions := []cass.Session{
+		{
+			ID:        "wf-parent",
+			Agent:     "claude-code",
+			Title:     "ordinary title",
+			Workspace: "tmc/cc",
+			StartedAt: start,
+			EndedAt:   start.Add(time.Hour),
+			Messages:  []cass.Message{{Role: "user", Content: "do some unrelated work"}},
+			Workflows: []cass.WorkflowRun{{
+				RunID:      "wf_zzz",
+				Name:       "ccmagicreview",
+				Status:     "completed",
+				AgentCount: 5,
+				StartedAt:  start.Add(time.Minute),
+			}},
+		},
+		{
+			ID:        "decoy",
+			Agent:     "claude-code",
+			Title:     "decoy",
+			Workspace: "tmc/cc",
+			StartedAt: start,
+			EndedAt:   start.Add(time.Hour),
+			Messages:  []cass.Message{{Role: "user", Content: "nothing to see here"}},
+		},
+	}
+	if err := s.BatchIndex(ctx, sessions); err != nil {
+		t.Fatal(err)
+	}
+
+	// The query term appears only in the workflow name, indexed into content.
+	res, err := s.Search(ctx, cass.SearchRequest{Query: "ccmagicreview", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("got %d hits, want 1 (parent session): %+v", len(res.Hits), res.Hits)
+	}
+	h := res.Hits[0]
+	if h.SessionID != "wf-parent" {
+		t.Fatalf("hit session = %q, want wf-parent", h.SessionID)
+	}
+	if !h.CollapsedChildren {
+		t.Error("expected CollapsedChildren=true when a workflow matched")
+	}
+	if len(h.MatchedWorkflowIDs) != 1 || h.MatchedWorkflowIDs[0] != "wf_zzz" {
+		t.Errorf("matched workflow ids = %v, want [wf_zzz]", h.MatchedWorkflowIDs)
+	}
+	if h.WorkflowMatchCount != 5 {
+		t.Errorf("workflow_match_count = %d, want 5 (agent count)", h.WorkflowMatchCount)
+	}
+	// The full workflow list is attached regardless of match.
+	if len(h.Workflows) != 1 || h.Workflows[0].RunID != "wf_zzz" {
+		t.Errorf("hit workflows = %+v, want one wf_zzz", h.Workflows)
+	}
+}
+
+func TestSearchAttachesWorkflowsWithoutMatch(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.BatchIndex(ctx, []cass.Session{sessionWithWorkflows()}); err != nil {
+		t.Fatal(err)
+	}
+	// No query: list all, workflows attached but nothing bubbled as matched.
+	res, err := s.Search(ctx, cass.SearchRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("got %d hits, want 1", len(res.Hits))
+	}
+	h := res.Hits[0]
+	if len(h.Workflows) != 2 {
+		t.Errorf("attached workflows = %d, want 2", len(h.Workflows))
+	}
+	if h.CollapsedChildren || len(h.MatchedWorkflowIDs) != 0 {
+		t.Errorf("no query should mean no folded matches: collapsed=%v matched=%v", h.CollapsedChildren, h.MatchedWorkflowIDs)
+	}
+}
+
 func TestDeleteCascadesWorkflows(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -48,6 +48,14 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("sort"); v != "" {
 		req.Sort = cass.SortMode(v)
 	}
+	switch cass.ChildMode(q.Get("children")) {
+	case cass.ChildrenExpanded:
+		req.Children = cass.ChildrenExpanded
+	case cass.ChildrenRaw:
+		req.Children = cass.ChildrenRaw
+	default:
+		req.Children = cass.ChildrenCollapsed
+	}
 	if v := q.Get("since"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			req.Filters.After = time.Now().Add(-d)
