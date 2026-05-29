@@ -99,3 +99,58 @@ func TestFileWatcherScheduleSingleFlight(t *testing.T) {
 		t.Fatal("no reindex pass ran")
 	}
 }
+
+// TestFileWatcherScheduleCancelLeavesQueued verifies that a batch merged into
+// the queue while a pass is in flight is not pulled-and-dropped when the context
+// is cancelled mid-pass: the queued set is left intact for the next Start to
+// reconcile, and running resets so a restart is not blocked.
+func TestFileWatcherScheduleCancelLeavesQueued(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	enter := make(chan struct{}, 1) // signals the first pass has started
+	release := make(chan struct{})  // unblocks the first pass
+
+	fw := &FileWatcher{
+		broker: NewSSEBroker(),
+		log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		reindex: func(ctx context.Context, paths []string) (int, error) {
+			select {
+			case enter <- struct{}{}:
+			default:
+			}
+			<-release // hold the first pass until the test enqueues + cancels.
+			return len(paths), nil
+		},
+	}
+
+	fw.schedule(ctx, map[string]struct{}{"/p/first.jsonl": {}})
+	<-enter // first pass is now inside reindex, holding the single-flight slot.
+
+	// Enqueue a second batch (merged into queued) and cancel before releasing.
+	fw.schedule(ctx, map[string]struct{}{"/p/second.jsonl": {}})
+	cancel()
+	close(release)
+
+	// Wait for the goroutine to finish.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		fw.mu.Lock()
+		running := fw.running
+		fw.mu.Unlock()
+		if !running {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+	if fw.running {
+		t.Fatal("running not reset after cancellation")
+	}
+	// The merged batch must survive (left for the next Start), not be silently
+	// pulled-and-dropped.
+	if _, ok := fw.queued["/p/second.jsonl"]; !ok {
+		t.Fatal("queued batch was dropped on cancellation instead of being left intact")
+	}
+}

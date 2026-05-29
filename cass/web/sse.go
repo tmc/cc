@@ -291,7 +291,10 @@ func (fw *FileWatcher) schedule(ctx context.Context, files map[string]struct{}) 
 		for {
 			fw.processPending(ctx, batch)
 			fw.mu.Lock()
-			if len(fw.queued) == 0 {
+			// Stop on cancellation before consuming the queue, so a merged batch
+			// is never pulled-and-dropped; any queued files are left intact for
+			// the next Start to reconcile.
+			if ctx.Err() != nil || len(fw.queued) == 0 {
 				fw.running = false
 				fw.mu.Unlock()
 				return
@@ -299,12 +302,6 @@ func (fw *FileWatcher) schedule(ctx context.Context, files map[string]struct{}) 
 			batch = fw.queued
 			fw.queued = nil
 			fw.mu.Unlock()
-			if ctx.Err() != nil {
-				fw.mu.Lock()
-				fw.running = false
-				fw.mu.Unlock()
-				return
-			}
 		}
 	}()
 }
