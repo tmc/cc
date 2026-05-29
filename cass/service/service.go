@@ -22,13 +22,25 @@ type Config struct {
 	DBPath     string // Path to the SQLite database. Defaults to ~/.cache/cass/index.db.
 	Collectors []cass.Collector
 	Logger     *slog.Logger
+
+	// ParseCacheBytes bounds the in-memory incremental-parse cache used by
+	// IndexPaths (the long-lived server's file-watcher path). Zero selects a
+	// default; a negative value disables caching so every reindex reads in
+	// full. One-shot Index never consults the cache regardless.
+	ParseCacheBytes int64
 }
+
+// defaultParseCacheBytes caps the incremental-parse cache. Large enough to hold
+// the working set of actively-written sessions; evicting a giant session just
+// makes its next reindex a full read.
+const defaultParseCacheBytes = 1500 << 20 // ~1.5 GiB
 
 // Service orchestrates collection, indexing, and search.
 type Service struct {
 	store      *store.DB
 	collectors []cass.Collector
 	log        *slog.Logger
+	cache      *ParseCache
 }
 
 // New creates a new service with the given configuration.
@@ -61,10 +73,16 @@ func New(cfg Config) (*Service, error) {
 		logger = slog.Default()
 	}
 
+	cacheBytes := cfg.ParseCacheBytes
+	if cacheBytes == 0 {
+		cacheBytes = defaultParseCacheBytes
+	}
+
 	return &Service{
 		store:      st,
 		collectors: collectors,
 		log:        logger,
+		cache:      NewParseCache(cacheBytes),
 	}, nil
 }
 
@@ -343,7 +361,10 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 		ch := make(chan cass.Session, 64)
 		errCh := make(chan error, 1)
 		go func(col cass.Collector, paths []string) {
-			errCh <- col.Scan(ctx, cass.ScanConfig{Paths: paths, Since: since}, ch)
+			// Parse via the incremental cache: skip unchanged files, tail only
+			// the appended bytes of grown ones. Only IndexPaths (the long-lived
+			// server's watcher path) uses the cache; one-shot Index does not.
+			errCh <- col.Scan(ctx, cass.ScanConfig{Paths: paths, Since: since, Parse: s.cache.ParseFile}, ch)
 		}(g.collector, dirList)
 
 		var batch []cass.Session
