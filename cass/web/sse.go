@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/tmc/cc/cass/service"
 	"github.com/tmc/cc/ccpaths"
 )
 
@@ -308,14 +309,11 @@ func (fw *FileWatcher) schedule(ctx context.Context, files map[string]struct{}) 
 
 // parentSessionPath maps a subagent JSONL path back to its parent session JSONL.
 // e.g. /path/to/<uuid>/subagents/agent-xyz.jsonl → /path/to/<uuid>.jsonl
-// For parent session files, returns the path unchanged.
+// For parent session files, returns the path unchanged. Delegates to
+// [service.ParentSessionPath], the single source of truth shared with
+// IndexPaths so the watcher and the indexer collapse subagent paths identically.
 func parentSessionPath(p string) string {
-	dir := filepath.Dir(p)
-	if filepath.Base(dir) == "subagents" {
-		sessionDir := filepath.Dir(dir)
-		return sessionDir + ".jsonl"
-	}
-	return p
+	return service.ParentSessionPath(p)
 }
 
 func (fw *FileWatcher) processPending(ctx context.Context, files map[string]struct{}) {

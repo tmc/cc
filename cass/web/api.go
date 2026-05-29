@@ -16,6 +16,7 @@ import (
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/ccinboxstore"
+	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/ccteamcfg"
 )
 
@@ -291,6 +292,68 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, entries)
+}
+
+// handleWorkflowAgent serves a single workflow fan-out agent transcript by its
+// source_path. Workflow agents are not sessions rows (they fold into their
+// parent), so they cannot be fetched via /api/session/{id}. The path is taken
+// from the client, so it is strictly validated — symlink-resolved and confined
+// to a subagents/workflows/ transcript under the Claude projects root — to
+// prevent reading arbitrary files.
+func (s *Server) handleWorkflowAgent(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("source_path")
+	if raw == "" {
+		writeError(w, fmt.Errorf("missing source_path"), http.StatusBadRequest)
+		return
+	}
+	path, err := validateWorkflowAgentPath(raw)
+	if err != nil {
+		writeError(w, err, http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("Accept") == "text/event-stream" {
+		s.streamSession(w, r, path)
+		return
+	}
+	// Single agent file: no subagent merge (an agent has no subagents/ of its own).
+	entries, err := readSessionEntries(path)
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, entries)
+}
+
+// validateWorkflowAgentPath confirms p is a workflow-agent transcript safely
+// reachable: it must be an agent-*.jsonl under a subagents/workflows/ segment,
+// and (symlink-resolved) reside under the Claude projects root. Returns the
+// resolved path to open.
+func validateWorkflowAgentPath(p string) (string, error) {
+	if !strings.HasSuffix(p, ".jsonl") || !strings.HasPrefix(filepath.Base(p), "agent-") {
+		return "", fmt.Errorf("not a workflow-agent transcript")
+	}
+	if !strings.Contains(filepath.ToSlash(p), "/subagents/workflows/") {
+		return "", fmt.Errorf("not under subagents/workflows/")
+	}
+	home, err := ccpaths.ClaudeHome()
+	if err != nil {
+		return "", err
+	}
+	root, err := filepath.EvalSymlinks(filepath.Join(home, "projects"))
+	if err != nil {
+		return "", err
+	}
+	// Resolve symlinks on the target before the prefix check so "../" and
+	// symlink escapes cannot leave the projects root.
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes projects root")
+	}
+	return resolved, nil
 }
 
 func (s *Server) streamSession(w http.ResponseWriter, r *http.Request, path string) {
@@ -580,6 +643,29 @@ func readSessionEntriesWithSubagents(path string) ([]cc.Entry, error) {
 		}
 		// Extract agent ID from filename: agent-<id>.jsonl
 		agentID := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
+		for i := range sub {
+			if sub[i].AgentID == "" {
+				sub[i].AgentID = agentID
+			}
+			sub[i].IsSidechain = true
+		}
+		entries = append(entries, sub...)
+	}
+
+	// Workflow fan-out agents nest a level deeper, under
+	// subagents/workflows/<run_id>/agent-*.jsonl. Include them as sidechains so
+	// the parent's flat transcript shows their activity too.
+	wfAgents, _ := filepath.Glob(filepath.Join(subagentDir, "workflows", "*", "agent-*.jsonl"))
+	for _, wfPath := range wfAgents {
+		base := filepath.Base(wfPath)
+		if strings.HasPrefix(base, "agent-acompact") {
+			continue
+		}
+		sub, err := readSessionEntries(wfPath)
+		if err != nil {
+			continue
+		}
+		agentID := strings.TrimSuffix(strings.TrimPrefix(base, "agent-"), ".jsonl")
 		for i := range sub {
 			if sub[i].AgentID == "" {
 				sub[i].AgentID = agentID

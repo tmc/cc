@@ -83,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session/{id}/meta", s.handleSessionMeta)
 	mux.HandleFunc("GET /api/session/{id}", s.handleSessionStream)
 	mux.HandleFunc("GET /api/session/{id}/requests", s.handleSessionRequests)
+	mux.HandleFunc("GET /api/workflow-agent", s.handleWorkflowAgent)
 	mux.HandleFunc("GET /api/limits", s.handleLimits)
 	mux.HandleFunc("GET /api/usage", s.handleUsage)
 	mux.HandleFunc("GET /api/graph", s.handleGraph)
