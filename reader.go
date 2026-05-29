@@ -635,68 +635,74 @@ var ErrTailInvalid = errors.New("tail offset invalid; reparse from start")
 
 // ReadFileFrom reads the entries appended to a JSONL file after the given byte
 // offset, which must point just past a line terminator (or be 0). It returns
-// the new entries and the byte offset just past the last complete line read; a
-// trailing line without a final newline is treated as still being written — it
-// is not decoded and not included in newOffset, so it is re-read once complete.
+// the new complete entries and the byte offset just past the last complete line
+// read. A trailing line without a final newline is treated as still being
+// written: it is decoded and returned separately as partial (nil if absent or
+// undecodable), but is not included in newOffset, so it is re-read once
+// complete. Callers that cache by offset must store only entries and return
+// entries+partial — folding partial into the cache would double-count it when
+// the line later completes.
 //
 // Because each JSONL line decodes independently (see decodeEntryLine), the
-// entries returned are exactly those a full [ReadFile] would yield for the
-// same byte range. ReadFileFrom returns [ErrTailInvalid] when offset is past
-// the file size or not on a line boundary; the caller should reparse the whole
-// file in that case.
-func ReadFileFrom(ctx context.Context, path string, offset int64) (entries []Entry, newOffset int64, err error) {
+// entries (plus partial) returned are exactly those a full [ReadFile] would
+// yield for the same byte range. ReadFileFrom returns [ErrTailInvalid] when
+// offset is past the file size or not on a line boundary; the caller should
+// reparse the whole file in that case.
+func ReadFileFrom(ctx context.Context, path string, offset int64) (entries []Entry, newOffset int64, partial *Entry, err error) {
 	if err := ctx.Err(); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	defer f.Close()
 
 	fi, err := f.Stat()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	size := fi.Size()
 	if offset > size {
-		return nil, 0, ErrTailInvalid // file shrank: truncation or rewrite.
+		return nil, 0, nil, ErrTailInvalid // file shrank: truncation or rewrite.
 	}
 	if offset == size {
-		return nil, offset, nil // nothing appended.
+		return nil, offset, nil, nil // nothing appended.
 	}
 	if offset > 0 {
 		// Confirm the offset sits just past a newline, so we start on a clean
 		// line boundary rather than mid-line.
 		var b [1]byte
 		if _, err := f.ReadAt(b[:], offset-1); err != nil {
-			return nil, 0, err
+			return nil, 0, nil, err
 		}
 		if b[0] != '\n' {
-			return nil, 0, ErrTailInvalid
+			return nil, 0, nil, ErrTailInvalid
 		}
 	}
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
-	entries, consumed, err := readComplete(ctx, f)
+	entries, consumed, partial, err := readComplete(ctx, f)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
-	return entries, offset + consumed, nil
+	return entries, offset + consumed, partial, nil
 }
 
 // ReadFileWithOffset reads all entries from a JSONL file and also returns the
 // byte offset just past the last complete (newline-terminated) line, suitable
-// for a later [ReadFileFrom]. A trailing line without a final newline is not
-// reflected in the offset, so it is re-read once completed.
-func ReadFileWithOffset(ctx context.Context, path string) (entries []Entry, offset int64, err error) {
+// for a later [ReadFileFrom]. A trailing line without a final newline is
+// decoded and returned as partial (nil if absent or undecodable) but is not
+// reflected in the offset, so it is re-read once completed. See [ReadFileFrom]
+// for the caching contract on partial.
+func ReadFileWithOffset(ctx context.Context, path string) (entries []Entry, offset int64, partial *Entry, err error) {
 	if err := ctx.Err(); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	defer f.Close()
 	return readComplete(ctx, f)
@@ -705,41 +711,93 @@ func ReadFileWithOffset(ctx context.Context, path string) (entries []Entry, offs
 // readComplete scans r, decoding each complete newline-terminated line, and
 // returns the decoded entries plus the number of bytes consumed up to and
 // including the last newline. Bytes after the final newline (an unterminated
-// trailing line) are not decoded and not counted, so the offset always lands
-// on a line boundary.
-func readComplete(ctx context.Context, r io.Reader) (entries []Entry, consumed int64, err error) {
+// trailing line) are not counted in consumed — so the offset always lands on a
+// line boundary — but are decoded and returned as partial (nil if absent or
+// undecodable), matching what [ReadFile]'s scanner yields for the final token.
+// A single line longer than [MaxLineSize] returns the entries decoded so far
+// plus [bufio.ErrTooLong], exactly as [ReadFile] does, so all readers agree on
+// which files are unparseable.
+func readComplete(ctx context.Context, r io.Reader) (entries []Entry, consumed int64, partial *Entry, err error) {
 	br := bufio.NewReaderSize(r, initialBufferSize)
 	n := 0
 	for {
-		line, readErr := br.ReadBytes('\n')
-		if len(line) > 0 && line[len(line)-1] == '\n' {
-			consumed += int64(len(line))
+		line, complete, readErr := readLine(br)
+		if readErr != nil && readErr != io.EOF {
+			// ErrTooLong (line content reached MaxLineSize) or an I/O error;
+			// either way report it just as ReadFile's scanner would, with the
+			// entries decoded so far.
+			return entries, consumed, nil, readErr
+		}
+		if complete {
+			consumed += int64(len(line)) + 1 // include the trailing newline.
 			n++
 			if n%256 == 0 {
 				if cerr := ctx.Err(); cerr != nil {
-					return entries, consumed, cerr
+					return entries, consumed, nil, cerr
 				}
 			}
-			trimmed := line[:len(line)-1]
-			if len(trimmed) > 0 && trimmed[len(trimmed)-1] == '\r' {
-				trimmed = trimmed[:len(trimmed)-1]
-			}
-			if len(trimmed) == 0 {
-				continue
-			}
-			if entry, ok := decodeEntryLine(trimmed); ok {
+			if entry, ok := decodeLine(line); ok {
 				entries = append(entries, entry)
 			}
-		}
-		if readErr != nil {
-			if readErr == io.EOF {
-				// Any bytes in `line` here lacked a trailing newline: an
-				// incomplete final line. Leave them out of `consumed`.
-				return entries, consumed, nil
+		} else if len(line) > 0 {
+			// An unterminated final line: decode it for the returned set
+			// (matching ReadFile) but leave it out of consumed so it is re-read
+			// once a newline lands.
+			if entry, ok := decodeLine(line); ok {
+				partial = &entry
 			}
-			return entries, consumed, readErr
+		}
+		if readErr == io.EOF {
+			return entries, consumed, partial, nil
 		}
 	}
+}
+
+// readLine returns the next line from br without its trailing newline. complete
+// reports whether the line was newline-terminated (false for an unterminated
+// final line at EOF). It returns [bufio.ErrTooLong] when a single line's
+// content reaches [MaxLineSize] — matching the bufio.Scanner cap [ReadFile]
+// uses — so memory stays bounded even on a pathological multi-gigabyte line.
+func readLine(br *bufio.Reader) (line []byte, complete bool, err error) {
+	for {
+		frag, e := br.ReadSlice('\n')
+		if e == nil {
+			if line == nil {
+				return frag[:len(frag)-1], true, nil // common case: no fragment buffering.
+			}
+			line = append(line, frag[:len(frag)-1]...)
+			if len(line) >= MaxLineSize {
+				return nil, false, bufio.ErrTooLong
+			}
+			return line, true, nil
+		}
+		if e == bufio.ErrBufferFull {
+			line = append(line, frag...)
+			if len(line) >= MaxLineSize {
+				return nil, false, bufio.ErrTooLong
+			}
+			continue
+		}
+		// e is io.EOF or an I/O error: frag holds the trailing unterminated bytes.
+		line = append(line, frag...)
+		if len(line) >= MaxLineSize {
+			return nil, false, bufio.ErrTooLong
+		}
+		return line, false, e
+	}
+}
+
+// decodeLine trims a trailing CR and skips an empty line, then decodes it the
+// same way [Reader.Next] does, so terminated and unterminated lines decode
+// identically.
+func decodeLine(content []byte) (Entry, bool) {
+	if len(content) > 0 && content[len(content)-1] == '\r' {
+		content = content[:len(content)-1]
+	}
+	if len(content) == 0 {
+		return Entry{}, false
+	}
+	return decodeEntryLine(content)
 }
 
 // ReadFileWithSubagents reads a session JSONL file and merges entries from any

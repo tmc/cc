@@ -76,13 +76,13 @@ func TestParseCache_EquivalenceUnderRandomOps(t *testing.T) {
 		next := 0
 
 		for step := 0; step < 30; step++ {
-			switch rng.Intn(6) {
+			switch rng.Intn(7) {
 			case 0, 1, 2: // append one or more complete lines
 				for k := 0; k < 1+rng.Intn(3); k++ {
 					appendBytes(t, path, pcRow(uuidf(trial, next)))
 					next++
 				}
-			case 3: // append a partial (unterminated) line
+			case 3: // append a partial (unterminated, invalid) half-line
 				row := pcRow(uuidf(trial, next))
 				appendBytes(t, path, row[:len(row)/2]) // no newline
 			case 4: // truncate to zero
@@ -99,6 +99,12 @@ func TestParseCache_EquivalenceUnderRandomOps(t *testing.T) {
 				if err := os.WriteFile(path, buf, 0o644); err != nil {
 					t.Fatal(err)
 				}
+			case 6: // append a COMPLETE but unterminated final line (mid-write
+				// flush): cc.ReadFile decodes it, so ParseFile must too via the
+				// returned partial, while keeping the cached offset on a boundary.
+				row := pcRow(uuidf(trial, next))
+				appendBytes(t, path, row[:len(row)-1]) // drop only the '\n'
+				next++
 			}
 			// Every mutation advances mtime monotonically, as a real filesystem
 			// does for sequential writes.

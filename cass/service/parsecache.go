@@ -42,10 +42,11 @@ type ParseCache struct {
 type cacheEntry struct {
 	size     int64
 	mtime    time.Time
-	offset   int64  // byte just past the last complete line of the cached entries.
-	anchor   []byte // bytes ending at offset; re-checked before tailing.
-	entries  []cc.Entry
-	bytes    int64 // estimated heap cost, for the LRU budget.
+	offset   int64      // byte just past the last complete line of the cached entries.
+	anchor   []byte     // bytes ending at offset; re-checked before tailing.
+	entries  []cc.Entry // complete (newline-terminated) lines only.
+	partial  *cc.Entry  // decoded unterminated trailing line, if any; excluded from offset/entries.
+	bytes    int64      // estimated heap cost, for the LRU budget.
 	lastUsed int64
 }
 
@@ -115,10 +116,12 @@ func (c *ParseCache) ParseFile(ctx context.Context, path string) ([]cc.Entry, er
 	prev, ok := c.entries[key]
 	c.mu.Unlock()
 
-	// Skip: exact size+mtime match means the bytes are identical (rule A).
+	// Skip: exact size+mtime match means the bytes are identical (rule A). The
+	// cached entries are complete-only, so re-append the remembered trailing
+	// partial to match what cc.ReadFile would return for these bytes.
 	if ok && prev.size == size && prev.mtime.Equal(mtime) {
 		c.touch(key)
-		return cloneEntries(prev.entries), nil
+		return withPartial(prev.entries, prev.partial), nil
 	}
 
 	// Tail: strict grow with mtime not going backward, and a verified-unchanged
@@ -127,7 +130,7 @@ func (c *ParseCache) ParseFile(ctx context.Context, path string) ([]cc.Entry, er
 	// replaced the prefix bytes (a larger rewrite that coincidentally leaves a
 	// newline at offset-1).
 	if ok && size > prev.size && !mtime.Before(prev.mtime) && c.anchorMatches(path, prev) {
-		tail, newOffset, err := cc.ReadFileFrom(ctx, path, prev.offset)
+		tail, newOffset, partial, err := cc.ReadFileFrom(ctx, path, prev.offset)
 		if err == nil {
 			anchor := readAnchorAt(path, newOffset)
 			// TOCTOU guard (rule E): only commit if the file did not change
@@ -136,8 +139,11 @@ func (c *ParseCache) ParseFile(ctx context.Context, path string) ([]cc.Entry, er
 				merged := make([]cc.Entry, 0, len(prev.entries)+len(tail))
 				merged = append(merged, prev.entries...)
 				merged = append(merged, tail...)
-				c.store(key, size, mtime, newOffset, anchor, merged)
-				return cloneEntries(merged), nil
+				// Store complete lines only (on the newOffset boundary); the
+				// trailing partial must not be cached or it double-counts when
+				// the line later completes. It is appended to the return only.
+				c.store(key, size, mtime, newOffset, anchor, merged, partial)
+				return withPartial(merged, partial), nil
 			}
 			// File moved under us: fall through to a full read of current bytes.
 		} else if !errors.Is(err, cc.ErrTailInvalid) {
@@ -147,7 +153,7 @@ func (c *ParseCache) ParseFile(ctx context.Context, path string) ([]cc.Entry, er
 	}
 
 	// Full: any miss, shrink, backward mtime, or tail rejection.
-	entries, offset, err := cc.ReadFileWithOffset(ctx, path)
+	entries, offset, partial, err := cc.ReadFileWithOffset(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -156,11 +162,24 @@ func (c *ParseCache) ParseFile(ctx context.Context, path string) ([]cc.Entry, er
 	// we actually parsed (rule E). If it drifted, return the entries we read
 	// but do not cache a stale snapshot.
 	if fi2, err2 := os.Stat(path); err2 == nil && fi2.Size() == size && fi2.ModTime().Equal(mtime) {
-		c.store(key, size, mtime, offset, anchor, entries)
+		c.store(key, size, mtime, offset, anchor, entries, partial)
 	} else {
 		c.evict(key)
 	}
-	return cloneEntries(entries), nil
+	return withPartial(entries, partial), nil
+}
+
+// withPartial returns an independent copy of entries with the unterminated
+// trailing line appended, matching what a plain cc.ReadFile yields for the
+// current bytes. The partial is never folded into the cached (offset-aligned)
+// entries — only into this returned slice — so a later read that finds the line
+// completed decodes it exactly once.
+func withPartial(entries []cc.Entry, partial *cc.Entry) []cc.Entry {
+	out := cloneEntries(entries)
+	if partial != nil {
+		out = append(out, *partial)
+	}
+	return out
 }
 
 // readAnchorAt reads up to anchorLen bytes ending at off, the fingerprint of
@@ -218,9 +237,16 @@ func cloneEntries(src []cc.Entry) []cc.Entry {
 // store inserts or replaces a cache entry and evicts LRU entries to stay within
 // the byte budget. The stored entries slice is owned by the cache; callers must
 // receive a clone (see cloneEntries) so eviction cannot corrupt a held slice.
-func (c *ParseCache) store(key string, size int64, mtime time.Time, offset int64, anchor []byte, entries []cc.Entry) {
+// partial is the unterminated trailing line, kept so a later skip can reproduce
+// the full cc.ReadFile result; it is excluded from offset and entries.
+func (c *ParseCache) store(key string, size int64, mtime time.Time, offset int64, anchor []byte, entries []cc.Entry, partial *cc.Entry) {
 	owned := cloneEntries(entries)
 	b := estimateBytes(owned)
+	var ownedPartial *cc.Entry
+	if partial != nil {
+		p := *partial
+		ownedPartial = &p
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if old, ok := c.entries[key]; ok {
@@ -233,6 +259,7 @@ func (c *ParseCache) store(key string, size int64, mtime time.Time, offset int64
 		offset:   offset,
 		anchor:   anchor,
 		entries:  owned,
+		partial:  ownedPartial,
 		bytes:    b,
 		lastUsed: c.clock,
 	}
