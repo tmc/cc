@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 type geminiChatFile struct {
@@ -228,7 +229,7 @@ func stableID(s string) string {
 }
 
 func defaultGeminiOutPath(projectPath, sessionID, startTS string) (string, error) {
-	gh, err := cc.GeminiHome()
+	gh, err := ccpaths.GeminiHome()
 	if err != nil {
 		return "", fmt.Errorf("gemini home: %w", err)
 	}
@@ -252,7 +253,7 @@ func projectName(projectPath string) (string, error) {
 	if strings.TrimSpace(projectPath) == "" {
 		return "", fmt.Errorf("missing project path")
 	}
-	gh, err := cc.GeminiHome()
+	gh, err := ccpaths.GeminiHome()
 	if err != nil {
 		return "", fmt.Errorf("gemini home: %w", err)
 	}

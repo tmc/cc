@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -161,7 +162,7 @@ func findSessionFiles() ([]string, error) {
 	}
 
 	// Parse since duration
-	since, err := cc.ParseDuration(*sinceFlag)
+	since, err := ccpaths.ParseDuration(*sinceFlag)
 	if err != nil {
 		return nil, fmt.Errorf("invalid duration: %w", err)
 	}
@@ -218,7 +219,7 @@ func findSessionFiles() ([]string, error) {
 }
 
 func getGlobalSearchDirs() []string {
-	ch, _ := cc.ClaudeHome()
+	ch, _ := ccpaths.ClaudeHome()
 	home, _ := os.UserHomeDir()
 	dirs := []string{
 		".",
@@ -240,7 +241,7 @@ func getProjectSearchDirs() []string {
 		)
 	}
 
-	ch, _ := cc.ClaudeHome()
+	ch, _ := ccpaths.ClaudeHome()
 	if ch != "" {
 		if err == nil {
 			hash := sha256.Sum256([]byte(gitCtx.GitCommonDir))

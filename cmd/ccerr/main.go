@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -171,7 +172,7 @@ func truncate(s string, n int) string {
 func inputs() ([]io.Reader, []io.Closer, error) {
 	args := flag.Args()
 	if *sinceFlag != "" && len(args) == 0 {
-		since, err := cc.ParseDuration(*sinceFlag)
+		since, err := ccpaths.ParseDuration(*sinceFlag)
 		if err != nil {
 			return nil, nil, err
 		}

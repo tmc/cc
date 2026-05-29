@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tmc/cc/ccpaths"
 )
 
 // AgentDef is a user-defined agent template stored at
@@ -44,7 +46,7 @@ func AgentsDir() (string, error) {
 	if dir := os.Getenv("CC_AGENTS_DIR"); dir != "" {
 		return dir, nil
 	}
-	ch, err := ClaudeHome()
+	ch, err := ccpaths.ClaudeHome()
 	if err != nil {
 		return "", fmt.Errorf("agents dir: %w", err)
 	}

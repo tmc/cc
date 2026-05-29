@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -65,16 +65,16 @@ func memoryDir(project string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve project: %w", err)
 	}
-	home, err := cc.ClaudeHome()
+	home, err := ccpaths.ClaudeHome()
 	if err != nil {
 		return "", err
 	}
-	candidate := filepath.Join(home, "projects", cc.EncodePath(abs), "memory")
+	candidate := filepath.Join(home, "projects", ccpaths.EncodePath(abs), "memory")
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate, nil
 	}
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil && resolved != abs {
-		return filepath.Join(home, "projects", cc.EncodePath(resolved), "memory"), nil
+		return filepath.Join(home, "projects", ccpaths.EncodePath(resolved), "memory"), nil
 	}
 	return candidate, nil
 }

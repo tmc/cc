@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -141,7 +142,7 @@ func printStat(edits []editOp, writes []writeOp) error {
 		if delta < 0 {
 			sign = ""
 		}
-		fmt.Printf(" %-60s | %3d edits  %s%d lines\n", cc.ShortPath(f), c[0], sign, delta)
+		fmt.Printf(" %-60s | %3d edits  %s%d lines\n", ccpaths.ShortPath(f), c[0], sign, delta)
 	}
 	fmt.Printf(" %d files changed, %d edits, %d writes\n", len(fileCounts), len(edits), len(writes))
 	return nil
@@ -149,8 +150,8 @@ func printStat(edits []editOp, writes []writeOp) error {
 
 func printDiffs(edits []editOp, writes []writeOp) error {
 	for _, e := range edits {
-		fmt.Printf("\033[1m--- %s\033[0m\n", cc.ShortPath(e.file))
-		fmt.Printf("\033[1m+++ %s\033[0m  (%s)\n", cc.ShortPath(e.file), e.ts)
+		fmt.Printf("\033[1m--- %s\033[0m\n", ccpaths.ShortPath(e.file))
+		fmt.Printf("\033[1m+++ %s\033[0m  (%s)\n", ccpaths.ShortPath(e.file), e.ts)
 		oldLines := strings.Split(e.oldString, "\n")
 		newLines := strings.Split(e.newString, "\n")
 		for _, l := range oldLines {
@@ -162,7 +163,7 @@ func printDiffs(edits []editOp, writes []writeOp) error {
 		fmt.Println()
 	}
 	for _, w := range writes {
-		fmt.Printf("\033[1m+++ %s\033[0m (new file, %s)\n", cc.ShortPath(w.file), w.ts)
+		fmt.Printf("\033[1m+++ %s\033[0m (new file, %s)\n", ccpaths.ShortPath(w.file), w.ts)
 		lines := strings.Split(w.content, "\n")
 		if len(lines) > 20 {
 			for _, l := range lines[:20] {
@@ -182,7 +183,7 @@ func printDiffs(edits []editOp, writes []writeOp) error {
 func inputs() ([]io.Reader, []io.Closer, error) {
 	args := flag.Args()
 	if *sinceFlag != "" && len(args) == 0 {
-		since, err := cc.ParseDuration(*sinceFlag)
+		since, err := ccpaths.ParseDuration(*sinceFlag)
 		if err != nil {
 			return nil, nil, err
 		}

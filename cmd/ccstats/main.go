@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -114,7 +115,7 @@ func resolveFiles() ([]string, error) {
 	if *sinceFlag == "" {
 		return nil, nil
 	}
-	since, err := cc.ParseDuration(*sinceFlag)
+	since, err := ccpaths.ParseDuration(*sinceFlag)
 	if err != nil {
 		return nil, err
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -58,7 +59,7 @@ func run() error {
 		return fmt.Errorf("no search query provided (use argument or clipboard)")
 	}
 
-	since, err := cc.ParseDuration(*sinceFlag)
+	since, err := ccpaths.ParseDuration(*sinceFlag)
 	if err != nil {
 		return fmt.Errorf("invalid duration: %w", err)
 	}
@@ -485,19 +486,19 @@ type searchRoot struct {
 }
 
 func sessionRoots() ([]searchRoot, error) {
-	ch, err := cc.ClaudeHome()
+	ch, err := ccpaths.ClaudeHome()
 	if err != nil {
 		return nil, err
 	}
 	roots := []searchRoot{{dir: filepath.Join(ch, "projects"), kind: "claude"}}
 
-	gh, _ := cc.GeminiHome()
+	gh, _ := ccpaths.GeminiHome()
 	if gh != "" {
 		if d := filepath.Join(gh, "projects"); dirExists(d) {
 			roots = append(roots, searchRoot{dir: d, kind: "gemini"})
 		}
 	}
-	xh, _ := cc.CodexHome()
+	xh, _ := ccpaths.CodexHome()
 	if xh != "" {
 		if d := filepath.Join(xh, "sessions"); dirExists(d) {
 			roots = append(roots, searchRoot{dir: d, kind: "codex"})
@@ -724,7 +725,7 @@ func decodePath(encoded string) string {
 	if len(segments) == 0 {
 		return "/"
 	}
-	if result, ok := cc.DecodeSegments("/"+segments[0], segments[1:]); ok {
+	if result, ok := ccpaths.DecodeSegments("/"+segments[0], segments[1:]); ok {
 		return result
 	}
 	return "/" + strings.Join(segments, "/")

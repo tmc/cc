@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -47,14 +47,14 @@ func run() error {
 	}
 
 	// Encode the path
-	encoded := cc.EncodePath(absDir)
+	encoded := ccpaths.EncodePath(absDir)
 
 	// Build cache path
 	var ch string
 	if *geminiFlag {
-		ch, _ = cc.GeminiHome()
+		ch, _ = ccpaths.GeminiHome()
 	} else {
-		ch, _ = cc.ClaudeHome()
+		ch, _ = ccpaths.ClaudeHome()
 	}
 	cachePath := filepath.Join(ch, "projects", encoded)
 	if *sessionsFlag {

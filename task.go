@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/tmc/cc/ccfs"
+	"github.com/tmc/cc/ccpaths"
 )
 
 // TeamTask represents a task stored at ~/.claude/tasks/{namespace}/{id}.json.
@@ -40,7 +41,7 @@ func NewTaskStore(ctx context.Context, namespace string) (*TaskStore, error) {
 	}
 	base := os.Getenv("CC_TASKS_DIR")
 	if base == "" {
-		ch, err := ClaudeHome()
+		ch, err := ccpaths.ClaudeHome()
 		if err != nil {
 			return nil, fmt.Errorf("task store: %w", err)
 		}

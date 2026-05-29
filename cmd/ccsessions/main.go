@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -31,7 +32,7 @@ func main() {
 }
 
 func run() error {
-	since, err := cc.ParseDuration(*sinceFlag)
+	since, err := ccpaths.ParseDuration(*sinceFlag)
 	if err != nil {
 		return fmt.Errorf("invalid duration %q: %w", *sinceFlag, err)
 	}
@@ -69,7 +70,7 @@ func runIndex(since time.Duration) error {
 	default:
 		for _, e := range entries {
 			ts := e.ModifiedTime().Local().Format("2006-01-02 15:04")
-			proj := cc.ShortPath(e.ProjectPath)
+			proj := ccpaths.ShortPath(e.ProjectPath)
 			prompt := collapse(e.FirstPrompt, 120)
 			if e.Summary != "" {
 				prompt = collapse(e.Summary, 120)
@@ -129,7 +130,7 @@ func runFull(since time.Duration) error {
 	default:
 		for _, s := range sessions {
 			ts := s.LastTime.Local().Format("2006-01-02 15:04")
-			proj := cc.ShortPath(s.CWD)
+			proj := ccpaths.ShortPath(s.CWD)
 			fmt.Printf("%-16s  %-36s  %-30s  msgs:%d/%d  lines:%d",
 				ts, s.SessionID, proj, s.UserMessages, s.AsstMessages, s.TotalLines)
 			if s.Compactions > 0 {

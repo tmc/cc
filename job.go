@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tmc/cc/ccpaths"
 )
 
 // Job is a daemon-backed background run stored under ~/.claude/jobs/<shortId>/.
@@ -62,7 +64,7 @@ func JobsDir() (string, error) {
 	if dir := os.Getenv("CC_JOBS_DIR"); dir != "" {
 		return dir, nil
 	}
-	ch, err := ClaudeHome()
+	ch, err := ccpaths.ClaudeHome()
 	if err != nil {
 		return "", fmt.Errorf("jobs dir: %w", err)
 	}

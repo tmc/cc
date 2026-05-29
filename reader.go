@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tmc/cc/ccpaths"
 )
 
 // Scanner buffer sizes for JSONL session lines. Sessions can carry
@@ -752,12 +754,12 @@ func collapseWhitespace(s string, max int) string {
 // ~/.gemini/projects/, and ~/.codex/sessions/. It excludes subagent files,
 // filters by modification time, and stops early when ctx is canceled.
 func FindSessionFiles(ctx context.Context, since time.Duration, project string) ([]string, error) {
-	ch, err := ClaudeHome()
+	ch, err := ccpaths.ClaudeHome()
 	if err != nil {
 		return nil, err
 	}
-	gh, _ := GeminiHome()
-	xh, _ := CodexHome()
+	gh, _ := ccpaths.GeminiHome()
+	xh, _ := ccpaths.CodexHome()
 
 	cutoff := time.Now().Add(-since)
 	var files []string

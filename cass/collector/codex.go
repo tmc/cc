@@ -14,6 +14,7 @@ import (
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/ccpaths"
 )
 
 // Codex collects sessions from Codex JSONL files.
@@ -202,7 +203,7 @@ func (c *Codex) root() (string, error) {
 	if c.Root != "" {
 		return c.Root, nil
 	}
-	ch, err := cc.CodexHome()
+	ch, err := ccpaths.CodexHome()
 	if err != nil {
 		return "", err
 	}

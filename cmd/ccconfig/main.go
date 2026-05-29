@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -222,9 +223,9 @@ func getConfigPath() (string, error) {
 	// Default to global
 	var ch string
 	if *geminiFlag {
-		ch, _ = cc.GeminiHome()
+		ch, _ = ccpaths.GeminiHome()
 	} else {
-		ch, _ = cc.ClaudeHome()
+		ch, _ = ccpaths.ClaudeHome()
 	}
 	return filepath.Join(ch, "config"), nil
 }
@@ -234,9 +235,9 @@ func loadAllConfigs() []loadedConfig {
 
 	var ch string
 	if *geminiFlag {
-		ch, _ = cc.GeminiHome()
+		ch, _ = ccpaths.GeminiHome()
 	} else {
-		ch, _ = cc.ClaudeHome()
+		ch, _ = ccpaths.ClaudeHome()
 	}
 
 	dirName := ".claude"

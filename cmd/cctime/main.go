@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 var (
@@ -248,19 +249,19 @@ func fmtToolUse(b cc.ContentBlock) string {
 			FilePath string `json:"file_path"`
 		}
 		json.Unmarshal(b.Input, &inp)
-		return fmt.Sprintf("Edit: %s", cc.ShortPath(inp.FilePath))
+		return fmt.Sprintf("Edit: %s", ccpaths.ShortPath(inp.FilePath))
 	case "Write":
 		var inp struct {
 			FilePath string `json:"file_path"`
 		}
 		json.Unmarshal(b.Input, &inp)
-		return fmt.Sprintf("Write: %s", cc.ShortPath(inp.FilePath))
+		return fmt.Sprintf("Write: %s", ccpaths.ShortPath(inp.FilePath))
 	case "Read":
 		var inp struct {
 			FilePath string `json:"file_path"`
 		}
 		json.Unmarshal(b.Input, &inp)
-		return fmt.Sprintf("Read: %s", cc.ShortPath(inp.FilePath))
+		return fmt.Sprintf("Read: %s", ccpaths.ShortPath(inp.FilePath))
 	case "Grep":
 		var inp struct {
 			Pattern string `json:"pattern"`
@@ -288,7 +289,7 @@ func fmtToolUse(b cc.ContentBlock) string {
 		json.Unmarshal(b.Input, &inp)
 		name := workflowMetaField(inp.Script, "name")
 		if name == "" {
-			name = cc.ShortPath(inp.ScriptPath)
+			name = ccpaths.ShortPath(inp.ScriptPath)
 		}
 		return fmt.Sprintf("Workflow: %s", name)
 	case "TaskCreate":
@@ -368,7 +369,7 @@ func fmtDuration(d time.Duration) string {
 func inputs() ([]io.Reader, []io.Closer, error) {
 	args := flag.Args()
 	if *sinceFlag != "" && len(args) == 0 {
-		since, err := cc.ParseDuration(*sinceFlag)
+		since, err := ccpaths.ParseDuration(*sinceFlag)
 		if err != nil {
 			return nil, nil, err
 		}

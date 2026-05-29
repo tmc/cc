@@ -14,6 +14,7 @@ import (
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/ccpaths"
 )
 
 // GeminiCLI collects sessions from Gemini CLI session files.
@@ -357,7 +358,7 @@ func (c *GeminiCLI) projectMaps() (map[string]string, map[string]string) {
 	hashToPath := map[string]string{}
 	nameToPath := map[string]string{}
 
-	gh, err := cc.GeminiHome()
+	gh, err := ccpaths.GeminiHome()
 	if err != nil {
 		return hashToPath, nameToPath
 	}
@@ -388,7 +389,7 @@ func (c *GeminiCLI) roots() ([]string, error) {
 		return []string{c.Root}, nil
 	}
 
-	gh, err := cc.GeminiHome()
+	gh, err := ccpaths.GeminiHome()
 	if err != nil {
 		return nil, err
 	}

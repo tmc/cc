@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass/store"
+	"github.com/tmc/cc/ccpaths"
 )
 
 // teamConfigJSON matches the shape of ~/.claude/teams/<name>/config.json.
@@ -25,13 +25,13 @@ type teamConfigJSON struct {
 func ScanTeamConfigs(root string) ([]store.TeamConfig, error) {
 	var roots []string
 	if root == "" {
-		ch, err := cc.ClaudeHome()
+		ch, err := ccpaths.ClaudeHome()
 		if err != nil {
 			return nil, fmt.Errorf("home dir: %w", err)
 		}
 		roots = append(roots, filepath.Join(ch, "teams"))
 
-		gh, err := cc.GeminiHome()
+		gh, err := ccpaths.GeminiHome()
 		if err == nil && gh != "" {
 			roots = append(roots, filepath.Join(gh, "teams"))
 		}

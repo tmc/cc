@@ -10,6 +10,7 @@ import (
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/ccpaths"
 )
 
 // ClaudeCode collects sessions from Claude Code's JSONL session files.
@@ -229,7 +230,7 @@ func (c *ClaudeCode) root() (string, error) {
 	if c.Root != "" {
 		return c.Root, nil
 	}
-	ch, err := cc.ClaudeHome()
+	ch, err := ccpaths.ClaudeHome()
 	if err != nil {
 		return "", err
 	}
@@ -312,5 +313,5 @@ func decodePath(encoded string) string {
 // by checking the filesystem. Returns the decoded path and whether it
 // (or a prefix of it) exists on disk.
 func decodeSegments(current string, remaining []string) (string, bool) {
-	return cc.DecodeSegments(current, remaining)
+	return ccpaths.DecodeSegments(current, remaining)
 }

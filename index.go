@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tmc/cc/ccpaths"
 )
 
 // SessionIndex is the sessions-index.json file written by Claude Code.
@@ -57,11 +59,11 @@ func ReadIndex(path string) (*SessionIndex, error) {
 
 // FindIndexFiles finds all sessions-index.json files under ~/.claude/projects/ and ~/.gemini/projects/.
 func FindIndexFiles() ([]string, error) {
-	ch, err := ClaudeHome()
+	ch, err := ccpaths.ClaudeHome()
 	if err != nil {
 		return nil, err
 	}
-	gh, _ := GeminiHome()
+	gh, _ := ccpaths.GeminiHome()
 
 	var files []string
 	dirs := []string{filepath.Join(ch, "projects")}

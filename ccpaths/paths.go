@@ -1,4 +1,4 @@
-package cc
+package ccpaths
 
 import (
 	"fmt"

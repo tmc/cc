@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/tmc/cc/ccfs"
+	"github.com/tmc/cc/ccpaths"
 )
 
 // TeamConfig represents a team's configuration stored at
@@ -43,7 +44,7 @@ func TeamsDir() (string, error) {
 	if dir := os.Getenv("CC_TEAMS_DIR"); dir != "" {
 		return dir, nil
 	}
-	ch, err := ClaudeHome()
+	ch, err := ccpaths.ClaudeHome()
 	if err != nil {
 		return "", fmt.Errorf("teams dir: %w", err)
 	}

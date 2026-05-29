@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 // Event is a server-sent event.
@@ -140,7 +140,7 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 	defer fw.w.Close()
 
 	// Watch the projects directory.
-	ch, err := cc.ClaudeHome()
+	ch, err := ccpaths.ClaudeHome()
 	if err != nil {
 		fw.log.Error("home dir", "err", err)
 		return
@@ -150,7 +150,7 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 		fw.log.Warn("watch dir", "path", root, "err", err)
 	}
 
-	gh, err := cc.GeminiHome()
+	gh, err := ccpaths.GeminiHome()
 	if err == nil && gh != "" {
 		geminiRoot := filepath.Join(gh, "projects")
 		if err := fw.addDirRecursive(geminiRoot); err != nil {
@@ -158,7 +158,7 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 		}
 	}
 
-	xh, err := cc.CodexHome()
+	xh, err := ccpaths.CodexHome()
 	if err == nil && xh != "" {
 		codexRoot := filepath.Join(xh, "sessions")
 		if err := fw.addDirRecursive(codexRoot); err != nil {
