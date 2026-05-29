@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccgit"
 	"github.com/tmc/cc/ccpaths"
 )
 
@@ -213,7 +213,7 @@ func getConfigPath() (string, error) {
 	}
 
 	if *projectFlag {
-		gitCtx, err := cc.ResolveGitContext("")
+		gitCtx, err := ccgit.ResolveGitContext("")
 		if err != nil {
 			return "", fmt.Errorf("not in a git repository")
 		}
@@ -251,7 +251,7 @@ func loadAllConfigs() []loadedConfig {
 		configs = append(configs, cfg)
 	}
 
-	if gitCtx, err := cc.ResolveGitContext(""); err == nil {
+	if gitCtx, err := ccgit.ResolveGitContext(""); err == nil {
 		projectPath := filepath.Join(gitCtx.WorktreePath, dirName, "config")
 		if cfg := loadConfig(projectPath, "project"); len(cfg.values) > 0 {
 			configs = append(configs, cfg)

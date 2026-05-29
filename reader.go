@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tmc/cc/ccgit"
 	"github.com/tmc/cc/ccpaths"
 )
 
@@ -646,7 +647,7 @@ type SessionSummary struct {
 	CWD          string   `json:"cwd,omitempty"`
 	DistinctCWDs []string `json:"distinct_cwds,omitempty"`
 	GitBranch    string   `json:"git_branch,omitempty"`
-	GitContext
+	ccgit.GitContext
 	Version      string    `json:"version,omitempty"`
 	Slug         string    `json:"slug,omitempty"`
 	Model        string    `json:"model,omitempty"`
@@ -729,7 +730,7 @@ func Summarize(file string, entries []Entry) SessionSummary {
 		}
 	}
 	if s.CWD != "" {
-		if ctx, err := ResolveGitContext(s.CWD); err == nil {
+		if ctx, err := ccgit.ResolveGitContext(s.CWD); err == nil {
 			s.GitContext = ctx
 		}
 	}

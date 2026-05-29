@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccgit"
 	"github.com/tmc/cc/ccpaths"
 )
 
@@ -120,7 +121,7 @@ func run() error {
 	}
 
 	curGitCommonDir := ""
-	if cur, err := cc.ResolveGitContext(""); err == nil {
+	if cur, err := ccgit.ResolveGitContext(""); err == nil {
 		curGitCommonDir = cur.GitCommonDir
 	}
 

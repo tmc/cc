@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccgit"
 )
 
 var (
@@ -99,7 +99,7 @@ func generateGitHash() string {
 		return "00000000"
 	}
 
-	gitCtx, err := cc.ResolveGitContext("")
+	gitCtx, err := ccgit.ResolveGitContext("")
 	var gitRoot string
 	if err != nil {
 		if *verbose {

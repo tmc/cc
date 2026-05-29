@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccgit"
 	"github.com/tmc/cc/ccpaths"
 )
 
@@ -233,7 +233,7 @@ func getGlobalSearchDirs() []string {
 func getProjectSearchDirs() []string {
 	dirs := []string{"."}
 
-	gitCtx, err := cc.ResolveGitContext("")
+	gitCtx, err := ccgit.ResolveGitContext("")
 	if err == nil {
 		dirs = append(dirs,
 			filepath.Join(gitCtx.WorktreePath, ".sessions"),
