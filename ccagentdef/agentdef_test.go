@@ -1,4 +1,4 @@
-package cc
+package ccagentdef
 
 import (
 	"os"

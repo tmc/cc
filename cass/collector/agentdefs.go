@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass/store"
+	"github.com/tmc/cc/ccagentdef"
 )
 
 // ScanAgentDefs walks ~/.claude/agents (and .disabled/) and returns store
@@ -22,14 +22,14 @@ func ScanAgentDefs(root string) ([]store.AgentDef, error) {
 	return out, nil
 }
 
-func listAgentDefs(root string) ([]*cc.AgentDef, error) {
+func listAgentDefs(root string) ([]*ccagentdef.AgentDef, error) {
 	if root == "" {
-		return cc.ListAgentDefs()
+		return ccagentdef.ListAgentDefs()
 	}
-	return cc.ListAgentDefsIn(root)
+	return ccagentdef.ListAgentDefsIn(root)
 }
 
-func toStoreAgentDef(d *cc.AgentDef) store.AgentDef {
+func toStoreAgentDef(d *ccagentdef.AgentDef) store.AgentDef {
 	if d == nil {
 		return store.AgentDef{}
 	}
@@ -38,21 +38,21 @@ func toStoreAgentDef(d *cc.AgentDef) store.AgentDef {
 	tools, _ := json.Marshal(d.Tools)
 	caps, _ := json.Marshal(d.Capabilities)
 	return store.AgentDef{
-		Name:            d.Name,
-		Description:     d.Description,
-		Version:         d.Version,
-		Command:         d.Command,
-		Disabled:        d.Disabled,
-		KeywordsJSON:    string(keywords),
-		PatternsJSON:    string(patterns),
-		ToolsJSON:       string(tools),
+		Name:             d.Name,
+		Description:      d.Description,
+		Version:          d.Version,
+		Command:          d.Command,
+		Disabled:         d.Disabled,
+		KeywordsJSON:     string(keywords),
+		PatternsJSON:     string(patterns),
+		ToolsJSON:        string(tools),
 		CapabilitiesJSON: string(caps),
-		SourcePath:      d.SourcePath,
-		Searchable:      buildAgentSearchable(d),
+		SourcePath:       d.SourcePath,
+		Searchable:       buildAgentSearchable(d),
 	}
 }
 
-func buildAgentSearchable(d *cc.AgentDef) string {
+func buildAgentSearchable(d *ccagentdef.AgentDef) string {
 	var parts []string
 	parts = append(parts, d.Name, d.Description, d.Command)
 	parts = append(parts, d.Triggers.Keywords...)
