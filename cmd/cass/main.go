@@ -831,6 +831,7 @@ func runWeb(ctx context.Context, svc *service.Service, args []string, logger *sl
 	addr := fs.String("addr", ":8080", "listen address")
 	dev := fs.Bool("dev", false, "serve static files from disk (for development)")
 	verbose := fs.Bool("v", false, "log requests with timing info")
+	pprofFlag := fs.Bool("pprof", false, "expose net/http/pprof under /debug/pprof/")
 	fs.Parse(args)
 
 	// When verbose, lower the log level so request logs are visible.
@@ -843,6 +844,7 @@ func runWeb(ctx context.Context, svc *service.Service, args []string, logger *sl
 		Addr:    *addr,
 		DevMode: *dev,
 		Verbose: *verbose,
+		Pprof:   *pprofFlag,
 		Logger:  logger,
 	})
 

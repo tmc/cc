@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -26,6 +27,7 @@ type Config struct {
 	DevMode      bool   // Serve static files from disk for development.
 	DevStaticDir string // Override dev static directory path.
 	Verbose      bool   // Log requests with timing info.
+	Pprof        bool   // Expose net/http/pprof handlers under /debug/pprof/.
 	Logger       *slog.Logger
 }
 
@@ -37,6 +39,7 @@ type Server struct {
 	dev     bool
 	devDir  string
 	verbose bool
+	pprof   bool
 	log     *slog.Logger
 	srv     *http.Server
 }
@@ -56,6 +59,7 @@ func New(cfg Config) *Server {
 		dev:     cfg.DevMode,
 		devDir:  cfg.DevStaticDir,
 		verbose: cfg.Verbose,
+		pprof:   cfg.Pprof,
 		log:     cfg.Logger,
 	}
 }
@@ -89,6 +93,16 @@ func (s *Server) Handler() http.Handler {
 
 	// SSE endpoint.
 	mux.HandleFunc("GET /events", s.broker.ServeHTTP)
+
+	// Profiling endpoints, opt-in via -pprof. Registered on our own mux (not
+	// the net/http/pprof init() hook on DefaultServeMux, which we never serve).
+	if s.pprof {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
 
 	// Static files.
 	mux.HandleFunc("/", s.serveStatic)
