@@ -95,14 +95,31 @@ function normalizeDetailTab(tab) {
   return tab === 'agents' || tab === 'requests' ? tab : 'conversation';
 }
 
+// claudeResumeID extracts the Claude session UUID a `claude --resume <id>`
+// needs from a session's source_path. The cass session_id is a sha256 of the
+// path, not resumable; the real id is the JSONL filename
+// (~/.claude/projects/<encoded>/<uuid>.jsonl). Returns '' for a subagent or
+// workflow-agent transcript (agent-*.jsonl), which is not independently
+// resumable.
+function claudeResumeID(hit) {
+  const p = hit && hit.source_path;
+  if (!p || !p.endsWith('.jsonl')) return '';
+  const base = p.slice(p.lastIndexOf('/') + 1, -'.jsonl'.length);
+  if (base.startsWith('agent-')) return ''; // subagent/workflow-agent file.
+  return base;
+}
+
 function resumeCommand(hit) {
   if (!hit || !hit.agent) return '';
   const prefix = hit.workspace ? 'cd ' + shellQuote(hit.workspace) + ' && ' : '';
   if (hit.agent === 'codex-cli' || hit.agent === 'codex-app') {
     return prefix + 'codex resume ' + hit.session_id;
   }
+  // gemini --resume takes a session index or "latest", not a UUID, so resume
+  // interactively rather than guess an id.
   if (hit.agent === 'gemini-cli') return prefix + 'gemini --resume';
-  return prefix + 'claude --resume';
+  const id = claudeResumeID(hit);
+  return prefix + 'claude --resume' + (id ? ' ' + id : '');
 }
 
 async function copyText(text) {
