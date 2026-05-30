@@ -32,6 +32,26 @@ function setDbBusy(busy) {
 // fetch instead of stacking. GET params are already encoded in path via qs().
 const inflightGets = new Map();
 
+const refreshMinInterval = 2500;
+let refreshLast = 0;
+let refreshTimer = null;
+
+function dispatchRefresh() {
+  refreshLast = Date.now();
+  refreshTimer = null;
+  window.dispatchEvent(new CustomEvent('cass:refresh'));
+}
+
+function scheduleAppRefresh(delay = 300) {
+  const now = Date.now();
+  const next = Math.max(refreshLast + refreshMinInterval, now + delay);
+  const wait = Math.max(0, next - now);
+  if (refreshTimer !== null) {
+    clearTimeout(refreshTimer);
+  }
+  refreshTimer = setTimeout(dispatchRefresh, wait);
+}
+
 async function fetchJSON(path, opts) {
   const maxRetries = 3;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -666,22 +686,21 @@ function App() {
     // Collapse a burst of file-change events into one refresh: every panel
     // listens for cass:refresh, so an undebounced dispatch fans a single
     // server event out into ~6 fetches and a burst stacks them.
-    let refreshTimer = null;
-    const scheduleRefresh = () => {
-      clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => window.dispatchEvent(new CustomEvent('cass:refresh')), 300);
-    };
-    es.addEventListener('session_change', scheduleRefresh);
+    es.addEventListener('session_change', () => scheduleAppRefresh());
     es.addEventListener('index_complete', (e) => {
       const data = JSON.parse(e.data);
       showToast('Indexed ' + data.indexed + ' sessions');
-      scheduleRefresh();
+      scheduleAppRefresh();
     });
     // Team messages are direct human input, not file-change amplification.
     es.addEventListener('team_message', (e) => {
       window.dispatchEvent(new CustomEvent('cass:team_message', { detail: JSON.parse(e.data) }));
     });
-    return () => { clearTimeout(refreshTimer); es.close(); };
+    return () => {
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
+      refreshTimer = null;
+      es.close();
+    };
   }, []);
 
   function showToast(msg) {
