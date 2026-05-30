@@ -2157,7 +2157,26 @@ mark.search-hl {
 .wf-agent-name { color: var(--cyan); }
 .wf-agent-stats { font-size: 11px; color: var(--dim); margin-left: auto; }
 .wf-agent-transcript { margin: 4px 0 8px 18px; border-left: 2px solid var(--border); padding-left: 10px; }
+.wf-agent-loading, .wf-agent-empty {
+  margin: 6px 0 8px 28px;
+  padding: 6px 8px;
+  color: var(--dim);
+  font-size: 11px;
+  text-align: left;
+}
+.wf-agent-error { margin: 6px 0 8px 28px; }
 .wf-agent-msg { margin: 6px 0; font-size: 12px; }
 .wf-agent-role { display: inline-block; font-size: 10px; text-transform: uppercase; color: var(--dim); margin-right: 6px; }
 .wf-agent-role.user { color: var(--cyan); }
 .wf-agent-role.assistant { color: var(--magenta); }
+.wf-agent-more {
+  margin: 6px 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--cyan);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.wf-agent-more:hover { background: var(--hover); }

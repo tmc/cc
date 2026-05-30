@@ -31,6 +31,7 @@ function setDbBusy(busy) {
 // the header and stats panel both refreshing 'stats?aggregate=true') share one
 // fetch instead of stacking. GET params are already encoded in path via qs().
 const inflightGets = new Map();
+const workflowAgentCache = new Map();
 
 const refreshMinInterval = 2500;
 let refreshLast = 0;
@@ -1474,40 +1475,66 @@ function AgentsTab({ agentData }) {
 function WorkflowAgentTranscript({ sourcePath }) {
   const [entries, setEntries] = useState(null);
   const [error, setError] = useState(null);
+  const [visibleCount, setVisibleCount] = useState(40);
 
   useEffect(() => {
     let cancelled = false;
+    setVisibleCount(40);
     setEntries(null);
     setError(null);
-    fetch('api/workflow-agent?source_path=' + encodeURIComponent(sourcePath))
-      .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t || r.status))))
+    const cached = workflowAgentCache.get(sourcePath);
+    if (cached) {
+      setEntries(cached);
+      return () => { cancelled = true; };
+    }
+    api('workflow-agent?source_path=' + encodeURIComponent(sourcePath))
       .then(data => { if (!cancelled) setEntries(data || []); })
-      .catch(e => { if (!cancelled) setError(String(e)); });
+      .catch(e => { if (!cancelled) setError(errorMessage(e, 'workflow agent unavailable')); });
     return () => { cancelled = true; };
   }, [sourcePath]);
 
-  if (error) return html`<div class="detail-error" style="margin:6px 0">${error}</div>`;
-  if (entries === null) return html`<div class="loading" style="margin:6px 0">loading transcript...</div>`;
-  if (entries.length === 0) return html`<div class="empty" style="margin:6px 0">empty transcript</div>`;
+  useEffect(() => {
+    if (entries !== null) workflowAgentCache.set(sourcePath, entries);
+  }, [sourcePath, entries]);
+
+  if (error) return html`<div class="detail-error wf-agent-error">${error}</div>`;
+  if (entries === null) return html`<div class="wf-agent-loading">loading transcript...</div>`;
+  if (entries.length === 0) return html`<div class="wf-agent-empty">empty transcript</div>`;
+
+  const messageEntries = entries.filter(e => {
+    const msg = e.message;
+    if (!msg) return false;
+    const text = typeof msg.content === 'string'
+      ? msg.content
+      : (Array.isArray(msg.content)
+          ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n')
+          : '');
+    return !!text;
+  });
+  if (messageEntries.length === 0) return html`<div class="wf-agent-empty">empty transcript</div>`;
+  const newestFirst = messageEntries.slice().reverse();
+  const visible = newestFirst.slice(0, visibleCount);
+  const hidden = newestFirst.length - visible.length;
 
   return html`
     <div class="wf-agent-transcript">
-      ${entries.map((e, i) => {
+      ${visible.map((e, i) => {
         const msg = e.message;
-        if (!msg) return null;
         const text = typeof msg.content === 'string'
           ? msg.content
-          : (Array.isArray(msg.content)
-              ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n')
-              : '');
-        if (!text) return null;
+          : msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
         return html`
           <div class="wf-agent-msg" key=${i}>
             <span class="wf-agent-role ${msg.role}">${msg.role}</span>
-            ${renderAnsiContent(text, 1200, '')}
+            <${AnsiContent} text=${text} maxLen=${1200} cls=${''} searchQuery=${''} />
           </div>
         `;
       })}
+      ${hidden > 0 && html`
+        <button class="wf-agent-more" onClick=${() => setVisibleCount(n => n + 40)}>
+          load ${Math.min(40, hidden)} earlier message${Math.min(40, hidden) === 1 ? '' : 's'}
+        </button>
+      `}
     </div>
   `;
 }
@@ -1582,6 +1609,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     : 0;
   const resumeCmd = resumeCommand(hit);
   const activeTab = activeTabRaw;
+  const needsSessionEntries = activeTab === 'conversation' || activeTab === 'agents';
 
   function setActiveTab(tab) {
     const normalized = normalizeDetailTab(tab);
@@ -1600,6 +1628,14 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       setActiveTabRaw('conversation'); setApiRequests([]); setDetailError('');
       return;
     }
+    if (!needsSessionEntries) {
+      setLoading(false);
+      setStreaming(false);
+      setEntries([]);
+      setEntryCount(0);
+      setDetailError(hit.meta_error || '');
+      return;
+    }
     setLoading(true);
     setStreaming(true);
     setEntries([]);
@@ -1607,7 +1643,6 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     setDetailError(hit.meta_error || '');
     setExpanded({});
     setDetailSearch(initialFilter || '');
-    setActiveTabRaw(normalizeDetailTab(initialTab));
     if (hit.meta_error) {
       setLoading(false);
       setStreaming(false);
@@ -1677,7 +1712,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     });
 
     return () => controller.abort();
-  }, [hit?.session_id]);
+  }, [hit?.session_id, needsSessionEntries]);
 
   // Apply initialFilter from tool click on search hit.
   useEffect(() => {
