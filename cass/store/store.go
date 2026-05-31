@@ -215,6 +215,28 @@ func (s *DB) migrate() error {
 
 		CREATE INDEX IF NOT EXISTS idx_team_lead_session ON team_configs(lead_session_id);
 
+		CREATE TABLE IF NOT EXISTS team_members (
+			team_name TEXT NOT NULL,
+			ordinal INTEGER NOT NULL DEFAULT 0,
+			agent_id TEXT NOT NULL DEFAULT '',
+			name TEXT NOT NULL DEFAULT '',
+			agent_type TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			color TEXT NOT NULL DEFAULT '',
+			prompt TEXT NOT NULL DEFAULT '',
+			backend_type TEXT NOT NULL DEFAULT '',
+			is_active INTEGER NOT NULL DEFAULT 0,
+			joined_at INTEGER NOT NULL DEFAULT 0,
+			tmux_pane_id TEXT NOT NULL DEFAULT '',
+			cwd TEXT NOT NULL DEFAULT '',
+			subscriptions_json TEXT NOT NULL DEFAULT '[]',
+			indexed_at INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (team_name, ordinal)
+		);
+		CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_name);
+		CREATE INDEX IF NOT EXISTS idx_team_members_agent ON team_members(agent_id);
+		CREATE INDEX IF NOT EXISTS idx_team_members_type ON team_members(agent_type);
+
 		CREATE TABLE IF NOT EXISTS api_requests (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL DEFAULT '',
@@ -2263,24 +2285,101 @@ func (s *DB) DailyTokenUsage(ctx context.Context, after time.Time) ([]DailyToken
 
 // TeamConfig holds the parsed config.json for a Claude Code agent team.
 type TeamConfig struct {
-	Name          string `json:"name"`
-	LeadSessionID string `json:"lead_session_id"` // authoritative FK to Claude session UUID.
-	LeadAgentID   string `json:"lead_agent_id"`
-	Description   string `json:"description"`
-	CreatedAt     int64  `json:"created_at"`
-	MembersJSON   string `json:"members_json"` // raw JSON array of member objects.
+	Name          string       `json:"name"`
+	LeadSessionID string       `json:"lead_session_id"` // authoritative FK to Claude session UUID.
+	LeadAgentID   string       `json:"lead_agent_id"`
+	Description   string       `json:"description"`
+	CreatedAt     int64        `json:"created_at"`
+	MembersJSON   string       `json:"members_json"` // raw JSON array of member objects.
+	Members       []TeamMember `json:"members,omitempty"`
+}
+
+// TeamMember is one normalized member row from a team config.
+type TeamMember struct {
+	TeamName          string `json:"team_name"`
+	Ordinal           int    `json:"ordinal"`
+	AgentID           string `json:"agent_id"`
+	Name              string `json:"name"`
+	AgentType         string `json:"agent_type"`
+	Model             string `json:"model,omitempty"`
+	Color             string `json:"color,omitempty"`
+	Prompt            string `json:"prompt,omitempty"`
+	BackendType       string `json:"backend_type,omitempty"`
+	IsActive          bool   `json:"is_active,omitempty"`
+	JoinedAt          int64  `json:"joined_at,omitempty"`
+	TmuxPaneID        string `json:"tmux_pane_id,omitempty"`
+	CWD               string `json:"cwd,omitempty"`
+	SubscriptionsJSON string `json:"subscriptions_json,omitempty"`
 }
 
 // SaveTeamConfig upserts a team config record.
 func (s *DB) SaveTeamConfig(ctx context.Context, tc TeamConfig) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin team config: %w", err)
+	}
+	defer tx.Rollback()
+
+	members := tc.Members
+	if tc.MembersJSON == "" {
+		tc.MembersJSON = "[]"
+		if len(members) > 0 {
+			if b, err := json.Marshal(members); err == nil {
+				tc.MembersJSON = string(b)
+			}
+		}
+	}
+	if len(members) == 0 && tc.MembersJSON != "" && tc.MembersJSON != "[]" {
+		_ = json.Unmarshal([]byte(tc.MembersJSON), &members)
+	}
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT OR REPLACE INTO team_configs
 			(name, lead_session_id, lead_agent_id, description, created_at, members_json, indexed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		tc.Name, tc.LeadSessionID, tc.LeadAgentID, tc.Description, tc.CreatedAt,
 		tc.MembersJSON, time.Now().Unix(),
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("save team config %s: %w", tc.Name, err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM team_members WHERE team_name = ?`, tc.Name); err != nil {
+		return fmt.Errorf("clear team members %s: %w", tc.Name, err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO team_members (
+			team_name, ordinal, agent_id, name, agent_type, model, color,
+			prompt, backend_type, is_active, joined_at, tmux_pane_id,
+			cwd, subscriptions_json, indexed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare team members: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().Unix()
+	for i, m := range members {
+		if m.TeamName == "" {
+			m.TeamName = tc.Name
+		}
+		if m.Ordinal == 0 {
+			m.Ordinal = i
+		}
+		active := 0
+		if m.IsActive {
+			active = 1
+		}
+		if _, err := stmt.ExecContext(ctx,
+			m.TeamName, m.Ordinal, m.AgentID, m.Name, m.AgentType, m.Model, m.Color,
+			m.Prompt, m.BackendType, active, m.JoinedAt, m.TmuxPaneID,
+			m.CWD, firstNonEmptyStr(m.SubscriptionsJSON, "[]"), now,
+		); err != nil {
+			return fmt.Errorf("insert team member %s/%s: %w", tc.Name, m.AgentID, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // TeamConfigs returns all indexed team configurations.
@@ -2301,6 +2400,43 @@ func (s *DB) TeamConfigs(ctx context.Context) ([]TeamConfig, error) {
 		result = append(result, tc)
 	}
 	return result, rows.Err()
+}
+
+// TeamMembers returns normalized team member rows. If teamName is empty, it
+// returns members for every indexed team.
+func (s *DB) TeamMembers(ctx context.Context, teamName string) ([]TeamMember, error) {
+	where := ""
+	var args []any
+	if teamName != "" {
+		where = "WHERE team_name = ?"
+		args = append(args, teamName)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT team_name, ordinal, agent_id, name, agent_type, model, color,
+			prompt, backend_type, is_active, joined_at, tmux_pane_id,
+			cwd, subscriptions_json
+		FROM team_members `+where+`
+		ORDER BY team_name, ordinal`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("team members: %w", err)
+	}
+	defer rows.Close()
+
+	var out []TeamMember
+	for rows.Next() {
+		var m TeamMember
+		var active int
+		if err := rows.Scan(
+			&m.TeamName, &m.Ordinal, &m.AgentID, &m.Name, &m.AgentType,
+			&m.Model, &m.Color, &m.Prompt, &m.BackendType, &active,
+			&m.JoinedAt, &m.TmuxPaneID, &m.CWD, &m.SubscriptionsJSON,
+		); err != nil {
+			return nil, fmt.Errorf("scan team member: %w", err)
+		}
+		m.IsActive = active != 0
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }
 
 // buildContent concatenates all message content for full-text indexing.

@@ -625,6 +625,12 @@ func (s *Service) TeamConfigs(ctx context.Context) ([]store.TeamConfig, error) {
 	return s.store.TeamConfigs(ctx)
 }
 
+// TeamMembers returns normalized members for an indexed team. If teamName is
+// empty, it returns members for every indexed team.
+func (s *Service) TeamMembers(ctx context.Context, teamName string) ([]store.TeamMember, error) {
+	return s.store.TeamMembers(ctx, teamName)
+}
+
 // SubagentRuns lists Task subagent invocations matching the given filter.
 func (s *Service) SubagentRuns(ctx context.Context, f store.SubagentRunFilter) ([]store.SubagentRunListEntry, error) {
 	return s.store.SubagentRuns(ctx, f)

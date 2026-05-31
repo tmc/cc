@@ -20,6 +20,21 @@ type teamConfigJSON struct {
 	Members       []json.RawMessage `json:"members"`
 }
 
+type teamMemberJSON struct {
+	AgentID       string   `json:"agentId"`
+	Name          string   `json:"name"`
+	AgentType     string   `json:"agentType"`
+	Model         string   `json:"model"`
+	Color         string   `json:"color"`
+	Prompt        string   `json:"prompt"`
+	BackendType   string   `json:"backendType"`
+	IsActive      bool     `json:"isActive"`
+	JoinedAt      int64    `json:"joinedAt"`
+	TmuxPaneID    string   `json:"tmuxPaneId"`
+	CWD           string   `json:"cwd"`
+	Subscriptions []string `json:"subscriptions"`
+}
+
 // ScanTeamConfigs reads all ~/.claude/teams/*/config.json and ~/.gemini/teams/*/config.json files and returns
 // parsed TeamConfig records. Pass an empty root to use the default location.
 func ScanTeamConfigs(root string) ([]store.TeamConfig, error) {
@@ -75,12 +90,42 @@ func parseTeamConfig(path string) (store.TeamConfig, error) {
 		return store.TeamConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 
-	// Re-encode members array as compact JSON for storage.
+	// Re-encode members array as compact JSON for storage and also normalize
+	// each known field into queryable team_members rows.
 	membersJSON := "[]"
 	if len(raw.Members) > 0 {
 		if b, err := json.Marshal(raw.Members); err == nil {
 			membersJSON = string(b)
 		}
+	}
+	members := make([]store.TeamMember, 0, len(raw.Members))
+	for i, rawMember := range raw.Members {
+		var m teamMemberJSON
+		if err := json.Unmarshal(rawMember, &m); err != nil {
+			continue
+		}
+		subscriptions := "[]"
+		if len(m.Subscriptions) > 0 {
+			if b, err := json.Marshal(m.Subscriptions); err == nil {
+				subscriptions = string(b)
+			}
+		}
+		members = append(members, store.TeamMember{
+			TeamName:          raw.Name,
+			Ordinal:           i,
+			AgentID:           m.AgentID,
+			Name:              m.Name,
+			AgentType:         m.AgentType,
+			Model:             m.Model,
+			Color:             m.Color,
+			Prompt:            m.Prompt,
+			BackendType:       m.BackendType,
+			IsActive:          m.IsActive,
+			JoinedAt:          m.JoinedAt / 1000,
+			TmuxPaneID:        m.TmuxPaneID,
+			CWD:               m.CWD,
+			SubscriptionsJSON: subscriptions,
+		})
 	}
 
 	return store.TeamConfig{
@@ -90,5 +135,6 @@ func parseTeamConfig(path string) (store.TeamConfig, error) {
 		Description:   raw.Description,
 		CreatedAt:     raw.CreatedAt / 1000, // ms → unix seconds
 		MembersJSON:   membersJSON,
+		Members:       members,
 	}, nil
 }

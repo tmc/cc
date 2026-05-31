@@ -708,8 +708,10 @@ token accounting.
 
 ### Medium
 
-**Team config not fully indexed**: ~/.claude/teams/ is scanned but
-member models, prompts, and tmux pane IDs are only stored as JSON blob.
+**Team config prompt privacy**: ~/.claude/teams/ member models, prompts,
+tmux pane IDs, cwd, and subscriptions are indexed into `team_members`
+for queryability. UI surfaces should still avoid showing full prompts by
+default because they may be long or sensitive.
 
 **Team member mapping is heuristic outside team configs**: native team
 members have authoritative roster records, but ad hoc subagent
