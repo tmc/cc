@@ -26,6 +26,13 @@ type Entry struct {
 	Slug        string   `json:"slug,omitempty"`
 	Message     *Message `json:"message,omitempty"`
 
+	// Less-common JSONL fields preserved for callers that need request and
+	// entry-linkage details beyond the normalized Message.
+	ThinkingMetadata        json.RawMessage `json:"thinkingMetadata,omitempty"`
+	Todos                   json.RawMessage `json:"todos,omitempty"`
+	RequestID               string          `json:"requestId,omitempty"`
+	SourceToolAssistantUUID string          `json:"sourceToolAssistantUUID,omitempty"`
+
 	// Custom title set via /rename command.
 	CustomTitle string `json:"customTitle,omitempty"`
 

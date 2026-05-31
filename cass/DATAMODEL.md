@@ -86,7 +86,8 @@ Entry types (Entry.Type):
     "queue-operation"   subagent lifecycle events (enqueue, popAll)
     "file-history-snapshot"  file state before each turn
 
-Key fields not yet in the Go struct (present in JSONL):
+Less-common fields preserved by `cc.Entry` for callers that need raw
+request, todo, and entry-linkage details:
 
     thinkingMetadata    extended thinking metadata
     todos               task list state (usually [])
