@@ -4115,6 +4115,11 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       if (n.journal_event_count) parts.push(n.journal_event_count + ' events');
       return parts.join(' · ');
     }
+    if (n.node_type === 'session' && (n.workflow_names || []).length > 0) {
+      const names = n.workflow_names.slice(0, 2);
+      const extra = n.workflow_names.length - names.length;
+      return names.join(' · ') + (extra > 0 ? ' · +' + extra : '');
+    }
     if (n.node_type === 'workflow_agent') return workflowGraphAgentInfo(n);
     if (n.node_type === 'subagent') return n.status || 'subagent';
     const parts = [];
@@ -4146,6 +4151,13 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       return Math.max(104, Math.min(220, textLen * 6.5 + 24));
     }
     if (n && n.node_type === 'subagent') return Math.max(80, label.length * 6.5 + 16);
+    if (n && n.node_type === 'session' && (n.workflow_names || []).length > 0) {
+      const info = nodeInfo(id);
+      const textLen = Math.max(label.length, info.length);
+      const base = Math.max(90, Math.min(240, textLen * 6.2 + 18));
+      const links = nodeLinkCount[id] || 0;
+      return base + Math.min(links * 3, 24);
+    }
     const min = n && n.node_type === 'workflow' ? 150 : 70;
     const base = Math.max(min, label.length * 6.5 + 16);
     const links = nodeLinkCount[id] || 0;
