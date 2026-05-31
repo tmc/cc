@@ -832,7 +832,7 @@ function ToolMicroBar({ breakdown, position, onToolClick }) {
             <span class="tool-bar-flyout-swatch" style="background:${TOOL_COLORS[name]||'var(--faint)'}"></span>
             <span class="tool-bar-flyout-name">
               <span>${name}</span>
-              <small>${TOOL_DESCRIPTIONS[name] || 'tool calls'}</small>
+              <small>${TOOL_DESCRIPTIONS[name] || 'Tool calls'}</small>
             </span>
             <span class="tool-bar-flyout-count">${count}</span>
             <span class="tool-bar-flyout-pct">${pct(count)}</span>
@@ -3207,7 +3207,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
     const parts = [
       hit.goal_count > 0 ? hit.goal_count + ' goal' + (hit.goal_count === 1 ? '' : 's') : '',
       detailSkillCount > 0 ? detailSkillCount + ' used skill' + (detailSkillCount === 1 ? '' : 's') : '',
-      detailToolTotal > 0 ? detailToolTotal + ' tool calls' : '',
+      detailToolTotal > 0 ? detailToolTotal + ' Tool calls' : '',
     ].filter(Boolean).join(' / ');
     return html`
       <details class="detail-context-panel">
@@ -5341,14 +5341,14 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
       </div>
 
       <div class="stats-grid">
-        ${card('sessions', fmtNum(agg.sessions), agg.agents + (agg.agents === 1 ? ' agent' : ' agents') + ', ' + agg.workspaces + (agg.workspaces === 1 ? ' workspace' : ' workspaces'))}
-        ${card('tool calls', fmtNum(agg.tool_calls))}
+        ${card('sessions', fmtNum(agg.sessions), agg.agents + (agg.agents === 1 ? ' Agent' : ' Agents') + ', ' + agg.workspaces + (agg.workspaces === 1 ? ' Workspace' : ' Workspaces'))}
+        ${card('Tool calls', fmtNum(agg.tool_calls))}
         ${card('total tokens', fmtNum(agg.total_tokens), fmtNum(agg.input_tokens) + ' in / ' + fmtNum(agg.output_tokens) + ' out')}
         ${card('turns', fmtNum(agg.turns))}
         ${card('files', fmtNum(agg.files_read + agg.files_written + agg.files_edited), fmtNum(agg.files_read) + ' read · ' + fmtNum(agg.files_edited) + ' edited · ' + fmtNum(agg.files_written) + ' written')}
         ${card('lines written', fmtNum(agg.lines_written))}
         ${card('total time', fmtDuration(agg.duration_secs))}
-        ${card('child agent spawn events', fmtNum(agg.subagent_spawns))}
+        ${card('Child agent spawn events', fmtNum(agg.subagent_spawns))}
         ${card('Workflow runs', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' Agents · ' + (agg.workflow_task_ops || 0) + ' Task operations')}
         ${card('goals', fmtNum(agg.goals || 0), (agg.active_goals || 0) + ' Active · ' + (agg.completed_goals || 0) + ' Complete')}
         ${card('skill usage', fmtNum((agg.selected_skills || 0) + (agg.loaded_skills || 0)),
@@ -5360,13 +5360,13 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('iTerm2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
           agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
         ${card('team operations', fmtNum(agg.team_inbox_reads + agg.team_inbox_sends + agg.team_task_ops + agg.team_spawns),
-          agg.team_inbox_reads + ' reads · ' + agg.team_inbox_sends + ' messages · ' + agg.team_task_ops + ' task operations · ' + agg.team_spawns + ' spawn events')}
+          agg.team_inbox_reads + ' Reads · ' + agg.team_inbox_sends + ' Messages · ' + agg.team_task_ops + ' Task operations · ' + agg.team_spawns + ' Spawn events')}
         ${card('last indexed', lastIdx)}
       </div>
 
       ${days.length > 0 && html`
         <div class="chart-section">
-          <div class="stat-label" style="margin-bottom:8px">sessions per day (30d)</div>
+          <div class="stat-label" style="margin-bottom:8px">Sessions per day (30d)</div>
           <svg viewBox="0 0 ${Math.max(days.length * 16, 100)} 80" preserveAspectRatio="none" style="height:60px">
             ${dayVals.map((v, i) => {
               const barH = Math.max(1, (v / maxDay) * 60);
