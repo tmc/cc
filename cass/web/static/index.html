@@ -4839,10 +4839,10 @@ function InboxViewer({ teamName, inboxes, members }) {
         ${messages.map(renderMessage)}
       </div>
       <div class="inbox-compose">
-        <input placeholder="send message to ${selectedAgent}..." value=${msgText}
+        <input placeholder="Send message to ${selectedAgent}..." value=${msgText}
           onInput=${e => setMsgText(e.target.value)}
           onKeyDown=${e => { if (e.key === 'Enter') send(); }} />
-        <button onClick=${send} disabled=${sending}>${sending ? '...' : 'Send'}</button>
+        <button onClick=${send} disabled=${sending}>${sending ? 'Sending...' : 'Send'}</button>
       </div>
     </div>
   `;
@@ -5335,9 +5335,9 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
           `)}
         </div>
         <button class="btn btn-sm" onClick=${() => reindex(false)} disabled=${indexing}>
-          ${indexing ? 'indexing...' : 're-index'}
+          ${indexing ? 'Indexing...' : 'Re-index'}
         </button>
-        <button class="btn btn-sm" onClick=${() => reindex(true)} disabled=${indexing}>full</button>
+        <button class="btn btn-sm" onClick=${() => reindex(true)} disabled=${indexing}>Full re-index</button>
       </div>
 
       <div class="stats-grid">
