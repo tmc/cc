@@ -2911,7 +2911,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
     if (apiRequests.length === 0) return html`
       <div class="empty" style="margin-top:20px;">
         No API requests found. <br/><br/>
-        Index HAR exports with <code>cass index --har-dir &lt;dir&gt;</code> or
+        Index API request exports with <code>cass index --har-dir &lt;dir&gt;</code> or
         Proxyman session archives with <code>cass index --session-dir &lt;path&gt;</code>.
       </div>
     `;

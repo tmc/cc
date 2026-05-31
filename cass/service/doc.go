@@ -3,7 +3,7 @@
 // A Service wraps a SQLite-backed [store.Store] and a set of
 // [cass.Collector] implementations. It exposes higher-level operations
 // (Detect, Index, Search, Stats, Links, Graph, ...) plus targeted
-// ingestion of HAR exports, Proxyman SessionV2 captures, team configs,
+// ingestion of API request exports, Proxyman SessionV2 captures, team configs,
 // jobs, and agent definitions.
 //
 // # Configuration
