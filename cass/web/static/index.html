@@ -2008,8 +2008,8 @@ function AgentsTab({ agentData, workflows }) {
         `}
       </div>
       <div class="agents-view-toggle">
-        <button class=${viewMode === 'tree' ? 'active' : ''} onClick=${() => setViewMode('tree')}>tree</button>
-        <button class=${viewMode === 'table' ? 'active' : ''} onClick=${() => setViewMode('table')}>table</button>
+        <button class=${viewMode === 'tree' ? 'active' : ''} onClick=${() => setViewMode('tree')}>Tree</button>
+        <button class=${viewMode === 'table' ? 'active' : ''} onClick=${() => setViewMode('table')}>Table</button>
       </div>
       ${viewMode === 'tree' ? renderTree() : renderTable()}
       ${renderTimeline()}
@@ -4259,16 +4259,16 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
               onClick=${() => setSince(t.value)}>${t.label}</button>
           `)}
         </div>
-        <button class="btn btn-sm" onClick=${load}>refresh</button>
+        <button class="btn btn-sm" onClick=${load}>Refresh</button>
       </div>
       <div class="filters" style="margin-bottom:4px">
-        <span style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">layout</span>
+        <span style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">Layout</span>
         <div class="filter-chips">
           ${[
-            { v: 'workflow', label: 'workflow' },
-            { v: 'sessions', label: 'sessions' },
-            { v: 'teams', label: 'teams' },
-            { v: 'network', label: 'network' },
+            { v: 'workflow', label: 'Workflow' },
+            { v: 'sessions', label: 'Sessions' },
+            { v: 'teams', label: 'Teams' },
+            { v: 'network', label: 'Network' },
           ].map(m => html`
             <button class="filter-chip ${effectiveMode === m.v ? 'active' : ''}"
               onClick=${() => selectMode(m.v)}
@@ -4283,15 +4283,15 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
               const next = {};
               if (anyCollapsed) allWf.forEach(x => { next[x.full_id || x.id] = true; });
               setExpandedWorkflows(next);
-            }}>expand/collapse all</button>
+            }}>Expand/Collapse all</button>
         `}
       </div>
       ${workspaces.length > 1 && html`
         <div class="filters" style="margin-bottom:4px">
-          <span style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">workspace</span>
+          <span style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:0.05em">Workspace</span>
           <div class="filter-chips">
             <button class="filter-chip ${wsFilter === '' ? 'active' : ''}"
-              onClick=${() => setWsFilter('')}>all</button>
+              onClick=${() => setWsFilter('')}>All</button>
             ${workspaces.map(ws => html`
               <button class="filter-chip ${wsFilter === ws ? 'active' : ''}"
                 onClick=${() => setWsFilter(wsFilter === ws ? '' : ws)}
