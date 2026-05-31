@@ -41,7 +41,10 @@ var subcommands = map[string]subcommandSpec{
 	"approve":  {binary: "ccapprove"},
 	"handoff":  {binary: "cchandoff"},
 	"memory":   {binary: "ccmemory"},
+	"goals":    {binary: "cass", args: []string{"goals"}},
+	"skills":   {binary: "cass", args: []string{"skills"}},
 	"requests": {binary: "cass", args: []string{"requests"}},
+	"web":      {binary: "cass", args: []string{"web"}},
 
 	// Short aliases
 	"m":  {binary: "cmsg"},
@@ -168,8 +171,11 @@ Commands:
   agent, ag    Inspect agent status
   approve, ap  Handle approval workflows
   handoff, ho  Build cross-tool session handoff prompt
-  memory, mm   List and read auto-memory files
+	memory, mm   List and read auto-memory files
+  goals        Show goal-mode objectives indexed by cass
+  skills       Show skill usage indexed by cass
   requests     Show indexed API request breakdown
+  web          Show the cass web UI
   help         Show help for a command
   version      Show version information
 

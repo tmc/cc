@@ -35,7 +35,10 @@
 //	approve, ap  → ccapprove   Handle approval workflows.
 //	handoff, ho  → cchandoff   Build cross-tool handoff prompts.
 //	memory,  mm  → ccmemory    List and read auto-memory files.
+//	goals        → cass goals   Show goal-mode objectives indexed by cass.
+//	skills       → cass skills  Show skill usage indexed by cass.
 //	requests     → cass requests Show indexed API request breakdown.
+//	web          → cass web     Start the cass web UI server.
 //
 //	help [cmd]   Show usage for cctl or a subcommand.
 //	version      Show cctl version and resolved subcommand paths.

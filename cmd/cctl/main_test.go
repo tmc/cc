@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestSubcommandsIncludeCassAndRequests(t *testing.T) {
+func TestSubcommandsIncludeCassAndCassAliases(t *testing.T) {
 	cassSpec, ok := resolveSubcommand("cass")
 	if !ok {
 		t.Fatal("missing cass subcommand")
@@ -28,6 +28,26 @@ func TestSubcommandsIncludeCassAndRequests(t *testing.T) {
 	}
 	if len(reqSpec.args) != 1 || reqSpec.args[0] != "requests" {
 		t.Fatalf("requests args = %#v, want [requests]", reqSpec.args)
+	}
+
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{name: "goals", want: "goals"},
+		{name: "skills", want: "skills"},
+		{name: "web", want: "web"},
+	} {
+		spec, ok := resolveSubcommand(tc.name)
+		if !ok {
+			t.Fatalf("missing %s subcommand", tc.name)
+		}
+		if spec.binary != "cass" {
+			t.Fatalf("%s binary = %q, want cass", tc.name, spec.binary)
+		}
+		if len(spec.args) != 1 || spec.args[0] != tc.want {
+			t.Fatalf("%s args = %#v, want [%s]", tc.name, spec.args, tc.want)
+		}
 	}
 }
 
@@ -93,6 +113,34 @@ func TestRunHelpDispatchesCassRequests(t *testing.T) {
 	}
 }
 
+func TestRunHelpDispatchesCassWeb(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper script is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "cass")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TMPDIR/cctl-help-web-args.txt\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath)
+	t.Setenv("TMPDIR", dir)
+
+	if code := runHelp([]string{"web"}); code != 0 {
+		t.Fatalf("runHelp exit code = %d, want 0", code)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "cctl-help-web-args.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := strings.TrimSpace(string(got)); text != "web\n--help" && text != "web --help" {
+		t.Fatalf("help dispatch args = %q, want web and --help", text)
+	}
+}
+
 func TestPrintVersionListsSubcommandsSorted(t *testing.T) {
 	oldPath := os.Getenv("PATH")
 	t.Setenv("PATH", t.TempDir()+string(os.PathListSeparator)+oldPath)
@@ -151,6 +199,15 @@ func TestUsageListsRequests(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "requests     Show indexed API request breakdown") {
 		t.Fatalf("usage output missing requests entry:\n%s", got)
+	}
+	for _, want := range []string{
+		"goals        Show goal-mode objectives indexed by cass",
+		"skills       Show skill usage indexed by cass",
+		"web          Show the cass web UI",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("usage output missing %q:\n%s", want, got)
+		}
 	}
 }
 
