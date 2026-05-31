@@ -184,13 +184,13 @@ function resumeCommand(hit) {
   if (!hit || !hit.agent) return '';
   const prefix = hit.workspace ? 'cd ' + shellQuote(hit.workspace) + ' && ' : '';
   if (hit.agent === 'codex-cli' || hit.agent === 'codex-app') {
-    return prefix + 'codex resume ' + hit.session_id;
+    return prefix + 'codex resume' + (hit.session_id ? ' ' + shellQuote(hit.session_id) : '');
   }
   // gemini --resume takes a session index or "latest", not a UUID, so resume
   // interactively rather than guess an id.
   if (hit.agent === 'gemini-cli') return prefix + 'gemini --resume';
   const id = claudeResumeID(hit);
-  return prefix + 'claude --resume' + (id ? ' ' + id : '');
+  return prefix + 'claude --resume' + (id ? ' ' + shellQuote(id) : '');
 }
 
 async function copyText(text) {
