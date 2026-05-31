@@ -558,11 +558,19 @@ func TestGraphWorkflowModes(t *testing.T) {
 			EndedAt:    start.Add(time.Hour),
 			Messages:   []cass.Message{{Role: "user", Content: "run the workflow"}},
 			Workflows: []cass.WorkflowRun{{
-				RunID:      "wf_graph",
-				Name:       "cc-go-team-review",
-				Status:     "completed",
-				AgentCount: 2,
-				StartedAt:  start.Add(time.Minute),
+				RunID:             "wf_graph",
+				TaskID:            "task_graph",
+				Name:              "cc-go-team-review",
+				Description:       "review the branch",
+				Summary:           "independent multi-lens review",
+				ScriptPath:        "/p/scripts/workflows/wf_graph.js",
+				TranscriptDir:     "/p/subagents/workflows/wf_graph",
+				SourcePath:        "/p/workflows/wf_graph.json",
+				Status:            "completed",
+				AgentCount:        2,
+				JournalEventCount: 7,
+				StartedAt:         start.Add(time.Minute),
+				CompletedAt:       start.Add(10 * time.Minute),
 			}},
 		}}}},
 	})
@@ -606,6 +614,22 @@ func TestGraphWorkflowModes(t *testing.T) {
 	if session != 1 || workflow != 1 || agent != 0 {
 		t.Fatalf("collapsed nodes: session=%d workflow=%d agent=%d, want 1/1/0", session, workflow, agent)
 	}
+	var wfNode cass.GraphNode
+	for _, n := range g.Nodes {
+		if n.NodeType == cass.NodeTypeWorkflow {
+			wfNode = n
+			break
+		}
+	}
+	if wfNode.ID != "wf_graph" {
+		t.Fatalf("workflow graph node id = %q, want wf_graph", wfNode.ID)
+	}
+	if wfNode.TaskID != "task_graph" || wfNode.Summary != "independent multi-lens review" ||
+		wfNode.ScriptPath != "/p/scripts/workflows/wf_graph.js" || wfNode.TranscriptDir != "/p/subagents/workflows/wf_graph" ||
+		wfNode.SourcePath != "/p/workflows/wf_graph.json" || wfNode.Status != "completed" || wfNode.AgentCount != 2 ||
+		wfNode.JournalEventCount != 7 || wfNode.StartedAt == 0 || wfNode.CompletedAt == 0 {
+		t.Fatalf("workflow graph node metadata = %+v", wfNode)
+	}
 	var contains int
 	for _, l := range g.Links {
 		if l.EdgeType == cass.EdgeWorkflowContains {
@@ -623,6 +647,9 @@ func TestGraphWorkflowModes(t *testing.T) {
 	for _, n := range g.Nodes {
 		if n.NodeType == cass.NodeTypeWorkflowAgent {
 			agent++
+			if n.WorkflowAgentIndex >= 2 {
+				t.Fatalf("workflow agent index = %d, want < 2", n.WorkflowAgentIndex)
+			}
 		}
 	}
 	for _, l := range g.Links {
