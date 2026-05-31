@@ -523,12 +523,6 @@ func runStats(ctx context.Context, svc *service.Service, jsonOut bool) error {
 		return err
 	}
 
-	// Include HAR request count if any are indexed.
-	reqCount, err := svc.APIRequestCount(ctx)
-	if err == nil && reqCount > 0 {
-		stats["har_request_count"] = reqCount
-	}
-
 	// Include aggregate token stats.
 	agg, err := svc.AggregateStats(ctx, time.Time{}, time.Time{})
 	if err == nil {
@@ -542,7 +536,7 @@ func runStats(ctx context.Context, svc *service.Service, jsonOut bool) error {
 	}
 
 	// Print core counts first.
-	for _, key := range []string{"session_count", "har_request_count", "last_indexed"} {
+	for _, key := range []string{"session_count", "api_request_count", "last_indexed"} {
 		if v, ok := stats[key]; ok {
 			fmt.Printf("%-28s %v\n", key, v)
 		}
@@ -564,7 +558,7 @@ func runStats(ctx context.Context, svc *service.Service, jsonOut bool) error {
 
 	// Print remaining keys.
 	skip := map[string]bool{
-		"session_count": true, "har_request_count": true, "last_indexed": true,
+		"session_count": true, "api_request_count": true, "last_indexed": true,
 		"input_tokens": true, "output_tokens": true,
 		"cache_creation_input_tokens": true, "cache_read_input_tokens": true,
 	}
