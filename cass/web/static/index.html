@@ -3480,7 +3480,7 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
               n.tool_calls && n.tool_calls + ' tools',
               n.turns && n.turns + ' turns',
               tok >= 1000 && fmtNum(tok) + ' tokens',
-            ].filter(Boolean).join(' · ') || 'no stats'}
+            ].filter(Boolean).join(' · ') || 'No stats'}
           </div>
           ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
           ${isActive(tooltip.id) && html`<div style="color:var(--green);margin-top:2px">active</div>`}
