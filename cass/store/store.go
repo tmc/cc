@@ -2189,6 +2189,10 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 	for _, sid := range sessIDs {
 		sm := sessions[sid]
 		runs := bySession[sid]
+		workflowNames := make([]string, 0, len(runs))
+		for _, w := range runs {
+			workflowNames = append(workflowNames, firstNonEmptyStr(w.Name, w.RunID))
+		}
 		if opts.IncludeNode(cass.NodeTypeSession) {
 			nodes = append(nodes, cass.GraphNode{
 				ID:            sid,
@@ -2198,6 +2202,7 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 				Title:         sm.title,
 				StartedAt:     sm.startedAt,
 				WorkflowCount: len(runs),
+				WorkflowNames: workflowNames,
 			})
 		}
 		track(sm.startedAt)
@@ -2253,19 +2258,19 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 					title := workflowAgentGraphTitle(a, i)
 					status := firstNonEmptyStr(a.Status, w.Status)
 					nodes = append(nodes, cass.GraphNode{
-						ID:              childID,
-						NodeType:        cass.NodeTypeWorkflowAgent,
-						ParentSessionID: sid,
-						WorkflowRunID:   w.RunID,
-						Workspace:       sm.workspace,
-						Title:           title,
+						ID:                 childID,
+						NodeType:           cass.NodeTypeWorkflowAgent,
+						ParentSessionID:    sid,
+						WorkflowRunID:      w.RunID,
+						Workspace:          sm.workspace,
+						Title:              title,
 						WorkflowAgentIndex: i,
-						Label:           firstNonEmptyStr(a.Label, a.Phase),
-						Phase:           a.Phase,
-						AgentType:       a.AgentType,
-						Status:          status,
-						ToolCalls:       a.ToolCalls,
-						Tokens:          a.Tokens,
+						Label:              firstNonEmptyStr(a.Label, a.Phase),
+						Phase:              a.Phase,
+						AgentType:          a.AgentType,
+						Status:             status,
+						ToolCalls:          a.ToolCalls,
+						Tokens:             a.Tokens,
 					})
 					links = append(links, cass.SessionLink{
 						SourceSession: w.RunID,

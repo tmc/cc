@@ -16,6 +16,7 @@ import (
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/cass/service"
 	"github.com/tmc/cc/ccteamcfg"
+	"slices"
 )
 
 type testCollector struct {
@@ -601,10 +602,12 @@ func TestGraphWorkflowModes(t *testing.T) {
 	// Default (collapsed): one session node, one workflow node, no agents.
 	g := get("?workflow=collapsed")
 	var session, workflow, agent int
+	var sessionNode cass.GraphNode
 	for _, n := range g.Nodes {
 		switch n.NodeType {
 		case cass.NodeTypeSession:
 			session++
+			sessionNode = n
 		case cass.NodeTypeWorkflow:
 			workflow++
 		case cass.NodeTypeWorkflowAgent:
@@ -613,6 +616,9 @@ func TestGraphWorkflowModes(t *testing.T) {
 	}
 	if session != 1 || workflow != 1 || agent != 0 {
 		t.Fatalf("collapsed nodes: session=%d workflow=%d agent=%d, want 1/1/0", session, workflow, agent)
+	}
+	if got, want := sessionNode.WorkflowNames, []string{"cc-go-team-review"}; !slices.Equal(got, want) {
+		t.Fatalf("session workflow_names = %#v, want %#v", got, want)
 	}
 	var wfNode cass.GraphNode
 	for _, n := range g.Nodes {

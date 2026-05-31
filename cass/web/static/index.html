@@ -1394,6 +1394,26 @@ function renderWorkflowBadges(workflows, limit) {
   `;
 }
 
+function renderTextBadges(values, limit, moreLabel) {
+  const items = (values || []).filter(Boolean).slice(0, typeof limit === 'number' ? limit : 3);
+  if (items.length === 0) return null;
+  const more = (values || []).filter(Boolean).length - items.length;
+  return html`
+    <span class="workflow-badge-list">
+      ${items.map((value, i) => html`
+        <span class="hit-workflow-name" key=${value + ':' + i} title=${value}>
+          ${value}
+        </span>
+      `)}
+      ${more > 0 && html`
+        <span class="hit-workflow-name hit-workflow-more" title=${more + ' more ' + (moreLabel || 'item') + (more === 1 ? '' : 's')}>
+          +${more}
+        </span>
+      `}
+    </span>
+  `;
+}
+
 function resultCountLabel(result, noun = 'result') {
   const n = result?.total_count || 0;
   const suffix = result?.total_count_exact === false ? '+' : '';
@@ -3432,6 +3452,11 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
         <div class="graph-tooltip visible"
           style="left:${tooltip.x}px;top:${tooltip.y}px">
           <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
+          ${n.workflow_names && n.workflow_names.length > 0 && html`
+            <div class="graph-tooltip-stat" style="white-space:normal;max-width:240px">
+              ${renderTextBadges(n.workflow_names, 3, 'workflow')}
+            </div>
+          `}
           ${n.workspace && html`<div class="graph-tooltip-stat graph-tooltip-ws"
             onClick=${(e) => { e.stopPropagation(); if (onNavigate) onNavigate('search', { q: shortProject(n.workspace) }); }}
             style="cursor:pointer;text-decoration:underline">${shortProject(n.workspace)}</div>`}

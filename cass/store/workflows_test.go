@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc/cass"
+	"slices"
 )
 
 // sessionWithWorkflows returns a session carrying two workflow runs, one of
@@ -226,6 +227,9 @@ func TestGraphCollapsedMode(t *testing.T) {
 	}
 	if sessionNode.WorkflowCount != 2 {
 		t.Errorf("session workflow_count = %d, want 2", sessionNode.WorkflowCount)
+	}
+	if got, want := sessionNode.WorkflowNames, []string{"cc-go-team-review", "cc-implement"}; !slices.Equal(got, want) {
+		t.Errorf("session workflow_names = %#v, want %#v", got, want)
 	}
 	// Two workflow_contains edges (session -> each workflow), no spawn edges.
 	var contains, spawn int

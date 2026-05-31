@@ -95,24 +95,25 @@ type GraphNode struct {
 	AgentName    string `json:"agent_name,omitempty"`
 
 	// Workflow / workflow-agent fields (populated by node type).
-	ParentSessionID   string `json:"parent_session_id,omitempty"`
-	WorkflowRunID     string `json:"workflow_run_id,omitempty"`
-	Name              string `json:"name,omitempty"`
-	TaskID            string `json:"task_id,omitempty"`
-	WorkflowAgentIndex int   `json:"workflow_agent_index,omitempty"`
-	Label             string `json:"label,omitempty"`
-	Phase             string `json:"phase,omitempty"`
-	AgentType         string `json:"agent_type,omitempty"`
-	Description       string `json:"description,omitempty"`
-	Summary           string `json:"summary,omitempty"`
-	ScriptPath        string `json:"script_path,omitempty"`
-	TranscriptDir     string `json:"transcript_dir,omitempty"`
-	SourcePath        string `json:"source_path,omitempty"`
-	Status            string `json:"status,omitempty"`
-	AgentCount        int    `json:"agent_count,omitempty"`
-	JournalEventCount int    `json:"journal_event_count,omitempty"`
-	CompletedAt       int64  `json:"completed_at,omitempty"`
-	WorkflowCount     int    `json:"workflow_count,omitempty"` // session nodes: number of workflow runs.
+	ParentSessionID    string   `json:"parent_session_id,omitempty"`
+	WorkflowRunID      string   `json:"workflow_run_id,omitempty"`
+	Name               string   `json:"name,omitempty"`
+	TaskID             string   `json:"task_id,omitempty"`
+	WorkflowAgentIndex int      `json:"workflow_agent_index,omitempty"`
+	Label              string   `json:"label,omitempty"`
+	Phase              string   `json:"phase,omitempty"`
+	AgentType          string   `json:"agent_type,omitempty"`
+	Description        string   `json:"description,omitempty"`
+	Summary            string   `json:"summary,omitempty"`
+	ScriptPath         string   `json:"script_path,omitempty"`
+	TranscriptDir      string   `json:"transcript_dir,omitempty"`
+	SourcePath         string   `json:"source_path,omitempty"`
+	Status             string   `json:"status,omitempty"`
+	AgentCount         int      `json:"agent_count,omitempty"`
+	JournalEventCount  int      `json:"journal_event_count,omitempty"`
+	CompletedAt        int64    `json:"completed_at,omitempty"`
+	WorkflowCount      int      `json:"workflow_count,omitempty"` // session nodes: number of workflow runs.
+	WorkflowNames      []string `json:"workflow_names,omitempty"`
 }
 
 // TimeRange is the min/max timestamp range for graph data.
