@@ -289,7 +289,7 @@ Flags deliberately kept few and thresholds named (not positional) — `ccstats` 
 2. **M2** — Add 5.2 characteristics behind `-verbose`. Done.
 3. **M3** — JSON schema + golden tests. Done.
 4. **M4** — Refactor shared parsing out of `cmd/ccstats/main.go` into an internal package if the file grows past ~500 LOC.
-5. **M5** — (Optional) a small `ccstats watch` that refreshes the report every 60s, for users who want the Claude-Code-panel-shaped experience in their terminal.
+5. **M5** — `ccstats watch` refreshes the report every 60s for users who want the Claude-Code-panel-shaped experience in their terminal. Done.
 
 ## 13. Open questions
 

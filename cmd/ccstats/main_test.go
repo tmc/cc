@@ -189,6 +189,26 @@ func TestDefaultUsageMentionsCharacteristicsSubcommand(t *testing.T) {
 	}
 }
 
+func TestWatchUsageMentionsSubcommand(t *testing.T) {
+	oldUsage := flag.Usage
+	t.Cleanup(func() { flag.Usage = oldUsage })
+
+	configureUsage("watch")
+	got := captureStderr(t, func() {
+		flag.Usage()
+	})
+	for _, want := range []string{
+		"ccstats watch [flags] [file...]",
+		"Refreshes the usage-characteristics report every 60 seconds.",
+		"-pricing-file string",
+		"ccstats watch -since 24h",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("watch usage missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestParallelIndexCountsActiveSessions(t *testing.T) {
 	base := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	var idx ParallelIndex
@@ -522,6 +542,42 @@ func TestAnalyzeCharacteristicsAppliesPricingOverrides(t *testing.T) {
 	}
 	if got, want := report.Totals.Weight, 100*2.0+20*2.0+10*0.2+5*0.4; got != want {
 		t.Fatalf("weight = %f, want %f", got, want)
+	}
+}
+
+func TestWatchCycleRendersCharacteristicsReport(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong, oldSince, oldPricing := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag, *sinceFlag, *pricingFileFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+		*sinceFlag = oldSince
+		*pricingFileFlag = oldPricing
+	})
+	*unitFlag = "cost"
+	*verboseFlag = false
+	*formatFlag = "text"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+	*sinceFlag = "24h"
+
+	files := writeCharacteristicsFixture(t)
+	got := captureStdout(t, func() error {
+		return watchCycle(files)
+	})
+	for _, want := range []string{
+		"ccstats watch · refreshing every 1m0s (Ctrl-C to stop)",
+		"Last 24h · these are independent characteristics of your usage, not a breakdown",
+		"4+ sessions running in parallel",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("watch output missing %q:\n%s", want, got)
+		}
 	}
 }
 

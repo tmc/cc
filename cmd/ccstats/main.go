@@ -27,6 +27,8 @@ var (
 	longRunningThresholdFlag = flag.Duration("long-running-threshold", 8*time.Hour, "Session duration threshold for the long-running characteristic")
 )
 
+const watchRefreshInterval = 60 * time.Second
+
 // sessionStats holds aggregated statistics for a session.
 type sessionStats struct {
 	SessionID string `json:"session_id,omitempty"`
@@ -58,9 +60,12 @@ type sessionStats struct {
 
 func main() {
 	mode := "sessions"
-	if len(os.Args) > 1 && os.Args[1] == "characteristics" {
-		mode = "characteristics"
-		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "characteristics", "watch":
+			mode = os.Args[1]
+			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+		}
 	}
 	configureUsage(mode)
 	flag.Parse()
@@ -81,6 +86,9 @@ func run(mode string) error {
 
 	if mode == "characteristics" {
 		return runCharacteristics(files)
+	}
+	if mode == "watch" {
+		return runWatch(files)
 	}
 
 	var allStats []sessionStats
@@ -118,6 +126,18 @@ func configureUsage(mode string) {
 			fmt.Fprintln(os.Stderr, "Examples:")
 			fmt.Fprintln(os.Stderr, "  ccstats characteristics -since 24h ~/.claude/projects/*/*.jsonl")
 			fmt.Fprintln(os.Stderr, "  ccstats characteristics -since 7d -format json")
+		case "watch":
+			fmt.Fprintln(os.Stderr, "Usage:")
+			fmt.Fprintln(os.Stderr, "  ccstats watch [flags] [file...]")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Refreshes the usage-characteristics report every 60 seconds.")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Flags:")
+			flag.PrintDefaults()
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Examples:")
+			fmt.Fprintln(os.Stderr, "  ccstats watch -since 24h ~/.claude/projects/*/*.jsonl")
+			fmt.Fprintln(os.Stderr, "  ccstats watch -since 7d -format json")
 		default:
 			fmt.Fprintln(os.Stderr, "Usage:")
 			fmt.Fprintln(os.Stderr, "  ccstats [flags] [file...]")

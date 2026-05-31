@@ -117,6 +117,24 @@ func runCharacteristics(files []string) error {
 	return nil
 }
 
+func runWatch(files []string) error {
+	ticker := time.NewTicker(watchRefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		if err := watchCycle(files); err != nil {
+			return err
+		}
+		<-ticker.C
+	}
+}
+
+func watchCycle(files []string) error {
+	clearWatchScreen()
+	fmt.Fprintf(os.Stdout, "ccstats watch · refreshing every %s (Ctrl-C to stop)\n\n", watchRefreshInterval)
+	return runCharacteristics(files)
+}
+
 func analyzeCharacteristics(files []string, pricingCfg pricingConfig) (*characteristicsReport, error) {
 	var requests []requestRecord
 	sessions := make(map[string]*sessionAgg)
@@ -354,6 +372,14 @@ func renderCharacteristicsReport(report *characteristicsReport) {
 			fmt.Printf("  %-8s %3.0f%%  %s\n", k, pct*100, strings.Repeat("█", int(math.Round(pct*20))))
 		}
 	}
+}
+
+func clearWatchScreen() {
+	fi, err := os.Stdout.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return
+	}
+	fmt.Fprint(os.Stdout, "\033[H\033[2J")
 }
 
 func requestWeight(req requestRecord, pricingCfg pricingConfig) float64 {

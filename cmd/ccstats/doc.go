@@ -9,6 +9,8 @@
 // -context-threshold, -long-running-threshold, -pricing-file, and -redact
 // for JSON output.
 //
+// ccstats watch refreshes the characteristics report every 60 seconds.
+//
 // # Usage
 //
 //	ccstats [flags] [file...]
