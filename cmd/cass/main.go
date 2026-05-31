@@ -1139,8 +1139,22 @@ func resumeCommand(h cass.Hit) string {
 		}
 		return prefix + "codex resume"
 	default:
+		if id := claudeResumeID(h); id != "" {
+			return prefix + "claude --resume " + shellQuote(id)
+		}
 		return prefix + "claude --resume"
 	}
+}
+
+func claudeResumeID(h cass.Hit) string {
+	if h.SourcePath == "" || !strings.HasSuffix(h.SourcePath, ".jsonl") {
+		return ""
+	}
+	base := strings.TrimSuffix(filepath.Base(h.SourcePath), ".jsonl")
+	if strings.HasPrefix(base, "agent-") {
+		return ""
+	}
+	return base
 }
 
 func shellQuote(s string) string {

@@ -41,3 +41,29 @@ func TestResumeCommandLeavesSafeWorkspaceBare(t *testing.T) {
 		t.Fatalf("resumeCommand = %q, want %q", got, want)
 	}
 }
+
+func TestResumeCommandUsesClaudeSourcePathID(t *testing.T) {
+	got := resumeCommand(cass.Hit{
+		SessionID:  "cass-sha-id",
+		Agent:      "claude-code",
+		Workspace:  "/work/proj",
+		SourcePath: "/Users/me/.claude/projects/-work-proj/11111111-2222-3333-4444-555555555555.jsonl",
+	})
+	want := "cd /work/proj && claude --resume 11111111-2222-3333-4444-555555555555"
+	if got != want {
+		t.Fatalf("resumeCommand = %q, want %q", got, want)
+	}
+}
+
+func TestResumeCommandSkipsClaudeSubagentPath(t *testing.T) {
+	got := resumeCommand(cass.Hit{
+		SessionID:  "cass-sha-id",
+		Agent:      "claude-code",
+		Workspace:  "/work/proj",
+		SourcePath: "/Users/me/.claude/projects/-work-proj/11111111/subagents/agent-worker.jsonl",
+	})
+	want := "cd /work/proj && claude --resume"
+	if got != want {
+		t.Fatalf("resumeCommand = %q, want %q", got, want)
+	}
+}
