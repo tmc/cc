@@ -203,6 +203,20 @@ func TestRunWorkflowsListsIndexedRuns(t *testing.T) {
 	if len(got) != 1 || got[0].RunID != "wf_1" {
 		t.Fatalf("recent workflow JSON output = %+v, want only wf_1", got)
 	}
+
+	raw, err = captureStdout(t, func() error {
+		return runWorkflows(ctx, svc, []string{"--session", "parent-1", "--since", "24h"}, true)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode recent session JSON output: %v\n%s", err, raw)
+	}
+	if len(got) != 1 || got[0].RunID != "wf_1" {
+		t.Fatalf("recent session workflow JSON output = %+v, want only wf_1", got)
+	}
 }
 
 func workflowByRunID(workflows []workflowListEntry, id string) *workflowListEntry {

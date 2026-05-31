@@ -877,11 +877,15 @@ func runWorkflows(ctx context.Context, svc *service.Service, args []string, json
 	if fs.NArg() > 0 && *sessionID == "" {
 		*sessionID = fs.Arg(0)
 	}
+	var cutoff int64
+	if *since > 0 {
+		cutoff = time.Now().Add(-*since).Unix()
+	}
 
 	var rows []store.WorkflowRow
 	var err error
-	if *sessionID == "" && *since > 0 {
-		rows, err = svc.WorkflowsSince(ctx, time.Now().Add(-*since))
+	if *sessionID == "" && cutoff > 0 {
+		rows, err = svc.WorkflowsSince(ctx, time.Unix(cutoff, 0))
 	} else {
 		rows, err = svc.Workflows(ctx, *sessionID)
 	}
@@ -890,6 +894,9 @@ func runWorkflows(ctx context.Context, svc *service.Service, args []string, json
 	}
 	workflows := []workflowListEntry{}
 	for _, row := range rows {
+		if cutoff > 0 && positiveUnix(row.StartedAt) < cutoff {
+			continue
+		}
 		w := workflowEntryFromRow(row)
 		if *status != "" && w.Status != *status {
 			continue
