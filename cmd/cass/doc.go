@@ -14,6 +14,8 @@
 //	index      Index sessions from detected agents.
 //	search     Search indexed sessions.
 //	resume     Search and resume a session interactively.
+//	goals      List goal-mode objectives.
+//	skills     List skill usage.
 //	links      Show inter-session communication graph.
 //	map        Show iTerm2 <-> Claude session ID mappings.
 //	stats      Show index statistics.

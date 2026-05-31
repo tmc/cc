@@ -89,6 +89,8 @@ the full API.
 | Command | Description |
 |---|---|
 | [`cass`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | Index and search AI coding-agent session history (Claude Code, Codex, etc.). |
+| [`cass goals`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | List goal-mode objectives indexed from sessions. |
+| [`cass skills`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | List skill usage indexed from sessions. |
 | [`ccresume`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccresume) | Find a recent coding-agent session and resume it. |
 | [`ccstats`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccstats) | Report token usage, tool counts, and timing for sessions. |
 | [`cass requests`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | Show indexed API request breakdowns and capture metadata. |
