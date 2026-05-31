@@ -1485,6 +1485,70 @@ function renderSnippet(text) {
   return parts;
 }
 
+function isImageBlock(block) {
+  return block && (block.type === 'image' || block.type === 'input_image' || block.type === 'local_image');
+}
+
+function imageBlockSource(block) {
+  if (!block) return '';
+  const imageURL = (block.image_url || '').trim();
+  if (/^data:image\//i.test(imageURL)) return imageURL;
+  const url = (block.url || '').trim();
+  if (/^data:image\//i.test(url)) return url;
+  const data = (block.data || '').trim();
+  if (!data) return '';
+  if (/^data:image\//i.test(data)) return data;
+  const mime = block.mime_type || block.media_type || 'image/png';
+  return 'data:' + mime + ';base64,' + data.replace(/\s+/g, '');
+}
+
+function imageBlockHref(block) {
+  if (!block) return '';
+  return imageBlockSource(block) || block.image_url || block.url || '';
+}
+
+function imageBlockLabel(block) {
+  if (!block) return 'image';
+  const path = block.path || block.file_path;
+  if (path) return path;
+  if (block.image_url && /^data:image\//i.test(block.image_url)) {
+    return (block.media_type || block.mime_type || 'image') + ' data url';
+  }
+  if (block.image_url) return block.image_url;
+  if (block.url) return block.url;
+  if (block.data) return (block.media_type || block.mime_type || 'image') + ' base64';
+  return block.type || 'image';
+}
+
+function ImageBlockPreview({ block }) {
+  const src = imageBlockSource(block);
+  const href = imageBlockHref(block);
+  const label = imageBlockLabel(block);
+  return html`
+    <div class="conv-image">
+      ${src ? html`
+        <a class="conv-image-frame" href=${src} target="_blank" rel="noreferrer" title=${label}>
+          <img src=${src} alt=${label || 'image'} loading="lazy" decoding="async" />
+        </a>
+      ` : href ? html`
+        <a class="conv-image-placeholder" href=${href} target="_blank" rel="noreferrer" title=${label}>image link</a>
+      ` : html`
+        <div class="conv-image-placeholder" title=${label}>image file</div>
+      `}
+      <div class="conv-image-meta">${label}</div>
+    </div>
+  `;
+}
+
+function renderImageEntry(block, key, role) {
+  return html`
+    <div class="conv-entry role-image" key=${key}>
+      <div class="conv-role">${block?.type || role || 'image'}</div>
+      <${ImageBlockPreview} block=${block} />
+    </div>
+  `;
+}
+
 // Highlight search query matches in plain text (returns HTML string).
 function highlightText(text, query) {
   if (!query || !text) return escHtml(text);
@@ -1929,11 +1993,12 @@ function WorkflowAgentTranscript({ sourcePath }) {
     if (!Array.isArray(msg.content)) return [];
     return msg.content
       .map(block => ({
-        role: block.type === 'tool_use' ? (block.name || 'tool') : block.type === 'tool_result' ? 'result' : (msg.role || 'message'),
+        role: isImageBlock(block) ? 'image' : block.type === 'tool_use' ? (block.name || 'tool') : block.type === 'tool_result' ? 'result' : (msg.role || 'message'),
         text: blockText(block),
+        image: isImageBlock(block) ? block : null,
         isError: !!block.is_error,
       }))
-      .filter(block => !!block.text);
+      .filter(block => !!block.text || !!block.image);
   }
 
   function roleClass(role) {
@@ -1963,7 +2028,9 @@ function WorkflowAgentTranscript({ sourcePath }) {
           ${item.blocks.map((block, bi) => html`
             <div class="wf-agent-block ${block.isError ? 'error' : ''}" key=${bi}>
               <span class="wf-agent-role ${roleClass(block.role)}">${block.role}</span>
-              <${AnsiContent} text=${block.text} maxLen=${1200} cls=${''} searchQuery=${''} />
+              ${block.image
+                ? html`<${ImageBlockPreview} block=${block.image} />`
+                : html`<${AnsiContent} text=${block.text} maxLen=${1200} cls=${''} searchQuery=${''} />`}
             </div>
           `)}
         </div>
@@ -2546,6 +2613,9 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
         return html`<div key=${entryID} data-eidx=${idx} class="${dimClass}${hlClass}">
           ${content.map((block, bi) => {
             const key = entryID + '-' + bi;
+            if (isImageBlock(block)) {
+              return renderImageEntry(block, key, role);
+            }
             if (block.type === 'tool_use') {
               const isExp = expanded[key];
               const inputText = typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2);

@@ -673,6 +673,9 @@ input::placeholder { color: var(--faint); }
   margin-left: 16px;
   font-size: 11px;
 }
+.conv-entry.role-image {
+  border-left-color: var(--magenta);
+}
 .conv-tool-summary {
   color: var(--dim);
   font-weight: 400;
@@ -714,6 +717,43 @@ input::placeholder { color: var(--faint); }
 }
 .conv-error { color: var(--danger); }
 .conv-success { color: var(--green); }
+.conv-image {
+  display: grid;
+  gap: 4px;
+  max-width: 100%;
+}
+.conv-image-frame {
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  background: var(--hover);
+  padding: 4px;
+}
+.conv-image-frame img {
+  display: block;
+  max-width: min(100%, 480px);
+  max-height: 360px;
+  object-fit: contain;
+}
+.conv-image-placeholder {
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px dashed var(--border);
+  color: var(--dim);
+  background: var(--hover);
+  padding: 8px 10px;
+  font-size: 11px;
+  text-decoration: none;
+}
+.conv-image-placeholder:hover { color: var(--accent); border-color: var(--accent); }
+.conv-image-meta {
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .detail-load-earlier {
   display: block;
   margin: 12px auto 4px;
@@ -2363,6 +2403,7 @@ mark.search-hl {
 .wf-agent-role { display: inline-block; font-size: 10px; text-transform: uppercase; color: var(--dim); margin-right: 6px; }
 .wf-agent-role.user { color: var(--cyan); }
 .wf-agent-role.assistant { color: var(--magenta); }
+.wf-agent-role.image { color: var(--magenta); }
 .wf-agent-role.result { color: var(--green); }
 .wf-agent-role.tool { color: var(--yellow); }
 .wf-agent-more {
