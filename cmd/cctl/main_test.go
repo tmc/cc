@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestSubcommandsIncludeCassAndRequests(t *testing.T) {
-	cassSpec, ok := subcommands["cass"]
+	cassSpec, ok := resolveSubcommand("cass")
 	if !ok {
 		t.Fatal("missing cass subcommand")
 	}
@@ -11,7 +11,7 @@ func TestSubcommandsIncludeCassAndRequests(t *testing.T) {
 		t.Fatalf("cass spec = %#v, want binary cass with no default args", cassSpec)
 	}
 
-	reqSpec, ok := subcommands["requests"]
+	reqSpec, ok := resolveSubcommand("requests")
 	if !ok {
 		t.Fatal("missing requests subcommand")
 	}
@@ -20,5 +20,11 @@ func TestSubcommandsIncludeCassAndRequests(t *testing.T) {
 	}
 	if len(reqSpec.args) != 1 || reqSpec.args[0] != "requests" {
 		t.Fatalf("requests args = %#v, want [requests]", reqSpec.args)
+	}
+}
+
+func TestResolveSubcommandRejectsUnknown(t *testing.T) {
+	if _, ok := resolveSubcommand("unknown"); ok {
+		t.Fatal("resolveSubcommand accepted unknown command")
 	}
 }

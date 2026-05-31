@@ -60,6 +60,11 @@ var subcommands = map[string]subcommandSpec{
 	"mm": {binary: "ccmemory"},
 }
 
+func resolveSubcommand(name string) (subcommandSpec, bool) {
+	spec, ok := subcommands[name]
+	return spec, ok
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -72,8 +77,13 @@ func main() {
 	switch cmd {
 	case "help", "--help", "-h":
 		if len(args) > 0 {
-			// Show help for subcommand
-			runSubcommand(args[0], []string{"--help"})
+			spec, ok := resolveSubcommand(args[0])
+			if !ok {
+				fmt.Fprintf(os.Stderr, "cctl: unknown command %q\n", args[0])
+				fmt.Fprintf(os.Stderr, "Run 'cctl help' for usage.\n")
+				os.Exit(2)
+			}
+			runSubcommand(spec.binary, append(spec.args, "--help"))
 		} else {
 			usage()
 		}
@@ -85,7 +95,7 @@ func main() {
 	}
 
 	// Look up subcommand
-	spec, ok := subcommands[cmd]
+	spec, ok := resolveSubcommand(cmd)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "cctl: unknown command %q\n", cmd)
 		fmt.Fprintf(os.Stderr, "Run 'cctl help' for usage.\n")
@@ -173,12 +183,12 @@ Run 'cctl help <command>' for more information on a specific command.
 func printVersion() {
 	fmt.Printf("cctl version %s\n", version)
 	fmt.Println("\nSubcommands:")
-	for name, binary := range subcommands {
+	for name, spec := range subcommands {
 		// Skip aliases
 		if len(name) == 1 {
 			continue
 		}
-		if path, err := exec.LookPath(binary.binary); err == nil {
+		if path, err := exec.LookPath(spec.binary); err == nil {
 			fmt.Printf("  %-10s %s\n", name, path)
 		} else {
 			fmt.Printf("  %-10s (not installed)\n", name)
