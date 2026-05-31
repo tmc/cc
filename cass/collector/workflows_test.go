@@ -177,6 +177,40 @@ func TestReadWorkflowAgentsClosesStartedAgentsWhenWorkflowCompletes(t *testing.T
 	}
 }
 
+func TestWorkflowScriptInfoAcceptsBacktickStrings(t *testing.T) {
+	script := "export const meta = { name: `backtick-flow`, description: `uses template-string literals` }\n" +
+		"export const meta2 = { phases: [\n" +
+		"  { title: `Build`, detail: `prepare inputs` },\n" +
+		"  { detail: `write summary`, title: `Synthesize` },\n" +
+		"] }\n" +
+		"const LENSES = [{ key: `api` }]\n" +
+		"phase(`Review`)\n" +
+		"agent('review', { label: `lens:${l.key}`, phase: `Review`, agentType: `Explore` })\n" +
+		"agent('final', { phase: `Synthesize`, label: `synthesize`, agentType: `Writer` })\n"
+
+	info := workflowScriptInfoFromScript(script)
+	if info.Name != "backtick-flow" || info.Description != "uses template-string literals" {
+		t.Fatalf("meta = %q/%q, want backtick-flow/uses template-string literals", info.Name, info.Description)
+	}
+	if len(info.Phases) != 3 {
+		t.Fatalf("phases = %d, want 3", len(info.Phases))
+	}
+	if info.Phases[0].Title != "Build" || info.Phases[0].Detail != "prepare inputs" ||
+		info.Phases[1].Title != "Synthesize" || info.Phases[1].Detail != "write summary" ||
+		info.Phases[2].Title != "Review" {
+		t.Fatalf("phases = %+v, want Build, Synthesize, Review", info.Phases)
+	}
+	if len(info.AgentSpecs) != 2 {
+		t.Fatalf("agent specs = %d, want 2 without duplicate template-label matches", len(info.AgentSpecs))
+	}
+	if info.AgentSpecs[0] != (workflowAgentSpec{Label: "lens:api", Phase: "Review", AgentType: "Explore"}) {
+		t.Fatalf("first agent spec = %+v, want lens:api Review Explore", info.AgentSpecs[0])
+	}
+	if info.AgentSpecs[1] != (workflowAgentSpec{Label: "synthesize", Phase: "Synthesize", AgentType: "Writer"}) {
+		t.Fatalf("second agent spec = %+v, want synthesize Synthesize Writer", info.AgentSpecs[1])
+	}
+}
+
 func writeWorkflowAgentTestFile(t *testing.T, path, prompt string) {
 	t.Helper()
 	line, err := json.Marshal(map[string]any{
