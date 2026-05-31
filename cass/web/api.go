@@ -1184,7 +1184,7 @@ func (s *Server) handleSessionAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, runs)
 }
 
-// handleSessionRequests returns HAR-derived API requests for a session.
+// handleSessionRequests returns API requests for a session.
 // GET /api/session/{id}/requests
 func (s *Server) handleSessionRequests(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
