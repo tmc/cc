@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -21,17 +22,31 @@ func sessionWithWorkflows() cass.Session {
 		EndedAt:   start.Add(time.Hour),
 		Workflows: []cass.WorkflowRun{
 			{
-				RunID:             "wf_aaa",
-				TaskID:            "task_aaa",
-				Name:              "cc-go-team-review",
-				Description:       "review the branch",
-				Status:            "completed",
+				RunID:       "wf_aaa",
+				TaskID:      "task_aaa",
+				Name:        "cc-go-team-review",
+				Description: "review the branch",
+				Status:      "completed",
+				Phases: []cass.WorkflowPhase{
+					{Title: "Lenses", Detail: "independent perspectives"},
+					{Title: "Stress", Detail: "adversarial checks"},
+				},
 				AgentCount:        3,
 				JournalEventCount: 12,
 				StartedAt:         start.Add(time.Minute),
 				CompletedAt:       start.Add(30 * time.Minute),
 				SourcePath:        "/p/workflows/wf_aaa.json",
 				TranscriptDir:     "/p/subagents/workflows/wf_aaa",
+				Agents: []cass.WorkflowAgent{
+					{
+						ID:        "agent-1",
+						Label:     "lens:architecture",
+						Phase:     "Lenses",
+						AgentType: "Explore",
+						Title:     "Architecture review",
+						Status:    "completed",
+					},
+				},
 			},
 			{
 				RunID:      "wf_bbb",
@@ -68,6 +83,27 @@ func TestWorkflowPersistenceRoundTrip(t *testing.T) {
 	}
 	if w.ParentSessionID != "sess1" {
 		t.Errorf("parent session = %q, want sess1", w.ParentSessionID)
+	}
+	var phases []cass.WorkflowPhase
+	if err := json.Unmarshal([]byte(w.PhasesJSON), &phases); err != nil {
+		t.Fatalf("unmarshal phases: %v", err)
+	}
+	if len(phases) != 2 || phases[0].Title != "Lenses" || phases[1].Title != "Stress" {
+		t.Fatalf("phases = %+v", phases)
+	}
+	var agents []cass.WorkflowAgent
+	if err := json.Unmarshal([]byte(w.AgentsJSON), &agents); err != nil {
+		t.Fatalf("unmarshal agents: %v", err)
+	}
+	if len(agents) != 1 || agents[0].Label != "lens:architecture" || agents[0].Phase != "Lenses" {
+		t.Fatalf("agents = %+v", agents)
+	}
+	hit, err := s.Session(ctx, "sess1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hit.Workflows) != 2 || len(hit.Workflows[0].Phases) != 2 || len(hit.Workflows[0].Agents) != 1 {
+		t.Fatalf("folded workflows = %+v", hit.Workflows)
 	}
 
 	n, err := s.WorkflowCount(ctx)

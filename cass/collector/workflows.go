@@ -15,7 +15,28 @@ import (
 	"github.com/tmc/cc/cass"
 )
 
-var workflowMetaRE = regexp.MustCompile(`(?m)\b(name|description)\s*:\s*['"]([^'"]+)['"]`)
+var (
+	workflowMetaRE         = regexp.MustCompile(`(?m)\b(name|description)\s*:\s*['"]([^'"]+)['"]`)
+	workflowPhaseRE        = regexp.MustCompile(`(?s)\{\s*title\s*:\s*['"]([^'"]+)['"]\s*,\s*detail\s*:\s*['"]([^'"]*)['"]\s*\}`)
+	workflowLensKeyRE      = regexp.MustCompile(`\bkey\s*:\s*['"]([^'"]+)['"]`)
+	workflowLabelKeyRE     = regexp.MustCompile("label\\s*:\\s*`([^`]*\\$\\{l\\.key\\}[^`]*)`\\s*,\\s*phase\\s*:\\s*['\"]([^'\"]+)['\"]")
+	workflowLabelLiteralRE = regexp.MustCompile(`label\s*:\s*['"]([^'"]+)['"]\s*,\s*phase\s*:\s*['"]([^'"]+)['"]`)
+	workflowStressLensRE   = regexp.MustCompile(`reviewer using the "([^"]+)" lens`)
+	workflowLensTitleRE    = regexp.MustCompile(`(?m)^LENS:\s*([^\n.]+)`)
+)
+
+type workflowAgentSpec struct {
+	Label string
+	Phase string
+}
+
+type workflowScriptInfo struct {
+	Name        string
+	Description string
+	Phases      []cass.WorkflowPhase
+	LensKeys    []string
+	AgentSpecs  []workflowAgentSpec
+}
 
 // ExtractWorkflows summarizes native Claude Code Workflow runs for a parent
 // session. It uses the parent JSONL for launch metadata and the workflow state
@@ -65,8 +86,9 @@ func ExtractWorkflows(sessionPath string, entries []cc.Entry) []cass.WorkflowRun
 	}
 	out := make([]cass.WorkflowRun, 0, len(byRun))
 	for _, w := range byRun {
+		script := enrichWorkflowFromScriptFile(w)
 		if w.TranscriptDir != "" {
-			w.Agents = readWorkflowAgents(w.TranscriptDir)
+			w.Agents = readWorkflowAgents(*w, script)
 			w.AgentCount = len(w.Agents)
 			w.JournalEventCount = countWorkflowJournalLines(filepath.Join(w.TranscriptDir, "journal.jsonl"))
 		}
@@ -89,18 +111,7 @@ func workflowFromToolUse(b cc.ContentBlock) cass.WorkflowRun {
 	} else if input.ResumeFromRunIDAlt != "" {
 		w.RunID = input.ResumeFromRunIDAlt
 	}
-	for _, m := range workflowMetaRE.FindAllStringSubmatch(input.Script, -1) {
-		switch m[1] {
-		case "name":
-			if w.Name == "" {
-				w.Name = m[2]
-			}
-		case "description":
-			if w.Description == "" {
-				w.Description = m[2]
-			}
-		}
-	}
+	applyWorkflowScriptInfo(&w, workflowScriptInfoFromScript(input.Script))
 	return w
 }
 
@@ -209,14 +220,7 @@ func readWorkflowState(sessionPath string, byRun map[string]*cass.WorkflowRun) {
 		if w.StartedAt.IsZero() {
 			w.StartedAt = raw.Timestamp
 		}
-		for _, m := range workflowMetaRE.FindAllStringSubmatch(raw.Script, -1) {
-			if m[1] == "name" && w.Name == "" {
-				w.Name = m[2]
-			}
-			if m[1] == "description" && w.Description == "" {
-				w.Description = m[2]
-			}
-		}
+		applyWorkflowScriptInfo(w, workflowScriptInfoFromScript(raw.Script))
 		if len(raw.Result) > 0 && string(raw.Result) != "null" {
 			w.Status = "completed"
 			w.CompletedAt = raw.Timestamp
@@ -228,17 +232,93 @@ func readWorkflowState(sessionPath string, byRun map[string]*cass.WorkflowRun) {
 	}
 }
 
+func enrichWorkflowFromScriptFile(w *cass.WorkflowRun) workflowScriptInfo {
+	if w == nil || w.ScriptPath == "" {
+		return workflowScriptInfo{}
+	}
+	b, err := os.ReadFile(w.ScriptPath)
+	if err != nil {
+		return workflowScriptInfo{}
+	}
+	info := workflowScriptInfoFromScript(string(b))
+	applyWorkflowScriptInfo(w, info)
+	return info
+}
+
+func applyWorkflowScriptInfo(w *cass.WorkflowRun, info workflowScriptInfo) {
+	if w == nil {
+		return
+	}
+	if w.Name == "" {
+		w.Name = info.Name
+	}
+	if w.Description == "" {
+		w.Description = info.Description
+	}
+	if len(w.Phases) == 0 && len(info.Phases) > 0 {
+		w.Phases = info.Phases
+	}
+}
+
+func workflowScriptInfoFromScript(script string) workflowScriptInfo {
+	var info workflowScriptInfo
+	if script == "" {
+		return info
+	}
+	for _, m := range workflowMetaRE.FindAllStringSubmatch(script, -1) {
+		switch m[1] {
+		case "name":
+			if info.Name == "" {
+				info.Name = m[2]
+			}
+		case "description":
+			if info.Description == "" {
+				info.Description = m[2]
+			}
+		}
+	}
+	for _, m := range workflowPhaseRE.FindAllStringSubmatch(script, -1) {
+		info.Phases = append(info.Phases, cass.WorkflowPhase{Title: m[1], Detail: m[2]})
+	}
+	seenKeys := map[string]bool{}
+	for _, m := range workflowLensKeyRE.FindAllStringSubmatch(script, -1) {
+		key := m[1]
+		if key == "" || seenKeys[key] {
+			continue
+		}
+		seenKeys[key] = true
+		info.LensKeys = append(info.LensKeys, key)
+	}
+	for _, m := range workflowLabelKeyRE.FindAllStringSubmatch(script, -1) {
+		format := strings.ReplaceAll(m[1], "${l.key}", "%s")
+		for _, key := range info.LensKeys {
+			info.AgentSpecs = append(info.AgentSpecs, workflowAgentSpec{
+				Label: strings.ReplaceAll(format, "%s", key),
+				Phase: m[2],
+			})
+		}
+	}
+	for _, m := range workflowLabelLiteralRE.FindAllStringSubmatch(script, -1) {
+		info.AgentSpecs = append(info.AgentSpecs, workflowAgentSpec{Label: m[1], Phase: m[2]})
+	}
+	return info
+}
+
 // readWorkflowAgents reads per-agent metadata for the fan-out transcripts in a
 // workflow run's transcript dir (agent-*.jsonl, excluding acompact-* compaction
 // helpers). Each agent's text is folded into the parent session's content
 // elsewhere; here we capture just the metadata for tree rendering and per-agent
-// search attribution. Sorted by id for stable ordering.
-func readWorkflowAgents(dir string) []cass.WorkflowAgent {
+// search attribution. Journal start order is preferred; file-name order is the
+// fallback for transcripts missing journal entries.
+func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo) []cass.WorkflowAgent {
+	dir := w.TranscriptDir
 	infos, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
-	var agents []cass.WorkflowAgent
+	order, statuses := readWorkflowJournal(filepath.Join(dir, "journal.jsonl"))
+	files := map[string]string{}
+	var ids []string
 	for _, fi := range infos {
 		name := fi.Name()
 		if fi.IsDir() || !strings.HasPrefix(name, "agent-") || !strings.HasSuffix(name, ".jsonl") {
@@ -249,6 +329,27 @@ func readWorkflowAgents(dir string) []cass.WorkflowAgent {
 		}
 		path := filepath.Join(dir, name)
 		id := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
+		files[id] = path
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	seen := map[string]bool{}
+	var ordered []string
+	for _, id := range order {
+		if files[id] == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ordered = append(ordered, id)
+	}
+	for _, id := range ids {
+		if !seen[id] {
+			ordered = append(ordered, id)
+		}
+	}
+	var agents []cass.WorkflowAgent
+	for i, id := range ordered {
+		path := files[id]
 		a := cass.WorkflowAgent{ID: id, SourcePath: path, Title: id}
 
 		entries, err := cc.ReadFile(context.Background(), path)
@@ -265,12 +366,136 @@ func readWorkflowAgents(dir string) []cass.WorkflowAgent {
 					a.Tokens += e.Message.Usage.InputTokens + e.Message.Usage.OutputTokens
 				}
 			}
-			a.Status = "completed"
+			a.Status = firstNonEmpty(statuses[id], "completed")
+		}
+		if a.Status == "" {
+			a.Status = statuses[id]
+		}
+		if a.Status == "" {
+			a.Status = "unknown"
+		}
+		if meta := readWorkflowAgentMeta(strings.TrimSuffix(path, ".jsonl") + ".meta.json"); meta.AgentType != "" {
+			a.AgentType = meta.AgentType
+		}
+		if spec := inferWorkflowAgentSpec(entries, script, i); spec.Label != "" || spec.Phase != "" {
+			a.Label = spec.Label
+			a.Phase = spec.Phase
 		}
 		agents = append(agents, a)
 	}
-	sort.Slice(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
 	return agents
+}
+
+func readWorkflowJournal(path string) ([]string, map[string]string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil
+	}
+	defer f.Close()
+	var order []string
+	statuses := map[string]string{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var ev struct {
+			Type    string `json:"type"`
+			AgentID string `json:"agentId"`
+		}
+		if json.Unmarshal(sc.Bytes(), &ev) != nil || ev.AgentID == "" {
+			continue
+		}
+		switch ev.Type {
+		case "started":
+			order = append(order, ev.AgentID)
+			if statuses[ev.AgentID] == "" {
+				statuses[ev.AgentID] = "running"
+			}
+		case "result":
+			statuses[ev.AgentID] = "completed"
+		case "error", "failed":
+			statuses[ev.AgentID] = "error"
+		}
+	}
+	return order, statuses
+}
+
+type workflowAgentMeta struct {
+	AgentType string `json:"agentType"`
+}
+
+func readWorkflowAgentMeta(path string) workflowAgentMeta {
+	var meta workflowAgentMeta
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return meta
+	}
+	_ = json.Unmarshal(b, &meta)
+	return meta
+}
+
+func inferWorkflowAgentSpec(entries []cc.Entry, script workflowScriptInfo, index int) workflowAgentSpec {
+	prompt := workflowAgentPrompt(entries)
+	if spec := workflowAgentSpecFromPrompt(prompt, script.LensKeys); spec.Label != "" || spec.Phase != "" {
+		return spec
+	}
+	if index >= 0 && index < len(script.AgentSpecs) {
+		return script.AgentSpecs[index]
+	}
+	return workflowAgentSpec{}
+}
+
+func workflowAgentPrompt(entries []cc.Entry) string {
+	for _, e := range entries {
+		if e.Message == nil || e.Message.Role != "user" || e.Message.IsToolResultOnly() || e.IsMeta {
+			continue
+		}
+		if text := strings.TrimSpace(e.Message.TextContent()); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func workflowAgentSpecFromPrompt(prompt string, lensKeys []string) workflowAgentSpec {
+	if prompt == "" {
+		return workflowAgentSpec{}
+	}
+	lower := strings.ToLower(prompt)
+	if strings.Contains(lower, "you are the synthesizer") {
+		return workflowAgentSpec{Label: "synthesize", Phase: "Synthesize"}
+	}
+	if m := workflowStressLensRE.FindStringSubmatch(prompt); len(m) == 2 {
+		key := strings.TrimSpace(m[1])
+		switch {
+		case strings.Contains(prompt, "STRONGEST IDEA"):
+			return workflowAgentSpec{Label: "stress-strong:" + key, Phase: "Stress"}
+		case strings.Contains(prompt, "WEAKEST ASSUMPTION"):
+			return workflowAgentSpec{Label: "stress-weak:" + key, Phase: "Stress"}
+		}
+	}
+	if m := workflowLensTitleRE.FindStringSubmatch(prompt); len(m) == 2 {
+		title := strings.ToLower(m[1])
+		for _, key := range lensKeys {
+			if lensTitleMatchesKey(title, key) {
+				return workflowAgentSpec{Label: "lens:" + key, Phase: "Lenses"}
+			}
+		}
+	}
+	return workflowAgentSpec{}
+}
+
+func lensTitleMatchesKey(title, key string) bool {
+	parts := strings.FieldsFunc(strings.ToLower(key), func(r rune) bool {
+		return r < 'a' || r > 'z'
+	})
+	for _, p := range parts {
+		if len(p) <= 2 {
+			continue
+		}
+		if strings.Contains(title, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // workflowAgentTitle derives a short title from a summary, matching

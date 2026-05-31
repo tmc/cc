@@ -25,6 +25,8 @@ type WorkflowRow struct {
 	JournalEventCount int    `json:"journal_event_count"`
 	StartedAt         int64  `json:"started_at"`
 	CompletedAt       int64  `json:"completed_at"`
+	// PhasesJSON is the JSON-encoded []cass.WorkflowPhase declared by the script.
+	PhasesJSON string `json:"phases_json"`
 	// AgentsJSON is the JSON-encoded []cass.WorkflowAgent for this run; a small
 	// bounded blob, mirroring goals_json/skills_json. Defaults to "[]".
 	AgentsJSON string `json:"agents_json"`
@@ -47,6 +49,7 @@ const workflowsSchema = `
 		started_at INTEGER NOT NULL DEFAULT 0,
 		completed_at INTEGER NOT NULL DEFAULT 0,
 		indexed_at INTEGER NOT NULL DEFAULT 0,
+		phases_json TEXT NOT NULL DEFAULT '[]',
 		PRIMARY KEY (parent_session_id, run_id),
 		FOREIGN KEY (parent_session_id) REFERENCES sessions(id) ON DELETE CASCADE
 	);
@@ -61,7 +64,7 @@ func (s *DB) Workflows(ctx context.Context, parentSessionID string) ([]WorkflowR
 	query := `
 		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path, agent_count, journal_event_count,
-			started_at, completed_at, agents_json
+			started_at, completed_at, phases_json, agents_json
 		FROM workflows`
 	var args []any
 	if parentSessionID != "" {
@@ -80,7 +83,7 @@ func (s *DB) Workflows(ctx context.Context, parentSessionID string) ([]WorkflowR
 		if err := rows.Scan(
 			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
 			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
-			&w.StartedAt, &w.CompletedAt, &w.AgentsJSON,
+			&w.StartedAt, &w.CompletedAt, &w.PhasesJSON, &w.AgentsJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan workflow: %w", err)
 		}
@@ -95,7 +98,7 @@ func (s *DB) WorkflowsSince(ctx context.Context, since time.Time) ([]WorkflowRow
 	query := `
 		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path, agent_count, journal_event_count,
-			started_at, completed_at, agents_json
+			started_at, completed_at, phases_json, agents_json
 		FROM workflows`
 	var args []any
 	if !since.IsZero() {
@@ -114,7 +117,7 @@ func (s *DB) WorkflowsSince(ctx context.Context, since time.Time) ([]WorkflowRow
 		if err := rows.Scan(
 			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
 			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
-			&w.StartedAt, &w.CompletedAt, &w.AgentsJSON,
+			&w.StartedAt, &w.CompletedAt, &w.PhasesJSON, &w.AgentsJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan workflow: %w", err)
 		}

@@ -380,6 +380,9 @@ func (s *DB) migrate() error {
 		// Per-agent metadata for a workflow run (JSON []cass.WorkflowAgent), for
 		// tree rendering and per-agent search attribution.
 		"ALTER TABLE workflows ADD COLUMN agents_json TEXT NOT NULL DEFAULT '[]'",
+		// Script-declared workflow phase metadata (JSON []cass.WorkflowPhase), for
+		// TUI-like phase rendering in the web detail panel.
+		"ALTER TABLE workflows ADD COLUMN phases_json TEXT NOT NULL DEFAULT '[]'",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -440,9 +443,9 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path,
 			agent_count, journal_event_count, started_at, completed_at, indexed_at,
-			agents_json
+			phases_json, agents_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare workflows: %w", err)
@@ -555,6 +558,12 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			return fmt.Errorf("clear workflows %s: %w", sess.ID, err)
 		}
 		for _, wf := range sess.Workflows {
+			phasesJSON := "[]"
+			if len(wf.Phases) > 0 {
+				if b, err := json.Marshal(wf.Phases); err == nil {
+					phasesJSON = string(b)
+				}
+			}
 			agentsJSON := "[]"
 			if len(wf.Agents) > 0 {
 				if b, err := json.Marshal(wf.Agents); err == nil {
@@ -577,6 +586,7 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 				wf.StartedAt.Unix(),
 				wf.CompletedAt.Unix(),
 				now,
+				phasesJSON,
 				agentsJSON,
 			); err != nil {
 				return fmt.Errorf("insert workflow %s/%s: %w", sess.ID, wf.RunID, err)
@@ -797,7 +807,7 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path, agent_count, journal_event_count,
-			started_at, completed_at, agents_json
+			started_at, completed_at, phases_json, agents_json
 		FROM workflows WHERE parent_session_id IN (`+placeholders+`)
 		ORDER BY started_at, run_id`, args...)
 	if err != nil {
@@ -811,7 +821,7 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 		if err := rows.Scan(
 			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
 			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
-			&w.StartedAt, &w.CompletedAt, &w.AgentsJSON,
+			&w.StartedAt, &w.CompletedAt, &w.PhasesJSON, &w.AgentsJSON,
 		); err != nil {
 			return fmt.Errorf("scan folded workflow: %w", err)
 		}
@@ -823,11 +833,16 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 		if w.AgentsJSON != "" && w.AgentsJSON != "[]" {
 			_ = json.Unmarshal([]byte(w.AgentsJSON), &agents)
 		}
+		var phases []cass.WorkflowPhase
+		if w.PhasesJSON != "" && w.PhasesJSON != "[]" {
+			_ = json.Unmarshal([]byte(w.PhasesJSON), &phases)
+		}
 		h.Workflows = append(h.Workflows, cass.WorkflowRun{
 			RunID:             w.RunID,
 			TaskID:            w.TaskID,
 			Name:              w.Name,
 			Description:       w.Description,
+			Phases:            phases,
 			Status:            w.Status,
 			Summary:           w.Summary,
 			ScriptPath:        w.ScriptPath,
@@ -847,7 +862,7 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 		// this drives the "matched in N workflow agents" badge.
 		var matchedAgents int
 		for _, a := range agents {
-			if termsMatch(strings.ToLower(a.Title), terms) {
+			if termsMatch(strings.ToLower(a.Title+" "+a.Label+" "+a.Phase+" "+a.AgentType), terms) {
 				h.MatchedWorkflowAgentIDs = append(h.MatchedWorkflowAgentIDs, a.ID)
 				matchedAgents++
 			}
@@ -889,9 +904,9 @@ func queryTerms(query string) []string {
 }
 
 // workflowMatches reports whether every query term appears in the workflow's
-// searchable text (name, description, run id, status).
+// searchable text (name, description, phases, run id, status).
 func workflowMatches(w WorkflowRow, terms []string) bool {
-	hay := strings.ToLower(w.Name + " " + w.Description + " " + w.RunID + " " + w.Status)
+	hay := strings.ToLower(w.Name + " " + w.Description + " " + w.PhasesJSON + " " + w.RunID + " " + w.Status)
 	return termsMatch(hay, terms)
 }
 
@@ -1833,18 +1848,36 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 			track(posOrZero(w.CompletedAt))
 
 			if opts.Workflow == cass.WorkflowExpanded && opts.IncludeNode(cass.NodeTypeWorkflowAgent) {
-				// Per-child agent metadata is not yet indexed; synthesize one
-				// node per counted agent file so the fan-out is visible.
-				for i := 0; i < w.AgentCount; i++ {
+				var agents []cass.WorkflowAgent
+				if w.AgentsJSON != "" && w.AgentsJSON != "[]" {
+					_ = json.Unmarshal([]byte(w.AgentsJSON), &agents)
+				}
+				for i := 0; i < max(w.AgentCount, len(agents)); i++ {
+					var a cass.WorkflowAgent
+					if i < len(agents) {
+						a = agents[i]
+					}
 					childID := fmt.Sprintf("%s#%d", w.RunID, i)
+					if a.ID != "" {
+						childID = w.RunID + "#" + a.ID
+					}
+					title := fmt.Sprintf("agent %d", i+1)
+					if a.Label != "" {
+						title = a.Label
+					} else if a.Title != "" {
+						title = a.Title
+					}
+					status := firstNonEmptyStr(a.Status, w.Status)
 					nodes = append(nodes, cass.GraphNode{
 						ID:              childID,
 						NodeType:        cass.NodeTypeWorkflowAgent,
 						ParentSessionID: sid,
 						WorkflowRunID:   w.RunID,
 						Workspace:       sm.workspace,
-						Title:           fmt.Sprintf("agent %d", i+1),
-						Status:          w.Status,
+						Title:           title,
+						Status:          status,
+						ToolCalls:       a.ToolCalls,
+						Tokens:          a.Tokens,
 					})
 					links = append(links, cass.SessionLink{
 						SourceSession: w.RunID,

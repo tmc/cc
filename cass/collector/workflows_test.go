@@ -2,8 +2,10 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tmc/cc/cass"
@@ -62,5 +64,103 @@ func TestExtractWorkflowsFromClaudeSession(t *testing.T) {
 	}
 	if sess.Stats.WorkflowRuns != 1 || sess.Stats.WorkflowAsyncRuns != 1 || sess.Stats.WorkflowAgentRuns != 2 {
 		t.Fatalf("workflow stats = %+v", sess.Stats)
+	}
+}
+
+func TestReadWorkflowAgentsUsesScriptPhasesAndPromptAliases(t *testing.T) {
+	dir := t.TempDir()
+	script := `
+export const meta = {
+  name: 'mlxc-codegen-review',
+  description: 'Independent review',
+  phases: [
+    { title: 'Lenses', detail: 'independent analytical perspectives' },
+    { title: 'Stress', detail: 'adversarial verification' },
+    { title: 'Synthesize', detail: 'merge surviving conclusions' },
+  ],
+}
+const LENSES = [
+  { key: 'architecture', prompt: 'LENS: ARCHITECTURE. Decide.' },
+  { key: 'custom-jaccl', prompt: 'LENS: CUSTOM/HANDWRITTEN APIs (esp. JACCL).' },
+]
+phase('Lenses')
+agent(l.prompt, { label: ` + "`" + `lens:${l.key}` + "`" + `, phase: 'Lenses', agentType: 'Explore' })
+agent('stress', { label: ` + "`" + `stress-strong:${l.key}` + "`" + `, phase: 'Stress', agentType: 'Explore' })
+agent('stress', { label: ` + "`" + `stress-weak:${l.key}` + "`" + `, phase: 'Stress', agentType: 'Explore' })
+phase('Synthesize')
+agent('synth', { label: 'synthesize', phase: 'Synthesize' })
+`
+	info := workflowScriptInfoFromScript(script)
+	if len(info.Phases) != 3 {
+		t.Fatalf("phases = %d, want 3", len(info.Phases))
+	}
+	if len(info.AgentSpecs) != 7 {
+		t.Fatalf("agent specs = %d, want 7", len(info.AgentSpecs))
+	}
+
+	writeWorkflowAgentTestFile(t, filepath.Join(dir, "agent-b.jsonl"),
+		`ADVERSARIAL STRESS TEST. A reviewer using the "architecture" lens concluded:
+
+STRONGEST IDEA: lock the API first`)
+	writeWorkflowAgentTestFile(t, filepath.Join(dir, "agent-a.jsonl"),
+		`You are reviewing.
+
+LENS: CUSTOM/HANDWRITTEN APIs (esp. JACCL). Decide.`)
+	writeWorkflowAgentTestFile(t, filepath.Join(dir, "agent-c.jsonl"),
+		`You are the SYNTHESIZER. Below are 5 analytical lens views.`)
+	if err := os.WriteFile(filepath.Join(dir, "agent-a.meta.json"), []byte(`{"agentType":"Explore"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	journal := "" +
+		`{"type":"started","agentId":"b"}` + "\n" +
+		`{"type":"started","agentId":"a"}` + "\n" +
+		`{"type":"started","agentId":"c"}` + "\n" +
+		`{"type":"result","agentId":"a"}` + "\n" +
+		`{"type":"result","agentId":"c"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "journal.jsonl"), []byte(journal), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agents := readWorkflowAgents(cass.WorkflowRun{TranscriptDir: dir}, info)
+	if len(agents) != 3 {
+		t.Fatalf("agents = %d, want 3", len(agents))
+	}
+	tests := []struct {
+		index     int
+		id        string
+		label     string
+		phase     string
+		status    string
+		agentType string
+	}{
+		{0, "b", "stress-strong:architecture", "Stress", "running", ""},
+		{1, "a", "lens:custom-jaccl", "Lenses", "completed", "Explore"},
+		{2, "c", "synthesize", "Synthesize", "completed", ""},
+	}
+	for _, tt := range tests {
+		a := agents[tt.index]
+		if a.ID != tt.id || a.Label != tt.label || a.Phase != tt.phase || a.Status != tt.status || a.AgentType != tt.agentType {
+			t.Fatalf("agent %d = %+v, want id=%s label=%s phase=%s status=%s type=%s",
+				tt.index, a, tt.id, tt.label, tt.phase, tt.status, tt.agentType)
+		}
+	}
+}
+
+func writeWorkflowAgentTestFile(t *testing.T, path, prompt string) {
+	t.Helper()
+	line, err := json.Marshal(map[string]any{
+		"type":        "user",
+		"isSidechain": true,
+		"agentId":     strings.TrimSuffix(strings.TrimPrefix(filepath.Base(path), "agent-"), ".jsonl"),
+		"message": map[string]any{
+			"role":    "user",
+			"content": prompt,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(line, '\n'), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
