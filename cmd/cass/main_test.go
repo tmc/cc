@@ -1,9 +1,17 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/cass/service"
 	"github.com/tmc/cc/cass/store"
 )
 
@@ -100,4 +108,117 @@ func TestWorkflowAgentLabelsSkipPromptTitles(t *testing.T) {
 	if len(got) != 1 || got[0] != "Explore" {
 		t.Fatalf("workflowAgentLabels = %v, want [Explore]", got)
 	}
+}
+
+func TestRunWorkflowsListsIndexedRuns(t *testing.T) {
+	ctx := context.Background()
+	start := time.Unix(1_700_000_000, 0).UTC()
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{cassTestCollector{sessions: []cass.Session{{
+			ID:        "parent-1",
+			Agent:     "claude-code",
+			Title:     "workflow parent",
+			Workspace: "/work/proj",
+			StartedAt: start,
+			EndedAt:   start.Add(time.Hour),
+			Messages:  []cass.Message{{Role: "user", Content: "run workflow"}},
+			Workflows: []cass.WorkflowRun{{
+				RunID:       "wf_1",
+				Name:        "review workflow",
+				Description: "review this branch",
+				Status:      "completed",
+				Phases: []cass.WorkflowPhase{
+					{Title: "Review"},
+					{Title: "Synthesize"},
+				},
+				AgentCount:        2,
+				JournalEventCount: 7,
+				StartedAt:         start.Add(time.Minute),
+				Agents: []cass.WorkflowAgent{
+					{ID: "agent-a", Label: "lens:api", Phase: "Review", AgentType: "Explore"},
+					{ID: "agent-b", Phase: "Synthesize", AgentType: "Writer"},
+				},
+			}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v; want 1, nil", n, err)
+	}
+
+	text, err := captureStdout(t, func() error {
+		return runWorkflows(ctx, svc, []string{"--session", "parent-1"}, false)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"review workflow",
+		"completed",
+		"phases: Review / Synthesize",
+		"agents: lens:api, Writer",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("workflow text output missing %q:\n%s", want, text)
+		}
+	}
+
+	raw, err := captureStdout(t, func() error {
+		return runWorkflows(ctx, svc, []string{"parent-1"}, true)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []workflowListEntry
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, raw)
+	}
+	if len(got) != 1 || got[0].RunID != "wf_1" || len(got[0].Phases) != 2 || len(got[0].Agents) != 2 {
+		t.Fatalf("workflow JSON output = %+v", got)
+	}
+}
+
+type cassTestCollector struct {
+	sessions []cass.Session
+}
+
+func (c cassTestCollector) Name() string { return "test" }
+
+func (c cassTestCollector) Detect(context.Context) (*cass.DetectionResult, error) {
+	return &cass.DetectionResult{Agent: c.Name(), Found: true, Paths: []string{"test"}}, nil
+}
+
+func (c cassTestCollector) Scan(ctx context.Context, _ cass.ScanConfig, out chan<- cass.Session) error {
+	defer close(out)
+	for _, sess := range c.sessions {
+		select {
+		case out <- sess:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	runErr := fn()
+	w.Close()
+	os.Stdout = old
+	b, readErr := io.ReadAll(r)
+	r.Close()
+	if runErr != nil {
+		return string(b), runErr
+	}
+	return string(b), readErr
 }
