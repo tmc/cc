@@ -3806,7 +3806,12 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       }
     });
     const byStart = (a, b) => {
-      const sa = nodeData[a].started_at || 0, sb = nodeData[b].started_at || 0;
+      const na = nodeData[a] || {};
+      const nb = nodeData[b] || {};
+      const ia = na.workflow_agent_index ?? Number.MAX_SAFE_INTEGER;
+      const ib = nb.workflow_agent_index ?? Number.MAX_SAFE_INTEGER;
+      if (ia !== ib) return ia - ib;
+      const sa = na.started_at || 0, sb = nb.started_at || 0;
       return sa !== sb ? sa - sb : (a < b ? -1 : 1);
     };
     sessionsList.sort(byStart);

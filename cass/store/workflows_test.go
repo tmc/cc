@@ -288,6 +288,9 @@ func TestGraphExpandedMode(t *testing.T) {
 	if promptTitleNode.Label != "Stress" || promptTitleNode.Title != "Explore 2" || promptTitleNode.Phase != "Stress" || promptTitleNode.AgentType != "Explore" {
 		t.Errorf("agent-2 graph node = %+v, want phase label with prompt title kept as subtitle", promptTitleNode)
 	}
+	if promptTitleNode.WorkflowAgentIndex != 1 {
+		t.Errorf("agent-2 graph index = %d, want 1", promptTitleNode.WorkflowAgentIndex)
+	}
 
 	var workflowNode cass.GraphNode
 	for _, n := range g.Nodes {

@@ -2259,6 +2259,7 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 						WorkflowRunID:   w.RunID,
 						Workspace:       sm.workspace,
 						Title:           title,
+						WorkflowAgentIndex: i,
 						Label:           firstNonEmptyStr(a.Label, a.Phase),
 						Phase:           a.Phase,
 						AgentType:       a.AgentType,

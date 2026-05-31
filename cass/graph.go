@@ -99,6 +99,7 @@ type GraphNode struct {
 	WorkflowRunID     string `json:"workflow_run_id,omitempty"`
 	Name              string `json:"name,omitempty"`
 	TaskID            string `json:"task_id,omitempty"`
+	WorkflowAgentIndex int   `json:"workflow_agent_index,omitempty"`
 	Label             string `json:"label,omitempty"`
 	Phase             string `json:"phase,omitempty"`
 	AgentType         string `json:"agent_type,omitempty"`
