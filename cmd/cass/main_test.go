@@ -219,6 +219,39 @@ func TestRunWorkflowsListsIndexedRuns(t *testing.T) {
 	}
 }
 
+func TestRunRequestsNoRequestsMessage(t *testing.T) {
+	ctx := context.Background()
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{cassTestCollector{sessions: []cass.Session{{
+			ID:        "req-empty-1",
+			Agent:     "codex-cli",
+			Title:     "no requests",
+			Workspace: "/work/reqs",
+			StartedAt: time.Now().Add(-time.Minute),
+			EndedAt:   time.Now(),
+			Messages:  []cass.Message{{Role: "user", Content: "hello"}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if _, err := svc.Index(ctx, true); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+
+	text, err := captureStdout(t, func() error {
+		return runRequests(ctx, svc, nil, false)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "no API requests indexed") {
+		t.Fatalf("runRequests output missing API request wording:\n%s", text)
+	}
+}
+
 func workflowByRunID(workflows []workflowListEntry, id string) *workflowListEntry {
 	for i := range workflows {
 		if workflows[i].RunID == id {

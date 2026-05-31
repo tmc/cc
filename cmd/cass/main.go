@@ -207,7 +207,7 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	}
 	fmt.Printf("indexed %d sessions\n", count)
 	if harCount > 0 {
-		fmt.Printf("indexed %d HAR requests\n", harCount)
+		fmt.Printf("indexed %d API requests from HAR\n", harCount)
 	}
 	if sessionV2Count > 0 {
 		fmt.Printf("indexed %d sessionv2 requests\n", sessionV2Count)
@@ -1367,7 +1367,7 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// runRequests shows HAR-derived API request breakdown, optionally filtered to a session.
+// runRequests shows API request breakdown, optionally filtered to a session.
 func runRequests(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
 	fs := flag.NewFlagSet("requests", flag.ExitOnError)
 	since := fs.Duration("since", 0, "requests within duration (e.g. 24h, 168h)")
@@ -1399,9 +1399,9 @@ func runRequests(ctx context.Context, svc *service.Service, args []string, jsonO
 
 	if len(requests) == 0 {
 		if sessionID != "" {
-			fmt.Printf("no HAR requests indexed for session %s\n", sessionID)
+			fmt.Printf("no API requests indexed for session %s\n", sessionID)
 		} else {
-			fmt.Println("no HAR requests indexed (use: cass index --har-dir <path>)")
+			fmt.Println("no API requests indexed (use: cass index --har-dir <path>)")
 		}
 		return nil
 	}
