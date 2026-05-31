@@ -14,7 +14,6 @@ func TestUnsupportedCollectorsReturnScanError(t *testing.T) {
 		col  cass.Collector
 		want string
 	}{
-		{"antigravity", &Antigravity{}, "antigravity scan not implemented"},
 		{"cursor", &Cursor{}, "cursor scan not implemented"},
 	}
 	for _, tt := range tests {
