@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -319,6 +320,19 @@ func TestRunIndexWrapsApiRequestError(t *testing.T) {
 	err = runIndex(ctx, svc, []string{"--har-dir", filepath.Join(t.TempDir(), "missing")}, false)
 	if err == nil || !strings.Contains(err.Error(), "index api requests") {
 		t.Fatalf("runIndex error = %v, want wrapped api request wording", err)
+	}
+}
+
+func TestIndexUsageMentionsApiRequestDir(t *testing.T) {
+	fs := newIndexFlagSet()
+	var buf bytes.Buffer
+	fs.SetOutput(&buf)
+	fs.Usage()
+	got := buf.String()
+	for _, want := range []string{"--api-request-dir", "-api-request-dir", "-har-dir"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("index usage missing %q:\n%s", want, got)
+		}
 	}
 }
 

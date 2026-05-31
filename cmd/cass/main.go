@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,9 +150,25 @@ func rewriteIndexArgs(args []string) []string {
 	return out
 }
 
+func newIndexFlagSet() *flag.FlagSet {
+	fs := flag.NewFlagSet("index", flag.ExitOnError)
+	fs.Usage = func() {
+		printIndexUsage(fs.Output(), fs)
+	}
+	return fs
+}
+
+func printIndexUsage(w io.Writer, fs *flag.FlagSet) {
+	fmt.Fprintln(w, "Usage of index:")
+	fs.PrintDefaults()
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  --api-request-dir")
+	fmt.Fprintln(w, "      alias for -api-request-dir and --har-dir")
+}
+
 func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
 	args = rewriteIndexArgs(args)
-	fs := flag.NewFlagSet("index", flag.ExitOnError)
+	fs := newIndexFlagSet()
 	force := fs.Bool("force", false, "rebuild index from scratch")
 	harDir := fs.String("har-dir", "", "directory of Proxyman HAR export files to ingest")
 	apiRequestDir := fs.String("api-request-dir", "", "directory of API request export files to ingest")
