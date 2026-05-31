@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/cass/collector"
@@ -97,6 +98,115 @@ func TestIndexPathsWorkflowAgentAttributed(t *testing.T) {
 	if !strings.HasSuffix(agents[0].SourcePath, "agent-aone.jsonl") {
 		t.Errorf("agent source_path = %q", agents[0].SourcePath)
 	}
+}
+
+func TestSessionEnrichesStaleWorkflowMetadata(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	scriptPath := filepath.Join(root, "review.js")
+	transcriptDir := filepath.Join(root, "subagents", "workflows", "wf_stale")
+	if err := os.MkdirAll(transcriptDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := `
+export const meta = {
+  name: 'review-flow',
+  description: 'review stale metadata',
+  phases: [
+    { title: 'Lenses', detail: 'first pass' },
+  ],
+}
+phase('Lenses')
+await agent('review api surface', { label: 'lens:api', phase: 'Lenses', agentType: 'Explore' })
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentPath := filepath.Join(transcriptDir, "agent-aone.jsonl")
+	agentLines := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-05-28T17:16:00Z","message":{"role":"user","content":"review api surface"}}`,
+		`{"type":"assistant","timestamp":"2026-05-28T17:16:30Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"Read","input":{}}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(agentPath, []byte(agentLines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, err := New(Config{DBPath: filepath.Join(root, "index.db"), Collectors: nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+
+	start := mustParseTime(t, "2026-05-28T17:14:00Z")
+	stale := cass.Session{
+		ID:         "stale-parent",
+		Agent:      "claude-code",
+		Title:      "stale workflow",
+		Workspace:  "tmc/cc",
+		SourcePath: filepath.Join(root, "parent.jsonl"),
+		StartedAt:  start,
+		EndedAt:    start.Add(time.Minute),
+		Messages:   []cass.Message{{Role: "user", Content: "run workflow", CreatedAt: start}},
+		Workflows: []cass.WorkflowRun{{
+			RunID:         "wf_stale",
+			Name:          "review-flow",
+			ScriptPath:    scriptPath,
+			TranscriptDir: transcriptDir,
+			AgentCount:    1,
+			StartedAt:     start,
+			Agents: []cass.WorkflowAgent{{
+				ID:         "aone",
+				Title:      "You are reviewing this workflow transcript. READ THESE FILES FIRST before responding.",
+				SourcePath: agentPath,
+				Status:     "completed",
+			}},
+		}},
+	}
+	if err := svc.store.BatchIndex(ctx, []cass.Session{stale}); err != nil {
+		t.Fatal(err)
+	}
+
+	hit, err := svc.Session(ctx, "stale-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEnrichedWorkflow(t, hit)
+
+	result, err := svc.Search(ctx, cass.SearchRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(result.Hits))
+	}
+	assertEnrichedWorkflow(t, result.Hits[0])
+}
+
+func assertEnrichedWorkflow(t *testing.T, hit cass.Hit) {
+	t.Helper()
+	if len(hit.Workflows) != 1 {
+		t.Fatalf("workflows = %+v, want one", hit.Workflows)
+	}
+	wf := hit.Workflows[0]
+	if len(wf.Phases) != 1 || wf.Phases[0].Title != "Lenses" || wf.Phases[0].Detail != "first pass" {
+		t.Fatalf("phases = %+v, want Lenses phase", wf.Phases)
+	}
+	if len(wf.Agents) != 1 {
+		t.Fatalf("agents = %+v, want one", wf.Agents)
+	}
+	a := wf.Agents[0]
+	if a.Label != "lens:api" || a.Phase != "Lenses" || a.AgentType != "Explore" {
+		t.Fatalf("agent metadata = %+v, want lens:api/Lenses/Explore", a)
+	}
+}
+
+func mustParseTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	ts, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ts
 }
 
 func TestParentSessionPath(t *testing.T) {

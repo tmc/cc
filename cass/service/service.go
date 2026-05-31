@@ -210,7 +210,14 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 
 // Search queries the index.
 func (s *Service) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchResult, error) {
-	return s.store.Search(ctx, req)
+	result, err := s.store.Search(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	for i := range result.Hits {
+		enrichHitWorkflowMetadata(&result.Hits[i])
+	}
+	return result, nil
 }
 
 // SourcePath returns the source file path for a session by its ID.
@@ -220,7 +227,21 @@ func (s *Service) SourcePath(ctx context.Context, id string) (string, error) {
 
 // Session returns indexed metadata for a session.
 func (s *Service) Session(ctx context.Context, id string) (cass.Hit, error) {
-	return s.store.Session(ctx, id)
+	hit, err := s.store.Session(ctx, id)
+	if err != nil {
+		return cass.Hit{}, err
+	}
+	enrichHitWorkflowMetadata(&hit)
+	return hit, nil
+}
+
+func enrichHitWorkflowMetadata(hit *cass.Hit) {
+	if hit == nil {
+		return
+	}
+	for i := range hit.Workflows {
+		collector.EnrichWorkflowMetadata(&hit.Workflows[i])
+	}
 }
 
 // Stats returns basic index statistics.

@@ -254,6 +254,39 @@ func enrichWorkflowFromScriptFile(w *cass.WorkflowRun) workflowScriptInfo {
 	return info
 }
 
+// EnrichWorkflowMetadata fills script-declared phases and workflow-agent labels
+// from the run artifacts still on disk. It is best-effort and is useful when an
+// existing index row predates richer workflow metadata extraction.
+func EnrichWorkflowMetadata(w *cass.WorkflowRun) {
+	if w == nil {
+		return
+	}
+	info := enrichWorkflowFromScriptFile(w)
+	if needsWorkflowAgentEnrichment(w) {
+		if agents := readWorkflowAgents(*w, info); len(agents) > 0 {
+			w.Agents = agents
+			if w.AgentCount == 0 {
+				w.AgentCount = len(agents)
+			}
+		}
+	}
+}
+
+func needsWorkflowAgentEnrichment(w *cass.WorkflowRun) bool {
+	if w == nil || w.TranscriptDir == "" {
+		return false
+	}
+	if len(w.Agents) == 0 {
+		return true
+	}
+	for _, a := range w.Agents {
+		if a.Label == "" || a.Phase == "" {
+			return true
+		}
+	}
+	return false
+}
+
 func applyWorkflowScriptInfo(w *cass.WorkflowRun, info workflowScriptInfo) {
 	if w == nil {
 		return
