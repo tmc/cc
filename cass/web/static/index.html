@@ -5348,7 +5348,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('files', fmtNum(agg.files_read + agg.files_written + agg.files_edited), fmtNum(agg.files_read) + ' read · ' + fmtNum(agg.files_edited) + ' edited · ' + fmtNum(agg.files_written) + ' written')}
         ${card('lines written', fmtNum(agg.lines_written))}
         ${card('total time', fmtDuration(agg.duration_secs))}
-        ${card('child agent spawns', fmtNum(agg.subagent_spawns))}
+        ${card('child agent spawn events', fmtNum(agg.subagent_spawns))}
         ${card('workflow runs', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' agents · ' + (agg.workflow_task_ops || 0) + ' task operations')}
         ${card('goals', fmtNum(agg.goals || 0), (agg.active_goals || 0) + ' active · ' + (agg.completed_goals || 0) + ' complete')}
         ${card('skill usage', fmtNum((agg.selected_skills || 0) + (agg.loaded_skills || 0)),
@@ -5360,7 +5360,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('iTerm2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
           agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
         ${card('team operations', fmtNum(agg.team_inbox_reads + agg.team_inbox_sends + agg.team_task_ops + agg.team_spawns),
-          agg.team_inbox_reads + ' reads · ' + agg.team_inbox_sends + ' messages · ' + agg.team_task_ops + ' task operations · ' + agg.team_spawns + ' spawns')}
+          agg.team_inbox_reads + ' reads · ' + agg.team_inbox_sends + ' messages · ' + agg.team_task_ops + ' task operations · ' + agg.team_spawns + ' spawn events')}
         ${card('last indexed', lastIdx)}
       </div>
 
