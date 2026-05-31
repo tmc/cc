@@ -2127,6 +2127,7 @@ function workflowToolSummary(block) {
 function workflowAgentName(a, index) {
   if (a.label) return a.label;
   if (a.title && !looksLikePromptTitle(a.title)) return a.title;
+  if (a.phase) return a.phase + ' ' + String((index || 0) + 1).padStart(2, '0');
   if (a.agent_type) return a.agent_type + ' ' + String((index || 0) + 1).padStart(2, '0');
   return numberedAgentName(index);
 }
@@ -2134,6 +2135,7 @@ function workflowAgentName(a, index) {
 function workflowAgentSubtitle(a, name) {
   const title = (a.title || '').trim();
   if (!title || title === name || title === a.label || looksLikePromptTitle(title)) return '';
+  if (a.phase && title === a.phase) return '';
   return title;
 }
 
