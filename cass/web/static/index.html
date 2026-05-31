@@ -1750,7 +1750,7 @@ function workflowAgentName(a, index) {
 
 function workflowAgentSubtitle(a, name) {
   const title = (a.title || '').trim();
-  if (!title || title === name || title === a.label) return '';
+  if (!title || title === name || title === a.label || looksLikePromptTitle(title)) return '';
   return title;
 }
 
