@@ -3349,6 +3349,7 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
         return html`
           <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
             <div class="graph-tooltip-title">${n.name || tooltip.id}</div>
+            ${n.summary && html`<div class="graph-tooltip-stat" style="white-space:normal;max-width:240px">${n.summary}</div>`}
             ${n.description && html`<div class="graph-tooltip-stat" style="white-space:normal;max-width:240px">${n.description}</div>`}
             <div class="graph-tooltip-stat">
               ${[
@@ -3356,6 +3357,14 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
                 (n.agent_count || 0) + ' agents',
                 n.journal_event_count && n.journal_event_count + ' events',
                 dur && dur,
+              ].filter(Boolean).join(' · ')}
+            </div>
+            <div class="graph-tooltip-stat">
+              ${[
+                n.task_id && 'task ' + n.task_id,
+                n.script_path && 'script ' + shortPath(n.script_path),
+                n.transcript_dir && 'transcript ' + shortPath(n.transcript_dir),
+                n.source_path && 'source ' + shortPath(n.source_path),
               ].filter(Boolean).join(' · ')}
             </div>
             ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}

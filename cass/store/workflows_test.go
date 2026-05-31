@@ -288,6 +288,22 @@ func TestGraphExpandedMode(t *testing.T) {
 	if promptTitleNode.Label != "Stress" || promptTitleNode.Title != "Explore 2" || promptTitleNode.Phase != "Stress" || promptTitleNode.AgentType != "Explore" {
 		t.Errorf("agent-2 graph node = %+v, want phase label with prompt title kept as subtitle", promptTitleNode)
 	}
+
+	var workflowNode cass.GraphNode
+	for _, n := range g.Nodes {
+		if n.NodeType == cass.NodeTypeWorkflow && n.ID == "wf_aaa" {
+			workflowNode = n
+			break
+		}
+	}
+	if workflowNode.ID == "" {
+		t.Fatalf("missing workflow node for wf_aaa")
+	}
+	if workflowNode.TaskID != "task_aaa" || workflowNode.Summary != "independent multi-lens review and adversarial stress-test" ||
+		workflowNode.ScriptPath != "/p/scripts/workflows/wf_aaa.js" || workflowNode.TranscriptDir != "/p/subagents/workflows/wf_aaa" ||
+		workflowNode.SourcePath != "/p/workflows/wf_aaa.json" {
+		t.Errorf("workflow node metadata = %+v, want task/summary/path fields", workflowNode)
+	}
 }
 
 func TestGraphSubagentNodes(t *testing.T) {
