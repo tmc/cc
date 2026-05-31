@@ -150,6 +150,30 @@ func TestTitleFromSummary(t *testing.T) {
 			want: "session-abc.jsonl",
 		},
 		{
+			name: "command markup",
+			summary: cc.SessionSummary{
+				FirstPrompt: "<command-name>efforts</command-name> <command-message>efforts</command-message>",
+				File:        "/path/to/session.jsonl",
+			},
+			want: "efforts",
+		},
+		{
+			name: "goal context markup",
+			summary: cc.SessionSummary{
+				FirstPrompt: "<goal_context> Continue working toward the active thread. </goal_context>",
+				File:        "/path/to/session.jsonl",
+			},
+			want: "Continue working toward the active thread.",
+		},
+		{
+			name: "image payload markup",
+			summary: cc.SessionSummary{
+				FirstPrompt: "<image name=[Image #1]> input_image data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA",
+				File:        "/path/to/session.jsonl",
+			},
+			want: "image input",
+		},
+		{
 			name: "empty prompt with empty file",
 			summary: cc.SessionSummary{
 				FirstPrompt: "",

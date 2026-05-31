@@ -1051,6 +1051,41 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
 
 // --- Hit Item ---
 
+function cleanSessionTitle(title) {
+  let t = (title || '').trim();
+  if (!t) return '';
+  const commandMessage = t.match(/<command-message>([^<]+)<\/command-message>/i);
+  if (commandMessage && commandMessage[1].trim()) return commandMessage[1].trim();
+  const commandName = t.match(/<command-name>([^<]+)<\/command-name>/i);
+  if (commandName && commandName[1].trim()) return commandName[1].trim();
+  const hadImage = /<image[^>]*>/i.test(t) || /\binput_image\s+data:image\//i.test(t);
+  t = t
+    .replace(/<image[^>]*>/gi, ' ')
+    .replace(/\binput_image\s+data:image\/\S+/gi, ' ')
+    .replace(/<\/?goal_context>/gi, ' ')
+    .replace(/<\/?[a-z][^>]*>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!t && hadImage) return 'image input';
+  return t;
+}
+
+function displaySessionTitle(hit) {
+  return cleanSessionTitle(hit?.title) || hit?.title || 'Untitled';
+}
+
+function importantSkills(skills) {
+  return (skills || []).filter(s => s.kind === 'selected' || s.kind === 'tool');
+}
+
+function skillKindLabel(kind) {
+  if (kind === 'expanded') return 'context';
+  if (kind === 'available') return 'available';
+  if (kind === 'selected') return 'selected';
+  if (kind === 'loaded') return 'loaded';
+  return kind || 'skill';
+}
+
 function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onToolClick }) {
   const stats = [];
   if (h.tool_calls) stats.push(h.tool_calls + ' tools');
@@ -1079,8 +1114,10 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
   const primaryGoalBadgeText = primaryGoalBlocked
     ? primaryGoalGates.unresolved + ' gate' + (primaryGoalGates.unresolved === 1 ? '' : 's')
     : primaryGoalStatus + ' goal';
-  const visibleSkills = (h.skills || []).filter(s => s.kind !== 'available');
-  const primarySkill = visibleSkills.length ? visibleSkills[visibleSkills.length - 1] : (h.skills && h.skills.length ? h.skills[h.skills.length - 1] : null);
+  const primarySkills = importantSkills(h.skills);
+  const primarySkill = primarySkills.length ? primarySkills[primarySkills.length - 1] : null;
+  const shownSkillCount = (h.selected_skill_count || 0) + (h.loaded_skill_count || 0);
+  const title = displaySessionTitle(h);
 
   // Team badge: lead gets crown, member gets dot.
   const teamBadge = h.team_name ? html`
@@ -1125,7 +1162,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
             matched ${h.workflow_match_count || (h.matched_workflow_ids || []).length} agent${(h.workflow_match_count || 1) === 1 ? '' : 's'}
           </span>
         `}
-        <span class="hit-title">${h.title || 'Untitled'}</span>
+        <span class="hit-title" title=${h.title && h.title !== title ? h.title : ''}>${title}</span>
         ${h.sparkline && html`<span class="hit-sparkline">${h.sparkline}</span>`}
       </div>
       ${h.snippet && html`<div class="hit-snippet">${renderSnippet(h.snippet)}</div>`}
@@ -1143,7 +1180,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         ${stats.length > 0 && html`<span class="hit-stats">${stats.join(' | ')}</span>`}
         ${h.compactions > 0 && html`<span class="hit-compactions">${h.compactions} compaction${h.compactions > 1 ? 's' : ''}</span>`}
         ${h.goal_count > 0 && html`<span class="hit-goals">${h.active_goal_count || 0} active / ${h.completed_goal_count || 0} complete</span>`}
-        ${h.skill_count > 0 && html`<span class="hit-skills">${h.selected_skill_count || 0} selected / ${h.loaded_skill_count || 0} loaded</span>`}
+        ${shownSkillCount > 0 && html`<span class="hit-skills">${h.selected_skill_count || 0} selected / ${h.loaded_skill_count || 0} loaded</span>`}
         ${h.workflow_count > 0 && html`<span class="hit-workflows">${h.workflow_count} workflow${h.workflow_count === 1 ? '' : 's'} · ${h.workflow_agent_count || 0} agents${h.workflow_task_op_count ? ' · ' + h.workflow_task_op_count + ' task ops' : ''}</span>`}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
       </div>
@@ -1699,6 +1736,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const resumeCmd = resumeCommand(hit);
   const activeTab = activeTabRaw;
   const needsSessionEntries = activeTab === 'conversation' || activeTab === 'agents';
+  const detailTitle = displaySessionTitle(hit);
+  const detailSkillCount = (hit?.selected_skill_count || 0) + (hit?.loaded_skill_count || 0);
 
   function setActiveTab(tab) {
     const normalized = normalizeDetailTab(tab);
@@ -1864,7 +1903,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
   function onDetailWheel(e) {
     e.stopPropagation();
-    if (e.target.closest('.detail-body')) {
+    if (e.target.closest('.detail-body, .detail-skills-scroll')) {
       return;
     }
     if (bodyRef.current) {
@@ -2215,25 +2254,56 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
   function renderSkillPanel() {
     if (!hit?.skills || hit.skills.length === 0) return null;
+    const active = hit.skills.filter(skill => skill.kind !== 'available');
+    const available = hit.skills.filter(skill => skill.kind === 'available');
+    const selected = hit.skills.filter(skill => skill.kind === 'selected' || skill.kind === 'tool').length;
+    const loaded = hit.skills.filter(skill => skill.kind === 'loaded').length;
+    const context = hit.skills.filter(skill => skill.kind === 'expanded').length;
+    const counts = [
+      selected ? selected + ' selected' : '',
+      loaded ? loaded + ' loaded' : '',
+      context ? context + ' context' : '',
+      available.length ? available.length + ' available' : '',
+    ].filter(Boolean).join(' / ');
+    const renderCard = (skill, i) => html`
+      <div class="detail-skill-card ${skill.kind || 'skill'}" key=${i}>
+        <div class="detail-skill-head">
+          <span class="detail-skill-name">${skill.name}</span>
+          <span class="detail-skill-kind">${skillKindLabel(skill.kind)}</span>
+        </div>
+        ${skill.path && skill.kind !== 'available' && html`<div class="detail-skill-path">${skill.path}</div>`}
+        <div class="detail-skill-meta">
+          ${skill.source && html`<span>${skill.source}</span>`}
+          ${skill.count > 1 && html`<span>${skill.count} signals</span>`}
+          ${skill.last_seen && html`<span>${relTime(skill.last_seen)}</span>`}
+        </div>
+        ${skill.evidence && skill.evidence.length > 0 && skill.kind !== 'available' && html`
+          <div class="detail-skill-evidence">${skill.evidence.join('; ')}</div>
+        `}
+      </div>
+    `;
     return html`
       <div class="detail-skills">
-        ${hit.skills.map((skill, i) => html`
-          <div class="detail-skill-card ${skill.kind || 'skill'}" key=${i}>
-            <div class="detail-skill-head">
-              <span class="detail-skill-name">${skill.name}</span>
-              <span class="detail-skill-kind">${skill.kind || 'skill'}</span>
-            </div>
-            ${skill.path && html`<div class="detail-skill-path">${skill.path}</div>`}
-            <div class="detail-skill-meta">
-              ${skill.source && html`<span>${skill.source}</span>`}
-              ${skill.count > 1 && html`<span>${skill.count} signals</span>`}
-              ${skill.last_seen && html`<span>${relTime(skill.last_seen)}</span>`}
-            </div>
-            ${skill.evidence && skill.evidence.length > 0 && html`
-              <div class="detail-skill-evidence">${skill.evidence.join('; ')}</div>
-            `}
+        <div class="detail-skills-summary">
+          <span>Skills</span>
+          <strong>${counts || hit.skills.length}</strong>
+        </div>
+        ${active.length > 0 && html`
+          <div class="detail-skills-scroll detail-skill-list active">
+            ${active.map(renderCard)}
           </div>
-        `)}
+        `}
+        ${available.length > 0 && html`
+          <details class="detail-skill-section">
+            <summary>
+              <span>available skills</span>
+              <strong>${available.length}</strong>
+            </summary>
+            <div class="detail-skills-scroll detail-skill-list available">
+              ${available.map(renderCard)}
+            </div>
+          </details>
+        `}
       </div>
     `;
   }
@@ -2243,7 +2313,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       ${hit && html`
         <div class="detail-header">
           <div class="detail-header-top">
-            <div class="detail-title">${hit.title || 'Untitled'}</div>
+            <div class="detail-title" title=${hit.title && hit.title !== detailTitle ? hit.title : ''}>${detailTitle}</div>
             <button class="detail-close" onClick=${onClose}>close</button>
           </div>
           <div class="detail-badges">
@@ -2260,7 +2330,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
             ${(hit.input_tokens || hit.output_tokens) && html`<span>${fmtNum((hit.input_tokens||0)+(hit.output_tokens||0))} tok</span>`}
             ${hit.compactions > 0 && html`<span class="hit-compactions">${hit.compactions} compaction${hit.compactions > 1 ? 's' : ''}</span>`}
             ${hit.goal_count > 0 && html`<span class="hit-goals">${hit.active_goal_count || 0} active goals / ${hit.completed_goal_count || 0} complete</span>`}
-            ${hit.skill_count > 0 && html`<span class="hit-skills">${hit.selected_skill_count || 0} selected skills / ${hit.loaded_skill_count || 0} loaded</span>`}
+            ${detailSkillCount > 0 && html`<span class="hit-skills">${hit.selected_skill_count || 0} selected skills / ${hit.loaded_skill_count || 0} loaded</span>`}
             ${hit.workflow_count > 0 && html`<span class="hit-workflows">${hit.workflow_count} workflow${hit.workflow_count === 1 ? '' : 's'} / ${hit.workflow_agent_count || 0} agents / ${hit.workflow_task_op_count || 0} task ops</span>`}
           </div>
           ${renderGoalPanel()}

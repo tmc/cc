@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/tmc/cc"
@@ -285,13 +286,49 @@ func titleFromSummary(s cc.SessionSummary) string {
 		return s.CustomTitle
 	}
 	if s.FirstPrompt != "" {
-		t := s.FirstPrompt
-		if len(t) > 80 {
-			t = t[:80] + "..."
-		}
-		return t
+		return truncateTitle(cleanGeneratedTitle(s.FirstPrompt))
 	}
 	return filepath.Base(s.File)
+}
+
+var (
+	commandNameTitleRE    = regexp.MustCompile(`(?i)<command-name>([^<]+)</command-name>`)
+	commandMessageTitleRE = regexp.MustCompile(`(?i)<command-message>([^<]+)</command-message>`)
+	goalContextTitleRE    = regexp.MustCompile(`(?i)</?goal_context>`)
+	imageTagTitleRE       = regexp.MustCompile(`(?i)<image[^>]*>`)
+	imagePayloadTitleRE   = regexp.MustCompile(`(?i)\binput_image\s+data:image/\S+`)
+	xmlTagTitleRE         = regexp.MustCompile(`(?i)</?[a-z][^>]*>`)
+)
+
+func cleanGeneratedTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	if m := commandMessageTitleRE.FindStringSubmatch(title); len(m) == 2 && strings.TrimSpace(m[1]) != "" {
+		return strings.TrimSpace(m[1])
+	}
+	if m := commandNameTitleRE.FindStringSubmatch(title); len(m) == 2 && strings.TrimSpace(m[1]) != "" {
+		return strings.TrimSpace(m[1])
+	}
+
+	hadImage := imageTagTitleRE.MatchString(title) || imagePayloadTitleRE.MatchString(title)
+	title = imageTagTitleRE.ReplaceAllString(title, " ")
+	title = imagePayloadTitleRE.ReplaceAllString(title, " ")
+	title = goalContextTitleRE.ReplaceAllString(title, " ")
+	title = xmlTagTitleRE.ReplaceAllString(title, " ")
+	title = strings.Join(strings.Fields(title), " ")
+	if title == "" && hadImage {
+		return "image input"
+	}
+	return title
+}
+
+func truncateTitle(title string) string {
+	if len(title) > 80 {
+		return title[:80] + "..."
+	}
+	return title
 }
 
 // workspaceFromPath extracts the original workspace path from the encoded

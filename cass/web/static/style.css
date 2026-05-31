@@ -890,10 +890,52 @@ mark.search-hl {
 
 /* detail: skill cards */
 .detail-skills {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 6px;
   margin-top: 8px;
+  max-height: min(34vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+.detail-skills-summary,
+.detail-skill-section summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 11px;
+}
+.detail-skills-summary strong,
+.detail-skill-section summary strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+.detail-skill-section {
+  border-top: 1px solid var(--border);
+  padding-top: 5px;
+}
+.detail-skill-section summary {
+  cursor: pointer;
+  list-style: none;
+}
+.detail-skill-section summary::-webkit-details-marker { display: none; }
+.detail-skill-section summary::before {
+  content: "[+]";
+  color: var(--faint);
+  margin-right: 4px;
+}
+.detail-skill-section[open] summary::before { content: "[-]"; }
+.detail-skill-list {
+  display: grid;
+  gap: 6px;
+}
+.detail-skill-list.available {
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-top: 6px;
 }
 .detail-skill-card {
   border: 1px solid color-mix(in srgb, var(--cyan) 45%, transparent);
@@ -906,6 +948,21 @@ mark.search-hl {
   border-color: color-mix(in srgb, var(--green) 45%, transparent);
   border-left-color: var(--green);
   background: color-mix(in srgb, var(--green) 5%, transparent);
+}
+.detail-skill-card.available {
+  border-color: var(--border);
+  border-left-color: var(--faint);
+  background: transparent;
+}
+.detail-skill-card.expanded {
+  border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
+  border-left-color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 5%, transparent);
+}
+.detail-skill-card.loaded {
+  border-color: color-mix(in srgb, var(--magenta) 45%, transparent);
+  border-left-color: var(--magenta);
+  background: color-mix(in srgb, var(--magenta) 5%, transparent);
 }
 .detail-skill-head {
   display: flex;
