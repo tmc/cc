@@ -170,6 +170,63 @@ func TestSearchSummaryOmitsDetailPayload(t *testing.T) {
 	}
 }
 
+func TestSearchSummaryIncludesMatchedWorkflowNames(t *testing.T) {
+	ctx := context.Background()
+	start := time.Unix(100, 0)
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: []cass.Session{{
+			ID:         "search-match-1",
+			Agent:      "codex-cli",
+			Title:      "Workflow match",
+			Workspace:  "/work/match",
+			SourcePath: "/tmp/search-match.jsonl",
+			StartedAt:  start,
+			EndedAt:    start.Add(time.Minute),
+			Messages:   []cass.Message{{Role: "user", Content: "ccmagicreview"}},
+			Stats: cass.SessionStats{
+				WorkflowRuns:      1,
+				WorkflowAgentRuns: 1,
+			},
+			Workflows: []cass.WorkflowRun{{
+				RunID:      "wf_match",
+				Name:       "ccmagicreview",
+				Status:     "completed",
+				AgentCount: 1,
+				StartedAt:  start.Add(10 * time.Second),
+			}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v; want 1, nil", n, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/search?q=ccmagicreview&summary=true", nil)
+	rr := httptest.NewRecorder()
+	New(Config{Service: svc}).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
+	var result cass.SearchResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(result.Hits))
+	}
+	hit := result.Hits[0]
+	if got, want := hit.MatchedWorkflowNames, []string{"ccmagicreview"}; !slices.Equal(got, want) {
+		t.Fatalf("matched workflow names = %#v, want %#v", got, want)
+	}
+	if len(hit.MatchedWorkflowIDs) != 1 || hit.MatchedWorkflowIDs[0] != "wf_match" {
+		t.Fatalf("matched workflow ids = %#v, want [wf_match]", hit.MatchedWorkflowIDs)
+	}
+}
+
 func TestSearchCountFalseSkipsExactTotal(t *testing.T) {
 	ctx := context.Background()
 	start := time.Unix(100, 0)
