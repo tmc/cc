@@ -213,6 +213,9 @@ func (c *ClaudeCode) parseSession(ctx context.Context, config cass.ScanConfig, p
 	if sum.Version != "" {
 		meta["version"] = sum.Version
 	}
+	if sid := claudeSessionID(parentEntries); sid != "" {
+		meta["claude_session"] = sid
+	}
 	if len(links) > 0 {
 		meta["session_links"] = links
 	}

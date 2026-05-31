@@ -9,7 +9,7 @@ package cass
 // rate-limit utilization snapshots, and context composition breakdown.
 type APIRequest struct {
 	ID        string `json:"id"`         // SHA256(request_id + timestamp).
-	SessionID string `json:"session_id"` // Linked cass session ID (may be empty).
+	SessionID string `json:"session_id"` // Claude session UUID; legacy rows may hold cass session ID.
 	RequestID string `json:"request_id"` // x-request-id from response headers.
 	Timestamp int64  `json:"timestamp"`  // Request time (unix seconds).
 

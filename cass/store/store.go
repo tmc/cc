@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -21,7 +22,7 @@ type DB struct {
 
 const hitStatsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goals_json, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count`
 
-const hitAPIRequestCountCol = `(SELECT count(*) FROM api_requests ar WHERE ar.session_id = s.id OR (ar.session_id = '' AND ar.it2_session_id = s.id))`
+const hitAPIRequestCountCol = `(SELECT count(*) FROM api_requests ar WHERE ar.session_id = s.id OR ar.session_id IN (SELECT m.claude_session FROM session_mapping m WHERE m.cass_session = s.id) OR (ar.session_id = '' AND ar.it2_session_id = s.id))`
 
 type hitScanner interface {
 	Scan(dest ...any) error
@@ -618,15 +619,14 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		}
 
 		// Store iTerm2 <-> Claude session mapping.
+		claudeSID := claudeSessionIDForSession(sess)
 		if itermSID, ok := sess.Metadata["iterm_session"].(string); ok && itermSID != "" {
-			claudeSID := ""
-			if len(sess.Messages) > 0 {
-				claudeSID = sess.Messages[0].ID
+			if err := upsertSessionMapping(ctx, tx, itermSID, claudeSID, sess.ID, sess.Workspace, sess.Title, sess.StartedAt.Unix()); err != nil {
+				return fmt.Errorf("map session %s: %w", sess.ID, err)
 			}
-			tx.ExecContext(ctx, `
-				INSERT OR REPLACE INTO session_mapping (iterm_session, claude_session, cass_session, workspace, title, started_at)
-				VALUES (?, ?, ?, ?, ?, ?)
-			`, itermSID, claudeSID, sess.ID, sess.Workspace, sess.Title, sess.StartedAt.Unix())
+		}
+		if err := upsertRequestMappingsForSession(ctx, tx, sess, claudeSID); err != nil {
+			return fmt.Errorf("map request sessions %s: %w", sess.ID, err)
 		}
 
 		// Store session links.
@@ -1309,13 +1309,150 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 	}, nil
 }
 
-// SaveMapping stores a mapping between iTerm2 session, Claude session, and CASS session IDs.
-func (s *DB) SaveMapping(ctx context.Context, itermSID, claudeSID, cassSID, workspace, title string, startedAt int64) error {
-	_, err := s.db.ExecContext(ctx, `
+type mappingExec interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+type mappingQueryer interface {
+	mappingExec
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func claudeSessionIDForSession(sess cass.Session) string {
+	if sess.Metadata != nil {
+		if sid, ok := sess.Metadata["claude_session"].(string); ok && sid != "" {
+			return sid
+		}
+	}
+	return claudeSessionIDFromPath(sess.SourcePath)
+}
+
+func claudeSessionIDFromPath(path string) string {
+	base := filepath.Base(path)
+	if !strings.HasSuffix(base, ".jsonl") {
+		return ""
+	}
+	sid := strings.TrimSuffix(base, ".jsonl")
+	if !looksLikeUUID(sid) {
+		return ""
+	}
+	return sid
+}
+
+func looksLikeUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if !('0' <= r && r <= '9' || 'a' <= r && r <= 'f' || 'A' <= r && r <= 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func upsertSessionMapping(ctx context.Context, q mappingExec, itermSID, claudeSID, cassSID, workspace, title string, startedAt int64) error {
+	if itermSID == "" {
+		return nil
+	}
+	_, err := q.ExecContext(ctx, `
 		INSERT OR REPLACE INTO session_mapping (iterm_session, claude_session, cass_session, workspace, title, started_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, itermSID, claudeSID, cassSID, workspace, title, startedAt)
 	return err
+}
+
+func upsertRequestMappingsForSession(ctx context.Context, q mappingQueryer, sess cass.Session, claudeSID string) error {
+	if claudeSID == "" && sess.ID == "" {
+		return nil
+	}
+	rows, err := q.QueryContext(ctx, `
+		SELECT it2_session_id, min(timestamp)
+		FROM api_requests
+		WHERE (session_id = ? OR session_id = ?) AND it2_session_id <> ''
+		GROUP BY it2_session_id
+	`, claudeSID, sess.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var itermSID string
+		var firstSeen int64
+		if err := rows.Scan(&itermSID, &firstSeen); err != nil {
+			return err
+		}
+		startedAt := sess.StartedAt.Unix()
+		if startedAt <= 0 {
+			startedAt = firstSeen
+		}
+		if err := upsertSessionMapping(ctx, q, itermSID, claudeSID, sess.ID, sess.Workspace, sess.Title, startedAt); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func upsertRequestMappings(ctx context.Context, q mappingQueryer, requests []cass.APIRequest) error {
+	type key struct {
+		itermSID  string
+		claudeSID string
+	}
+	firstSeen := make(map[key]int64)
+	for _, r := range requests {
+		if r.IT2SessionID == "" || r.SessionID == "" {
+			continue
+		}
+		k := key{itermSID: r.IT2SessionID, claudeSID: r.SessionID}
+		if firstSeen[k] == 0 || r.Timestamp < firstSeen[k] {
+			firstSeen[k] = r.Timestamp
+		}
+	}
+	for k, ts := range firstSeen {
+		cassSID, workspace, title, startedAt, err := lookupSessionForRequestID(ctx, q, k.claudeSID)
+		if err != nil {
+			return err
+		}
+		if startedAt == 0 {
+			startedAt = ts
+		}
+		if err := upsertSessionMapping(ctx, q, k.itermSID, k.claudeSID, cassSID, workspace, title, startedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func lookupSessionForRequestID(ctx context.Context, q mappingQueryer, sessionID string) (cassSID, workspace, title string, startedAt int64, err error) {
+	if sessionID == "" {
+		return "", "", "", 0, nil
+	}
+	like := "%" + sessionID + ".jsonl"
+	err = q.QueryRowContext(ctx, `
+		SELECT id, workspace, title, started_at
+		FROM sessions
+		WHERE id = ? OR source_path LIKE ?
+		ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, started_at DESC
+		LIMIT 1
+	`, sessionID, like, sessionID).Scan(&cassSID, &workspace, &title, &startedAt)
+	if err == sql.ErrNoRows {
+		return "", "", "", 0, nil
+	}
+	return cassSID, workspace, title, startedAt, err
+}
+
+// SaveMapping stores a mapping between iTerm2 session, Claude session, and CASS session IDs.
+func (s *DB) SaveMapping(ctx context.Context, itermSID, claudeSID, cassSID, workspace, title string, startedAt int64) error {
+	return upsertSessionMapping(ctx, s.db, itermSID, claudeSID, cassSID, workspace, title, startedAt)
 }
 
 // Mappings returns all session mappings, optionally filtered by iTerm2 or Claude session ID.
@@ -2100,6 +2237,9 @@ func (s *DB) BatchIndexRequests(ctx context.Context, requests []cass.APIRequest)
 			return fmt.Errorf("insert request %s: %w", r.ID, err)
 		}
 	}
+	if err := upsertRequestMappings(ctx, tx, requests); err != nil {
+		return fmt.Errorf("map artifact requests: %w", err)
+	}
 
 	return tx.Commit()
 }
@@ -2154,9 +2294,11 @@ func (s *DB) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIReq
 			user_hash, account_uuid, org_id,
 			context_breakdown_json
 		FROM api_requests
-		WHERE session_id = ? OR (session_id = '' AND it2_session_id = ?)
+		WHERE session_id = ?
+			OR session_id IN (SELECT claude_session FROM session_mapping WHERE cass_session = ?)
+			OR (session_id = '' AND it2_session_id = ?)
 		ORDER BY timestamp
-	`, sessionID, sessionID)
+	`, sessionID, sessionID, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("query requests: %w", err)
 	}

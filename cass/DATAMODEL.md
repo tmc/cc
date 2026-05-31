@@ -152,9 +152,10 @@ cache creation tokens, rate-limit snapshots, context composition.
 A running `claude` process.
 
     ID:         pid (OS-assigned integer)
-    Source:     client_pid in HAR request headers; ps/proc at runtime
-    Lifecycle:  ephemeral — valid only while process runs; PID recycling
-                breaks historical lookups
+    Source:     client_pid in HAR request headers, proxy artifact filename,
+                ps/proc at runtime
+    Lifecycle:  ephemeral at runtime; historical only when preserved by
+                proxy artifact paths
 
 ### V6: It2Session
 
@@ -424,10 +425,12 @@ Disambiguation signals:
 ### E7: OSProcess —[runs_in]→ It2Session
 
     Join:        it2 session list → match job_pid; or $ITERM_SESSION_ID
-                 env var at process start
+                 env var at process start; or persisted proxy artifact path
+                 ~/.it2/sessions/<it2>/proxy-traffic.<pid>.jsonl
     Cardinality: N:1 (typically 1:1 for Claude)
-    Confidence:  ephemeral — only queryable while process is running
-    Breaks:      process exit
+    Confidence:  ephemeral from live ps/it2 queries; authoritative from
+                 preserved artifact paths
+    Breaks:      process exit when no artifact path exists
 
 ### E8: APIRequest —[billed_to]→ Account
 
@@ -486,6 +489,9 @@ Haiku classifier subtypes:
     Breaks:      ephemeral PID linkage; concurrent resume multiplicity
 
 Stored in `session_mapping` table as (iterm_session, claude_session) pairs.
+Cass populates this table from both direct JSONL evidence
+(`iterm_session` metadata) and durable API-request artifacts carrying
+`it2_session_id` plus Claude `session_id`.
 
 ### E14: Session —[member_of(role)]→ AgentTeam
 
@@ -754,7 +760,5 @@ PIDs that become invalid after process exit.
 
 ## 13. Remaining Experiments
 
-Ranked by value/cost ratio:
-
-1. **PID→It2 mapping durability** — test E7 persistence across
-   subprocess exit, compaction, resume. Low priority given team infra.
+No open data-model experiments are currently tracked here. New unknowns
+should be added with the evidence needed to close them.

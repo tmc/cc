@@ -518,6 +518,148 @@ func TestSessionReturnsIndexedMetadata(t *testing.T) {
 	}
 }
 
+func TestSessionMappingUsesClaudeSessionID(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	claudeSID := "11111111-2222-3333-4444-555555555555"
+	itermSID := "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+	sess := cass.Session{
+		ID:         "cass-direct",
+		Agent:      "claude-code",
+		Title:      "Direct It2 mapping",
+		Workspace:  "/work/direct",
+		SourcePath: "/tmp/project/" + claudeSID + ".jsonl",
+		StartedAt:  time.Unix(100, 0),
+		Messages: []cass.Message{
+			{ID: "entry-uuid-not-session", Role: "user", Content: "hello"},
+		},
+		Metadata: map[string]any{"iterm_session": itermSID},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	mappings, err := s.Mappings(ctx, itermSID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 1 {
+		t.Fatalf("mappings = %d, want 1", len(mappings))
+	}
+	m := mappings[0]
+	if m.ClaudeSession != claudeSID {
+		t.Fatalf("ClaudeSession = %q, want %q", m.ClaudeSession, claudeSID)
+	}
+	if m.CASSSession != sess.ID || m.Workspace != sess.Workspace || m.Title != sess.Title {
+		t.Fatalf("mapping metadata = %+v, want session metadata", m)
+	}
+}
+
+func TestBatchIndexRequestsBuildsArtifactMappings(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	claudeFirst := "22222222-3333-4444-5555-666666666666"
+	itermFirst := "BBBBBBBB-CCCC-DDDD-EEEE-FFFFFFFFFFFF"
+	firstSess := cass.Session{
+		ID:         "cass-first",
+		Agent:      "claude-code",
+		Title:      "Session before artifacts",
+		Workspace:  "/work/first",
+		SourcePath: "/tmp/project/" + claudeFirst + ".jsonl",
+		StartedAt:  time.Unix(200, 0),
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{firstSess}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BatchIndexRequests(ctx, []cass.APIRequest{{
+		ID:                "req-first",
+		SessionID:         claudeFirst,
+		RequestID:         "r-first",
+		Timestamp:         210,
+		IT2SessionID:      itermFirst,
+		ClientPID:         4242,
+		InputTokens:       10,
+		OutputTokens:      2,
+		SourceHash:        "req-first",
+		Model:             "claude-opus-4-6",
+		ModelFamily:       "opus",
+		TotalRequestBytes: 1,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	mappings, err := s.Mappings(ctx, itermFirst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 1 {
+		t.Fatalf("first-order mappings = %d, want 1", len(mappings))
+	}
+	if m := mappings[0]; m.ClaudeSession != claudeFirst || m.CASSSession != firstSess.ID || m.Workspace != firstSess.Workspace {
+		t.Fatalf("first-order mapping = %+v", m)
+	}
+
+	reqs, err := s.QueryRequests(ctx, firstSess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reqs) != 1 || reqs[0].SessionID != claudeFirst || reqs[0].IT2SessionID != itermFirst {
+		t.Fatalf("QueryRequests via mapping = %+v, want artifact request", reqs)
+	}
+	hit, err := s.Session(ctx, firstSess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hit.APIRequestCount != 1 {
+		t.Fatalf("APIRequestCount = %d, want 1", hit.APIRequestCount)
+	}
+
+	claudeLater := "33333333-4444-5555-6666-777777777777"
+	itermLater := "CCCCCCCC-DDDD-EEEE-FFFF-000000000000"
+	if err := s.BatchIndexRequests(ctx, []cass.APIRequest{{
+		ID:           "req-later",
+		SessionID:    claudeLater,
+		RequestID:    "r-later",
+		Timestamp:    310,
+		IT2SessionID: itermLater,
+		ClientPID:    4343,
+		SourceHash:   "req-later",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	mappings, err = s.Mappings(ctx, itermLater)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 1 || mappings[0].ClaudeSession != claudeLater || mappings[0].CASSSession != "" {
+		t.Fatalf("request-before-session mapping = %+v, want claude-only row", mappings)
+	}
+
+	laterSess := cass.Session{
+		ID:         "cass-later",
+		Agent:      "claude-code",
+		Title:      "Session after artifacts",
+		Workspace:  "/work/later",
+		SourcePath: "/tmp/project/" + claudeLater + ".jsonl",
+		StartedAt:  time.Unix(300, 0),
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{laterSess}); err != nil {
+		t.Fatal(err)
+	}
+	mappings, err = s.Mappings(ctx, itermLater)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 1 {
+		t.Fatalf("backfilled mappings = %d, want 1", len(mappings))
+	}
+	if m := mappings[0]; m.ClaudeSession != claudeLater || m.CASSSession != laterSess.ID || m.Workspace != laterSess.Workspace {
+		t.Fatalf("backfilled mapping = %+v", m)
+	}
+}
+
 func TestSkillsRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
