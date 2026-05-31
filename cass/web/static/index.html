@@ -1042,6 +1042,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const [selected, setSelected] = useState(urlParams.session_id ? { session_id: urlParams.session_id } : null);
   const [toolFilter, setToolFilter] = useState(urlParams.detail_filter || '');
   const [detailTab, setDetailTabRaw] = useState(normalizeDetailTab(urlParams.detail_tab));
+  const [workflowAgentFocus, setWorkflowAgentFocus] = useState(urlParams.workflow_agent || '');
   const [selectedIdx, setSelectedIdx] = useState(-1);
   const searchAbortRef = useRef(null);
   const searchSeqRef = useRef(0);
@@ -1078,9 +1079,10 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
       session_id: selected?.session_id || '',
       detail_filter: selected?.session_id ? toolFilter : '',
       detail_tab: selected?.session_id && detailTab !== 'conversation' ? detailTab : '',
+      workflow_agent: selected?.session_id && detailTab === 'workflows' ? workflowAgentFocus : '',
     }), 300);
     return () => clearTimeout(urlRef.current);
-  }, [query, agent, workspace, since, sort, team, goalStatus, skill, selected?.session_id, toolFilter, detailTab]);
+  }, [query, agent, workspace, since, sort, team, goalStatus, skill, selected?.session_id, toolFilter, detailTab, workflowAgentFocus]);
 
   // Restore state from URL on browser navigation.
   useEffect(() => {
@@ -1095,6 +1097,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     setSkillRaw(urlParams.skill || '');
     setToolFilter(urlParams.detail_filter || '');
     setDetailTab(urlParams.detail_tab);
+    setWorkflowAgentFocus(urlParams.workflow_agent || '');
     setSelected(urlParams.session_id ? { session_id: urlParams.session_id } : null);
   }, [navVersion]);
 
@@ -1195,6 +1198,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
         setSelected(hits[selectedIdx]);
         setToolFilter('');
         setDetailTab('conversation');
+        setWorkflowAgentFocus('');
       }
       else if (e.key === 'Escape' && selected) { e.preventDefault(); setSelected(null); }
     }
@@ -1261,9 +1265,9 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
             <${HitItem} key=${h.session_id} hit=${h} num=${i + 1}
               isSelected=${selected?.session_id === h.session_id}
               isFocused=${i === selectedIdx}
-              onClick=${() => { setSelected(h); setSelectedIdx(i); setToolFilter(''); setDetailTab('conversation'); }}
+              onClick=${() => { setSelected(h); setSelectedIdx(i); setToolFilter(''); setDetailTab('conversation'); setWorkflowAgentFocus(''); }}
               onTeamClick=${onNavigate ? (name) => onNavigate('teams', { name }) : null}
-              onToolClick=${(toolName) => { setSelected(h); setSelectedIdx(i); setToolFilter(toolName); setDetailTab('conversation'); }} />
+              onToolClick=${(toolName) => { setSelected(h); setSelectedIdx(i); setToolFilter(toolName); setDetailTab('conversation'); setWorkflowAgentFocus(''); }} />
           `)}
         </ul>
       `}
@@ -1272,12 +1276,13 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
       `}
 
       </section>
-      <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => { setSelected(null); setToolFilter(''); setDetailTab('conversation'); }}></div>
+      <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => { setSelected(null); setToolFilter(''); setDetailTab('conversation'); setWorkflowAgentFocus(''); }}></div>
       <${SessionDetailPanel}
         hit=${selected}
-        onClose=${() => { setSelected(null); setToolFilter(''); setDetailTab('conversation'); }}
+        onClose=${() => { setSelected(null); setToolFilter(''); setDetailTab('conversation'); setWorkflowAgentFocus(''); }}
         initialFilter=${toolFilter}
         initialTab=${detailTab}
+        workflowAgentFocus=${workflowAgentFocus}
         onFilterChange=${setToolFilter}
         onTabChange=${setDetailTab} />
     </div>
@@ -2113,8 +2118,40 @@ function workflowPhaseGroups(wf) {
   return groups;
 }
 
-function WorkflowsTab({ workflows }) {
+function workflowAgentFocusMatch(focus, wf, ri, agent, agentIndex, key) {
+  if (!focus) return false;
+  const id = agent?.id || '';
+  const runID = wf?.run_id || '';
+  const candidates = [
+    key,
+    id,
+    runID && id ? runID + '#' + id : '',
+    runID && id ? runID + ':' + id : '',
+    runID ? runID + '#' + agentIndex : '',
+    runID ? runID + ':' + agentIndex : '',
+    agent?.source_path || '',
+  ].filter(Boolean);
+  return candidates.includes(focus);
+}
+
+function WorkflowsTab({ workflows, focusAgent }) {
   const [expanded, setExpanded] = useState(null); // "<runIdx>:<agentId>"
+
+  useEffect(() => {
+    if (!focusAgent || !workflows || workflows.length === 0) return;
+    for (let ri = 0; ri < workflows.length; ri++) {
+      const wf = workflows[ri];
+      const agents = wf.agents || [];
+      for (let ai = 0; ai < agents.length; ai++) {
+        const agentKey = agents[ai].id || String(ai);
+        const key = ri + ':' + agentKey;
+        if (workflowAgentFocusMatch(focusAgent, wf, ri, agents[ai], ai, key)) {
+          setExpanded(key);
+          return;
+        }
+      }
+    }
+  }, [focusAgent, workflows]);
 
   if (!workflows || workflows.length === 0) {
     return html`<div class="empty" style="margin-top:20px">no workflow runs in this session</div>`;
@@ -2154,11 +2191,13 @@ function WorkflowsTab({ workflows }) {
                           const wfAgents = wf.agents || [];
                           const globalIndex = wfAgents.findIndex(x => x && x.id === a.id);
                           const agentIndex = globalIndex >= 0 ? globalIndex : ai;
-                          const key = ri + ':' + a.id;
+                          const agentKey = a.id || String(agentIndex);
+                          const key = ri + ':' + agentKey;
                           const isOpen = expanded === key;
                           const isLast = ai === group.agents.length - 1;
                           const name = workflowAgentName(a, agentIndex);
                           const subtitle = workflowAgentSubtitle(a, name);
+                          const focused = workflowAgentFocusMatch(focusAgent, wf, ri, a, agentIndex, key);
                           const stats = [
                             a.agent_type,
                             a.tool_calls ? a.tool_calls + ' tools' : '',
@@ -2166,8 +2205,8 @@ function WorkflowsTab({ workflows }) {
                             a.status && a.status !== 'unknown' ? a.status : '',
                           ].filter(Boolean).join(' · ');
                           return html`
-                            <div class="wf-agent" key=${a.id}>
-                              <div class="wf-agent-row ${isOpen ? 'expanded' : ''}"
+                            <div class="wf-agent" key=${key}>
+                              <div class="wf-agent-row ${isOpen ? 'expanded' : ''} ${focused ? 'focused' : ''}"
                                    onClick=${() => setExpanded(prev => prev === key ? null : key)}
                                    title=${a.title || ''}>
                                 <span class="agent-tree-connector">${isLast ? '└─' : '├─'}</span>
@@ -2200,7 +2239,7 @@ function WorkflowsTab({ workflows }) {
   `;
 }
 
-function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterChange, onTabChange }) {
+function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowAgentFocus, onFilterChange, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -3096,7 +3135,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
               ? html`<div class="loading">loading agents...</div>`
               : html`<${AgentsTab} agentData=${agentData} workflows=${hit.workflows} />`}
           ` : activeTab === 'workflows' ? html`
-            <${WorkflowsTab} workflows=${hit.workflows} />
+            <${WorkflowsTab} workflows=${hit.workflows} focusAgent=${workflowAgentFocus} />
           ` : renderRequestsTab()}
         </div>
       `}
@@ -3902,7 +3941,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     if (n && n.node_type === 'workflow_agent') {
       if (onNavigate) {
         const sessionID = n.parent_session_full_id || n.parent_session_id || id;
-        onNavigate('search', { session_id: sessionID, detail_tab: 'workflows' });
+        onNavigate('search', { session_id: sessionID, detail_tab: 'workflows', workflow_agent: n.full_id || id });
       }
       return;
     }

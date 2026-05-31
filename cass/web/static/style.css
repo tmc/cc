@@ -2364,6 +2364,7 @@ mark.search-hl {
 .wf-agent-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; cursor: pointer; border-radius: 3px; font-size: 12px; }
 .wf-agent-row:hover { background: var(--border); }
 .wf-agent-row.expanded { background: var(--border); }
+.wf-agent-row.focused { outline: 1px solid var(--accent); outline-offset: 1px; }
 .wf-agent-text {
   display: grid;
   min-width: 0;
