@@ -2758,7 +2758,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
       if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
         const meta = entry.compactMetadata;
         const label = meta
-          ? (meta.trigger || 'auto') + (meta.preTokens ? ' | ' + fmtNum(meta.preTokens) + ' tok' : '')
+          ? (meta.trigger || 'auto') + (meta.preTokens ? ' | ' + fmtNum(meta.preTokens) + ' tokens' : '')
           : 'compacted';
         return html`
           <div class="conv-compact-boundary${dimClass}" key=${entryID} data-eidx=${idx}>
@@ -3455,7 +3455,7 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
           <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
             <div class="graph-tooltip-title">${n.title || n.name || tooltip.id}</div>
             <div class="graph-tooltip-stat">
-              ${[n.name || 'subagent', n.status, tok >= 1000 && fmtNum(tok) + ' tok'].filter(Boolean).join(' · ')}
+              ${[n.name || 'subagent', n.status, tok >= 1000 && fmtNum(tok) + ' tokens'].filter(Boolean).join(' · ')}
             </div>
             ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
             <div class="graph-tooltip-hint">click to open spawned session</div>
