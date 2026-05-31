@@ -50,7 +50,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "  stats      show index statistics")
 		fmt.Fprintln(os.Stderr, "  subagents  list Task subagent runs")
 		fmt.Fprintln(os.Stderr, "  workflows  list native workflow runs")
-		fmt.Fprintln(os.Stderr, "  requests   show API request breakdown from HAR exports")
+		fmt.Fprintln(os.Stderr, "  requests   show indexed API request breakdown")
 		fmt.Fprintln(os.Stderr, "  web        start web UI server")
 		os.Exit(1)
 	}

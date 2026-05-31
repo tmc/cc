@@ -19,7 +19,7 @@
 //	stats      Show index statistics.
 //	subagents  List Task subagent runs.
 //	workflows  List native workflow runs.
-//	requests   Show API request breakdown from HAR exports.
+//	requests   Show indexed API request breakdown.
 //	web        Start the web UI server.
 //
 // # Common flags
