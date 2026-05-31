@@ -194,6 +194,9 @@ input::placeholder { color: var(--faint); }
 .results { list-style: none; }
 
 @media (min-width: 900px) {
+  body.detail-open {
+    overflow: auto;
+  }
   .search-workspace.has-detail {
     width: min(1400px, calc(100vw - 40px));
     margin-left: 50%;
@@ -202,8 +205,8 @@ input::placeholder { color: var(--faint); }
     grid-template-columns: minmax(360px, 0.85fr) minmax(460px, 1.15fr);
     gap: 16px;
     align-items: stretch;
-    height: calc(100vh - 132px);
-    min-height: 560px;
+    height: calc(100dvh - 132px);
+    min-height: min(560px, calc(100dvh - 132px));
   }
   .search-workspace.has-detail .search-list-pane {
     min-height: 0;
