@@ -167,6 +167,7 @@ func TestCharacteristicsUsageMentionsSubcommand(t *testing.T) {
 		"Reports cross-session usage characteristics",
 		"-unit string",
 		"-verbose",
+		"-pricing-file string",
 		"ccstats characteristics -since 24h",
 	} {
 		if !strings.Contains(got, want) {
