@@ -3361,6 +3361,7 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
             </div>
             <div class="graph-tooltip-stat">
               ${[
+                'run ' + tooltip.id,
                 n.task_id && 'task ' + n.task_id,
                 n.script_path && 'script ' + shortPath(n.script_path),
                 n.transcript_dir && 'transcript ' + shortPath(n.transcript_dir),
