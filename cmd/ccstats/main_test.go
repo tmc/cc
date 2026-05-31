@@ -241,7 +241,7 @@ func TestAnalyzeCharacteristicsReportsCoreMetrics(t *testing.T) {
 		*longRunningThresholdFlag = oldLong
 	})
 	*unitFlag = "requests"
-	*verboseFlag = false
+	*verboseFlag = true
 	*formatFlag = "text"
 	*parallelWindowFlag = 2 * time.Minute
 	*contextThresholdFlag = 150000
@@ -308,6 +308,40 @@ func TestRunCharacteristicsVerboseJSON(t *testing.T) {
 	}
 	if report.Totals.Weight <= 0 {
 		t.Fatalf("total weight = %f, want > 0", report.Totals.Weight)
+	}
+}
+
+func TestRunCharacteristicsWarnsOnUnknownModel(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+	})
+	*unitFlag = "cost"
+	*verboseFlag = true
+	*formatFlag = "text"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+
+	dir := t.TempDir()
+	path := writeCharacteristicsSession(t, dir, "unknown.jsonl", []ccpkg.Entry{
+		assistantEntry("session-u", "session-u", "", time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC), false, "mystery-model-1", 50, 10, 0, 0, toolBlocks("", 0)),
+	})
+
+	out, errText := captureRunOutput(t, func() error {
+		return runCharacteristics([]string{path})
+	})
+	if !strings.Contains(errText, "unknown models: mystery-model-1") {
+		t.Fatalf("stderr missing unknown-model warning:\n%s", errText)
+	}
+	if !strings.Contains(out, "mystery-model-1") {
+		t.Fatalf("stdout missing model-derived report:\n%s", out)
 	}
 }
 
@@ -442,4 +476,43 @@ func captureStderr(t *testing.T, fn func()) string {
 	}
 	r.Close()
 	return buf.String()
+}
+
+func captureRunOutput(t *testing.T, fn func() error) (string, string) {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = outW
+	os.Stderr = errW
+
+	runErr := fn()
+
+	outW.Close()
+	errW.Close()
+	os.Stdout = oldStdout
+	os.Stderr = oldStderr
+
+	var outBuf, errBuf bytes.Buffer
+	if _, err := outBuf.ReadFrom(outR); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := errBuf.ReadFrom(errR); err != nil {
+		t.Fatal(err)
+	}
+	outR.Close()
+	errR.Close()
+
+	if runErr != nil {
+		t.Fatalf("operation failed: %v", runErr)
+	}
+	return outBuf.String(), errBuf.String()
 }

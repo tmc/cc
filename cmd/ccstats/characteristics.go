@@ -63,6 +63,7 @@ type characteristicsReport struct {
 	Totals          characteristicsTotals          `json:"totals"`
 	Characteristics map[string]characteristicValue `json:"characteristics"`
 	ModelShare      map[string]float64             `json:"model_share,omitempty"`
+	UnknownModels   []string                       `json:"-"`
 }
 
 type characteristicSpec struct {
@@ -99,6 +100,9 @@ func runCharacteristics(files []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(report)
 	}
+	if len(report.UnknownModels) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: unknown models: %s\n", strings.Join(report.UnknownModels, ", "))
+	}
 	renderCharacteristicsReport(report)
 	return nil
 }
@@ -108,6 +112,7 @@ func analyzeCharacteristics(files []string) (*characteristicsReport, error) {
 	sessions := make(map[string]*sessionAgg)
 	compactBudgets := make(map[string]int)
 	modelShares := make(map[string]float64)
+	unknownModels := make(map[string]struct{})
 
 	for _, path := range files {
 		entries, err := cc.ReadFile(context.Background(), path)
@@ -159,6 +164,9 @@ func analyzeCharacteristics(files []string) (*characteristicsReport, error) {
 			}
 			req.ContextSize = req.InputTokens + req.CacheRead + req.CacheCreate
 			req.Weight = requestWeight(req)
+			if family := modelFamily(req.Model); family == req.Model && family != "" && family != "unknown" {
+				unknownModels[req.Model] = struct{}{}
+			}
 			if compactBudgets[e.SessionID] > 0 {
 				req.CompactFollow = true
 				compactBudgets[e.SessionID]--
@@ -297,6 +305,13 @@ func analyzeCharacteristics(files []string) (*characteristicsReport, error) {
 		for name, weight := range modelShares {
 			report.ModelShare[name] = pct(weight, totalWeight)
 		}
+	}
+	if len(unknownModels) > 0 {
+		report.UnknownModels = make([]string, 0, len(unknownModels))
+		for name := range unknownModels {
+			report.UnknownModels = append(report.UnknownModels, name)
+		}
+		sort.Strings(report.UnknownModels)
 	}
 	return report, nil
 }
