@@ -605,12 +605,9 @@ func lensTitleMatchesKey(title, key string) bool {
 func workflowAgentTitle(s cc.SessionSummary) string {
 	t := s.CustomTitle
 	if t == "" {
-		t = s.FirstPrompt
+		t = cleanGeneratedTitle(s.FirstPrompt)
 	}
-	if len(t) > 80 {
-		t = t[:80] + "..."
-	}
-	return t
+	return truncateTitle(t)
 }
 
 func countWorkflowJournalLines(path string) int {

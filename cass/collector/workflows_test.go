@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 )
 
@@ -208,6 +209,44 @@ func TestWorkflowScriptInfoAcceptsBacktickStrings(t *testing.T) {
 	}
 	if info.AgentSpecs[1] != (workflowAgentSpec{Label: "synthesize", Phase: "Synthesize", AgentType: "Writer"}) {
 		t.Fatalf("second agent spec = %+v, want synthesize Synthesize Writer", info.AgentSpecs[1])
+	}
+}
+
+func TestWorkflowAgentTitleUsesGeneratedTitleCleanup(t *testing.T) {
+	tests := []struct {
+		name string
+		sum  cc.SessionSummary
+		want string
+	}{
+		{
+			name: "goal objective",
+			sum: cc.SessionSummary{
+				FirstPrompt: "<goal_context><objective>review the branch</objective></goal_context>",
+			},
+			want: "goal: review the branch",
+		},
+		{
+			name: "image payload",
+			sum: cc.SessionSummary{
+				FirstPrompt: "<image name=[Image #1]> input_image data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA",
+			},
+			want: "image input",
+		},
+		{
+			name: "custom title",
+			sum: cc.SessionSummary{
+				CustomTitle: "named agent",
+				FirstPrompt: "ignored prompt",
+			},
+			want: "named agent",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workflowAgentTitle(tt.sum); got != tt.want {
+				t.Fatalf("workflowAgentTitle() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
