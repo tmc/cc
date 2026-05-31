@@ -2145,7 +2145,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
     .filter(item => item.blocks.length > 0);
   const earlierButton = hasEarlier && html`
     <button class="wf-agent-more" disabled=${loadingEarlier} onClick=${loadEarlier}>
-      ${loadingEarlier ? 'Loading...' : 'Load earlier messages'}
+      ${loadingEarlier ? 'Loading...' : 'Load Earlier Messages'}
     </button>
   `;
   if (renderableEntries.length === 0) return html`
@@ -3279,7 +3279,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
             `}
             ${searchHasUnloadedEntries && html`
               <button class="detail-search-earlier" disabled=${loadingEarlierEntries} onClick=${loadEarlierSessionEntries}>
-                ${loadingEarlierEntries ? 'Loading...' : 'Search earlier'}
+                ${loadingEarlierEntries ? 'Loading...' : 'Search Earlier'}
               </button>
             `}
           </div>
@@ -3351,7 +3351,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
             ${!detailError && html`<div class="conversation">${renderConversation()}</div>`}
             ${hasEarlierEntries && !detailError && html`
               <button class="detail-load-earlier" disabled=${loadingEarlierEntries} onClick=${loadEarlierSessionEntries}>
-                ${loadingEarlierEntries ? 'Loading...' : 'Load earlier messages'}
+                ${loadingEarlierEntries ? 'Loading...' : 'Load Earlier Messages'}
               </button>
             `}
           ` : activeTab === 'agents' ? html`
@@ -5349,7 +5349,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('lines written', fmtNum(agg.lines_written))}
         ${card('total time', fmtDuration(agg.duration_secs))}
         ${card('child agent spawn events', fmtNum(agg.subagent_spawns))}
-        ${card('workflow runs', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' Agents · ' + (agg.workflow_task_ops || 0) + ' Task operations')}
+        ${card('Workflow runs', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' Agents · ' + (agg.workflow_task_ops || 0) + ' Task operations')}
         ${card('goals', fmtNum(agg.goals || 0), (agg.active_goals || 0) + ' Active · ' + (agg.completed_goals || 0) + ' Complete')}
         ${card('skill usage', fmtNum((agg.selected_skills || 0) + (agg.loaded_skills || 0)),
           (agg.selected_skills || 0) + ' Selected · ' + (agg.loaded_skills || 0) + ' Loaded' +
