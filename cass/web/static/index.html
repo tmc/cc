@@ -2973,7 +2973,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                   </div>
                 `}
                 <div class="req-metric">
-                  <span class="label">Stop Reason</span>
+                  <span class="label">Stop reason</span>
                   <span class="val">${req.stop_reason || 'unknown'}</span>
                 </div>
                 ${bd && bd.skill_names && bd.skill_names.length > 0 && html`
@@ -2997,7 +2997,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                   `}
                   ${serverEntries.length > 0 && html`
                     <div class="req-breakdown-row">
-                      <span class="req-breakdown-label">top mcp servers</span>
+                      <span class="req-breakdown-label">top MCP servers</span>
                       <div class="req-breakdown-chips">
                         ${serverEntries.map(([name, bytes]) => html`
                           <span class="tool-chip" key=${name} title="${name}: ${bytes}b">${name} ${fmtReqBytes(bytes)}</span>
