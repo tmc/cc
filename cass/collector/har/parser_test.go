@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // testHARDir returns the sample HAR directory, skipping the test if unavailable.
@@ -63,6 +64,9 @@ func TestParseFile_Classifier(t *testing.T) {
 	}
 	if req.SessionID != "317e4407-d212-446e-bd20-ff8a19af9f3a" {
 		t.Errorf("session_id = %q, want 317e4407-d212-446e-bd20-ff8a19af9f3a", req.SessionID)
+	}
+	if req.Method != "POST" {
+		t.Errorf("method = %q, want POST", req.Method)
 	}
 	if req.InputTokens != 294 {
 		t.Errorf("input_tokens = %d, want 294", req.InputTokens)
@@ -173,6 +177,31 @@ func TestParseFile_SecondSonnet(t *testing.T) {
 	// Conversation grows (includes prior turn).
 	if req.ConversationBytes != 9499 {
 		t.Errorf("conversation_bytes = %d, want 9499", req.ConversationBytes)
+	}
+}
+
+func TestConvertEntriesMethod(t *testing.T) {
+	proxy := convertProxyEntry(&proxyEntry{
+		Method: "PATCH",
+		URL:    "https://api.anthropic.com/v1/messages",
+	}, "/tmp/proxy-traffic.1.jsonl", "session-1", 99)
+	if proxy == nil {
+		t.Fatal("convertProxyEntry returned nil")
+	}
+	if proxy.Method != "PATCH" {
+		t.Fatalf("proxy method = %q, want PATCH", proxy.Method)
+	}
+
+	session := convertSessionV2Entry(&sessionV2Entry{
+		Method:   "PUT",
+		URL:      "https://api.anthropic.com/v1/messages",
+		Duration: time.Second,
+	}, "/tmp/archive.proxymansessionv2")
+	if session == nil {
+		t.Fatal("convertSessionV2Entry returned nil")
+	}
+	if session.Method != "PUT" {
+		t.Fatalf("session method = %q, want PUT", session.Method)
 	}
 }
 

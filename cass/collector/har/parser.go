@@ -50,6 +50,7 @@ func parseEntry(f *File, sourcePath string) (*cass.APIRequest, error) {
 
 	req := &cass.APIRequest{
 		SourceFile: sourcePath,
+		Method:     f.Request.Method,
 		StatusCode: f.Response.Status,
 	}
 

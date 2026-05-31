@@ -12,6 +12,7 @@ type APIRequest struct {
 	SessionID string `json:"session_id"` // Claude session UUID; legacy rows may hold cass session ID.
 	RequestID string `json:"request_id"` // x-request-id from response headers.
 	Timestamp int64  `json:"timestamp"`  // Request time (unix seconds).
+	Method    string `json:"method"`     // HTTP method used for the request.
 
 	// Model routing.
 	Model       string `json:"model"`        // Full model ID (e.g. "claude-sonnet-4-6").

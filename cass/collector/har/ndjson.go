@@ -135,6 +135,7 @@ func convertProxyEntry(e *proxyEntry, sourcePath, it2SessionID string, clientPID
 
 	req := &cass.APIRequest{
 		SourceFile:   sourcePath,
+		Method:       e.Method,
 		StatusCode:   e.StatusCode,
 		DurationMs:   int(e.DurationMs),
 		IT2SessionID: it2SessionID,

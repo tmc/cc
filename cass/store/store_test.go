@@ -788,6 +788,7 @@ func TestQueryRequestsEmptySessionReturnsAll(t *testing.T) {
 			SessionID:    "session-b",
 			RequestID:    "r-b",
 			Timestamp:    200,
+			Method:       "POST",
 			Model:        "claude-sonnet-4-6",
 			ModelFamily:  "sonnet",
 			IT2SessionID: "ITERM-B",
@@ -798,6 +799,7 @@ func TestQueryRequestsEmptySessionReturnsAll(t *testing.T) {
 			SessionID:   "session-a",
 			RequestID:   "r-a",
 			Timestamp:   100,
+			Method:      "GET",
 			Model:       "claude-haiku-4-5",
 			ModelFamily: "haiku",
 			SourceHash:  "req-a",
@@ -815,6 +817,9 @@ func TestQueryRequestsEmptySessionReturnsAll(t *testing.T) {
 	}
 	if reqs[0].ID != "req-a" || reqs[1].ID != "req-b" {
 		t.Fatalf("QueryRequests empty session order = %+v, want timestamp order req-a, req-b", reqs)
+	}
+	if reqs[0].Method != "GET" || reqs[1].Method != "POST" {
+		t.Fatalf("QueryRequests methods = %+v, want GET/POST", reqs)
 	}
 }
 

@@ -250,6 +250,7 @@ func (s *DB) migrate() error {
 			session_id TEXT NOT NULL DEFAULT '',
 			request_id TEXT NOT NULL DEFAULT '',
 			timestamp INTEGER NOT NULL DEFAULT 0,
+			method TEXT NOT NULL DEFAULT '',
 
 			model TEXT NOT NULL DEFAULT '',
 			model_family TEXT NOT NULL DEFAULT '',
@@ -387,6 +388,7 @@ func (s *DB) migrate() error {
 		"ALTER TABLE api_requests ADD COLUMN it2_session_id TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE api_requests ADD COLUMN client_pid INTEGER NOT NULL DEFAULT 0",
 		"CREATE INDEX IF NOT EXISTS idx_apireq_it2 ON api_requests(it2_session_id)",
+		"ALTER TABLE api_requests ADD COLUMN method TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE api_requests ADD COLUMN user_hash TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE api_requests ADD COLUMN account_uuid TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE api_requests ADD COLUMN org_id TEXT NOT NULL DEFAULT ''",
@@ -2420,6 +2422,7 @@ func (s *DB) BatchIndexRequests(ctx context.Context, requests []cass.APIRequest)
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT OR REPLACE INTO api_requests (
 			id, session_id, request_id, timestamp,
+			method,
 			model, model_family, purpose,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 			system_prompt_bytes, tool_definition_bytes, conversation_bytes, total_request_bytes,
@@ -2430,7 +2433,7 @@ func (s *DB) BatchIndexRequests(ctx context.Context, requests []cass.APIRequest)
 			it2_session_id, client_pid,
 			user_hash, account_uuid, org_id,
 			context_breakdown_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare api_requests: %w", err)
@@ -2448,6 +2451,7 @@ func (s *DB) BatchIndexRequests(ctx context.Context, requests []cass.APIRequest)
 
 		_, err := stmt.ExecContext(ctx,
 			r.ID, r.SessionID, r.RequestID, r.Timestamp,
+			r.Method,
 			r.Model, r.ModelFamily, r.Purpose,
 			r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheCreationTokens,
 			r.SystemPromptBytes, r.ToolDefinitionBytes, r.ConversationBytes, r.TotalRequestBytes,
@@ -2517,6 +2521,7 @@ func (s *DB) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIReq
 func (s *DB) QueryRequestsFiltered(ctx context.Context, f cass.APIRequestFilter) ([]cass.APIRequest, error) {
 	query := `
 		SELECT id, session_id, request_id, timestamp,
+			method,
 			model, model_family, purpose,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
 			system_prompt_bytes, tool_definition_bytes, conversation_bytes, total_request_bytes,
@@ -2564,7 +2569,7 @@ func (s *DB) QueryRequestsFiltered(ctx context.Context, f cass.APIRequestFilter)
 		var r cass.APIRequest
 		var breakdownJSON string
 		if err := rows.Scan(
-			&r.ID, &r.SessionID, &r.RequestID, &r.Timestamp,
+			&r.ID, &r.SessionID, &r.RequestID, &r.Timestamp, &r.Method,
 			&r.Model, &r.ModelFamily, &r.Purpose,
 			&r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheCreationTokens,
 			&r.SystemPromptBytes, &r.ToolDefinitionBytes, &r.ConversationBytes, &r.TotalRequestBytes,

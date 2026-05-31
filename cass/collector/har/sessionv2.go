@@ -16,6 +16,7 @@ import (
 
 type sessionV2Entry struct {
 	Timestamp       time.Time
+	Method          string
 	URL             string
 	StatusCode      int
 	RequestHeaders  map[string][]string
@@ -83,6 +84,7 @@ func convertSessionV2Entry(e *sessionV2Entry, sourcePath string) *cass.APIReques
 
 	req := &cass.APIRequest{
 		SourceFile: sourcePath,
+		Method:     e.Method,
 		StatusCode: e.StatusCode,
 		DurationMs: int(e.Duration.Milliseconds()),
 		ClientPID:  e.ClientPid,
