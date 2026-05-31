@@ -5357,7 +5357,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
           ((agg.skills || 0) > ((agg.selected_skills || 0) + (agg.loaded_skills || 0) + (agg.context_skills || 0))
             ? ' · ' + ((agg.skills || 0) - ((agg.selected_skills || 0) + (agg.loaded_skills || 0) + (agg.context_skills || 0))) + ' available not shown'
             : ''))}
-        ${card('it2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
+        ${card('iTerm2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
           agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
         ${card('team operations', fmtNum(agg.team_inbox_reads + agg.team_inbox_sends + agg.team_task_ops + agg.team_spawns),
           agg.team_inbox_reads + ' reads · ' + agg.team_inbox_sends + ' messages · ' + agg.team_task_ops + ' tasks · ' + agg.team_spawns + ' spawns')}
