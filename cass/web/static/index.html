@@ -1292,9 +1292,9 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
           onInput=${e => setSkill(e.target.value)} style="width:110px" />
           <span class="filter-chips">
             <button class="filter-chip ${goalStatus === 'active' ? 'active' : ''}"
-              onClick=${() => setGoalStatus(goalStatus === 'active' ? '' : 'active')}>active goals</button>
+              onClick=${() => setGoalStatus(goalStatus === 'active' ? '' : 'active')}>Active goals</button>
             <button class="filter-chip ${goalStatus === 'complete' ? 'active' : ''}"
-              onClick=${() => setGoalStatus(goalStatus === 'complete' ? '' : 'complete')}>complete goals</button>
+              onClick=${() => setGoalStatus(goalStatus === 'complete' ? '' : 'complete')}>Complete goals</button>
           </span>
           <span class="sort-group">
             ${sortModes.map(m => html`
@@ -1545,9 +1545,9 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         </span>`}
         ${stats.length > 0 && html`<span class="hit-stats">${stats.join(' | ')}</span>`}
         ${h.compactions > 0 && html`<span class="hit-compactions">${h.compactions} compaction${h.compactions > 1 ? 's' : ''}</span>`}
-        ${h.goal_count > 0 && html`<span class="hit-goals">${h.active_goal_count || 0} active / ${h.completed_goal_count || 0} complete</span>`}
-        ${shownSkillCount > 0 && html`<span class="hit-skills">${h.selected_skill_count || 0} selected / ${h.loaded_skill_count || 0} loaded</span>`}
-        ${h.workflow_count > 0 && html`<span class="hit-workflows">${h.workflow_count} workflow${h.workflow_count === 1 ? '' : 's'} · ${h.workflow_agent_count || 0} agents${h.workflow_task_op_count ? ' · ' + h.workflow_task_op_count + ' task operations' : ''}</span>`}
+        ${h.goal_count > 0 && html`<span class="hit-goals">${h.active_goal_count || 0} Active / ${h.completed_goal_count || 0} Complete</span>`}
+        ${shownSkillCount > 0 && html`<span class="hit-skills">${h.selected_skill_count || 0} Selected / ${h.loaded_skill_count || 0} Loaded</span>`}
+        ${h.workflow_count > 0 && html`<span class="hit-workflows">${h.workflow_count} Workflow${h.workflow_count === 1 ? '' : 's'} · ${h.workflow_agent_count || 0} Agents${h.workflow_task_op_count ? ' · ' + h.workflow_task_op_count + ' Task operations' : ''}</span>`}
         ${renderWorkflowBadges(h.workflows, 3)}
         ${it2.length > 0 && html`<span class="hit-it2">iTerm2: ${it2.join(', ')}</span>`}
       </div>
@@ -4829,7 +4829,7 @@ function InboxViewer({ teamName, inboxes, members }) {
   return html`
     <div class="inbox-container">
       <div class="inbox-header">
-        <span>inbox</span>
+        <span>Inbox</span>
         <select class="inbox-select" value=${selectedAgent} onChange=${e => setSelectedAgent(e.target.value)}>
           ${agentNames.map(a => html`<option value=${a} key=${a}>${a} (${(inboxes[a] || []).length})</option>`)}
         </select>
@@ -5349,13 +5349,13 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('lines written', fmtNum(agg.lines_written))}
         ${card('total time', fmtDuration(agg.duration_secs))}
         ${card('child agent spawn events', fmtNum(agg.subagent_spawns))}
-        ${card('workflow runs', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' agents · ' + (agg.workflow_task_ops || 0) + ' task operations')}
-        ${card('goals', fmtNum(agg.goals || 0), (agg.active_goals || 0) + ' active · ' + (agg.completed_goals || 0) + ' complete')}
+        ${card('workflow runs', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' Agents · ' + (agg.workflow_task_ops || 0) + ' Task operations')}
+        ${card('goals', fmtNum(agg.goals || 0), (agg.active_goals || 0) + ' Active · ' + (agg.completed_goals || 0) + ' Complete')}
         ${card('skill usage', fmtNum((agg.selected_skills || 0) + (agg.loaded_skills || 0)),
-          (agg.selected_skills || 0) + ' selected · ' + (agg.loaded_skills || 0) + ' loaded' +
-          ((agg.context_skills || 0) ? ' · ' + (agg.context_skills || 0) + ' context' : '') +
+          (agg.selected_skills || 0) + ' Selected · ' + (agg.loaded_skills || 0) + ' Loaded' +
+          ((agg.context_skills || 0) ? ' · ' + (agg.context_skills || 0) + ' Context' : '') +
           ((agg.skills || 0) > ((agg.selected_skills || 0) + (agg.loaded_skills || 0) + (agg.context_skills || 0))
-            ? ' · ' + ((agg.skills || 0) - ((agg.selected_skills || 0) + (agg.loaded_skills || 0) + (agg.context_skills || 0))) + ' available skills not shown'
+            ? ' · ' + ((agg.skills || 0) - ((agg.selected_skills || 0) + (agg.loaded_skills || 0) + (agg.context_skills || 0))) + ' Available skills not shown'
             : ''))}
         ${card('iTerm2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
           agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
