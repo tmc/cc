@@ -229,6 +229,8 @@ func (s *Service) search(ctx context.Context, req cass.SearchRequest, enrich boo
 		for i := range result.Hits {
 			enrichHitWorkflowMetadata(&result.Hits[i])
 		}
+	} else {
+		s.retitleWorkflowCommandHits(ctx, result.Hits)
 	}
 	return result, nil
 }
@@ -255,6 +257,45 @@ func enrichHitWorkflowMetadata(hit *cass.Hit) {
 	for i := range hit.Workflows {
 		collector.EnrichWorkflowMetadata(&hit.Workflows[i])
 	}
+	retitleWorkflowCommandHit(hit)
+}
+
+func retitleWorkflowCommandHit(hit *cass.Hit) {
+	if hit == nil || !workflowCommandTitle(hit.Title) {
+		return
+	}
+	if title := collector.WorkflowSessionTitle(hit.Workflows); title != "" {
+		hit.Title = title
+	}
+}
+
+func (s *Service) retitleWorkflowCommandHits(ctx context.Context, hits []cass.Hit) {
+	for i := range hits {
+		if !workflowCommandTitle(hits[i].Title) {
+			continue
+		}
+		rows, err := s.store.Workflows(ctx, hits[i].SessionID)
+		if err != nil || len(rows) == 0 {
+			continue
+		}
+		workflows := make([]cass.WorkflowRun, 0, len(rows))
+		for _, row := range rows {
+			workflows = append(workflows, cass.WorkflowRun{
+				RunID:       row.RunID,
+				Name:        row.Name,
+				Description: row.Description,
+				Summary:     row.Summary,
+			})
+		}
+		if title := collector.WorkflowSessionTitle(workflows); title != "" {
+			hits[i].Title = title
+		}
+	}
+}
+
+func workflowCommandTitle(title string) bool {
+	title = strings.ToLower(title)
+	return strings.Contains(title, "<command-name>") && strings.Contains(title, "</command-name>")
 }
 
 // Stats returns basic index statistics.

@@ -298,22 +298,24 @@ func titleFromSummaryAndWorkflows(s cc.SessionSummary, workflows []cass.Workflow
 	if s.CustomTitle != "" || !bareCommandPrompt(s.FirstPrompt) || len(workflows) == 0 {
 		return titleFromSummary(s)
 	}
-	if title := workflowSessionTitle(workflows); title != "" {
-		return truncateTitle(title)
+	if title := WorkflowSessionTitle(workflows); title != "" {
+		return title
 	}
 	return titleFromSummary(s)
 }
 
-func workflowSessionTitle(workflows []cass.WorkflowRun) string {
+// WorkflowSessionTitle returns a compact title for a session whose primary
+// user-visible work was one or more native workflow runs.
+func WorkflowSessionTitle(workflows []cass.WorkflowRun) string {
 	if len(workflows) == 0 {
 		return ""
 	}
 	name := workflowTitle(workflows[0])
 	if len(workflows) == 1 {
-		return name
+		return truncateTitle(name)
 	}
 	if name != "" {
-		return fmt.Sprintf("%d workflows: %s", len(workflows), name)
+		return truncateTitle(fmt.Sprintf("%d workflows: %s", len(workflows), name))
 	}
 	return fmt.Sprintf("%d workflows", len(workflows))
 }

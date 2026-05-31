@@ -141,7 +141,7 @@ await agent('review api surface', { label: 'lens:api', phase: 'Lenses', agentTyp
 	stale := cass.Session{
 		ID:         "stale-parent",
 		Agent:      "claude-code",
-		Title:      "stale workflow",
+		Title:      "<command-name>/effort</command-name><command-message>effort</command-message>",
 		Workspace:  "tmc/cc",
 		SourcePath: filepath.Join(root, "parent.jsonl"),
 		StartedAt:  start,
@@ -170,6 +170,9 @@ await agent('review api surface', { label: 'lens:api', phase: 'Lenses', agentTyp
 	if err != nil {
 		t.Fatal(err)
 	}
+	if hit.Title != "review-flow" {
+		t.Fatalf("session title = %q, want workflow title", hit.Title)
+	}
 	assertEnrichedWorkflow(t, hit)
 
 	result, err := svc.Search(ctx, cass.SearchRequest{Limit: 10})
@@ -179,7 +182,21 @@ await agent('review api surface', { label: 'lens:api', phase: 'Lenses', agentTyp
 	if len(result.Hits) != 1 {
 		t.Fatalf("hits = %d, want 1", len(result.Hits))
 	}
+	if result.Hits[0].Title != "review-flow" {
+		t.Fatalf("search title = %q, want workflow title", result.Hits[0].Title)
+	}
 	assertEnrichedWorkflow(t, result.Hits[0])
+
+	summary, err := svc.SearchSummary(ctx, cass.SearchRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.Hits) != 1 {
+		t.Fatalf("summary hits = %d, want 1", len(summary.Hits))
+	}
+	if summary.Hits[0].Title != "review-flow" {
+		t.Fatalf("summary title = %q, want workflow title", summary.Hits[0].Title)
+	}
 }
 
 func assertEnrichedWorkflow(t *testing.T, hit cass.Hit) {
