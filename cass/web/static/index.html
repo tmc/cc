@@ -2308,7 +2308,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
   const directSubagentSpawns = hit?.subagent_spawns || 0;
   const hasAgentTabHint = directSubagentSpawns > 0;
   const hasAgentTab = hasAgentTabHint || (!hasWorkflowTab && agentData.hasAgents);
-  const hasRequests = requestCount > 0 || apiRequests.length > 0;
+  const hasRequests = requestCount > 0 || apiRequests.length > 0 || showRequests;
   let activeTab = activeTabRaw;
   if (activeTab === 'agents' && !hasAgentTab) activeTab = hasWorkflowTab ? 'workflows' : 'conversation';
   if (activeTab === 'workflows' && !hasWorkflowTab) activeTab = 'conversation';
