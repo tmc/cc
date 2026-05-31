@@ -2944,14 +2944,14 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
               </div>
               <div class="req-meta">
                 ${requestMetaItem('session', shortSessionID(req.session_id), req.session_id)}
-                ${req.request_id && html`<span title=${req.request_id}>request ${shortSessionID(req.request_id)}</span>`}
+                ${req.request_id && html`<span title=${req.request_id}>request ID ${shortSessionID(req.request_id)}</span>`}
                 ${req.source_file && html`<span title=${req.source_file}>source ${shortPath(req.source_file)}</span>`}
                 ${requestMetaItem('source hash', shortSessionID(req.source_hash), req.source_hash)}
                 ${requestMetaItem('iTerm2', shortSessionID(req.it2_session_id), req.it2_session_id)}
-                ${requestMetaItem('process', req.client_pid ? String(req.client_pid) : '', req.client_pid ? String(req.client_pid) : '')}
+                ${requestMetaItem('client PID', req.client_pid ? String(req.client_pid) : '', req.client_pid ? String(req.client_pid) : '')}
                 ${requestMetaItem('user', shortSessionID(req.user_hash), req.user_hash)}
-                ${requestMetaItem('account', shortSessionID(req.account_uuid), req.account_uuid)}
-                ${requestMetaItem('organization', shortSessionID(req.org_id), req.org_id)}
+                ${requestMetaItem('account ID', shortSessionID(req.account_uuid), req.account_uuid)}
+                ${requestMetaItem('organization ID', shortSessionID(req.org_id), req.org_id)}
                 ${rateLimitItems && html`
                   <span class="req-rate-limits">${rateLimitItems}</span>
                 `}
