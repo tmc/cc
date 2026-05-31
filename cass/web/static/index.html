@@ -1610,6 +1610,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
   const [error, setError] = useState(null);
   const [hasEarlier, setHasEarlier] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   function fetchPage(offset) {
     return api('workflow-agent?' + qs({
@@ -1643,7 +1644,13 @@ function WorkflowAgentTranscript({ sourcePath }) {
       })
       .catch(e => { if (!cancelled) setError(errorMessage(e, 'workflow agent unavailable')); });
     return () => { cancelled = true; };
-  }, [sourcePath]);
+  }, [sourcePath, refreshTick]);
+
+  useEffect(() => {
+    const refresh = () => setRefreshTick(t => t + 1);
+    window.addEventListener('cass:refresh', refresh);
+    return () => window.removeEventListener('cass:refresh', refresh);
+  }, []);
 
   useEffect(() => {
     if (loaded) workflowAgentCache.set(sourcePath, { entries, hasEarlier });
