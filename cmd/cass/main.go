@@ -1127,7 +1127,7 @@ func outputResume(result *cass.SearchResult) error {
 func resumeCommand(h cass.Hit) string {
 	prefix := ""
 	if h.Workspace != "" {
-		prefix = fmt.Sprintf("cd %s && ", h.Workspace)
+		prefix = fmt.Sprintf("cd %s && ", shellQuote(h.Workspace))
 	}
 
 	switch h.Agent {
@@ -1135,12 +1135,37 @@ func resumeCommand(h cass.Hit) string {
 		return prefix + "gemini --resume"
 	case "codex-cli", "codex-app":
 		if h.SessionID != "" {
-			return prefix + "codex resume " + h.SessionID
+			return prefix + "codex resume " + shellQuote(h.SessionID)
 		}
 		return prefix + "codex resume"
 	default:
 		return prefix + "claude --resume"
 	}
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	safe := true
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z',
+			c >= 'A' && c <= 'Z',
+			c >= '0' && c <= '9',
+			c == '_', c == '-', c == '.', c == '/', c == ':', c == '@', c == '+', c == ',', c == '=':
+		default:
+			safe = false
+		}
+		if !safe {
+			break
+		}
+	}
+	if safe {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // runRequests shows HAR-derived API request breakdown, optionally filtered to a session.
