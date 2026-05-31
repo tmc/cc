@@ -1890,7 +1890,12 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   // Raw requested tab from URL/UI. activeTab falls back to conversation when
   // the selected session does not expose that tab.
   const [activeTabRaw, setActiveTabRaw] = useState(normalizeDetailTab(initialTab));
-  const [apiRequestsState, setApiRequestsState] = useState({ sessionID: '', items: [] });
+  const [apiRequestsState, setApiRequestsState] = useState({
+    sessionID: '',
+    items: [],
+    loaded: false,
+    refreshTick: -1,
+  });
   const [requestsLoading, setRequestsLoading] = useState(false);
 
   const bodyRef = useRef(null);
@@ -1953,11 +1958,15 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   useEffect(() => {
     if (!hit) {
       setEntries([]); setEntryCount(0); setSearchQuery('');
-      setActiveTabRaw('conversation'); setApiRequestsState({ sessionID: '', items: [] }); setDetailError('');
+      setActiveTabRaw('conversation');
+      setApiRequestsState({ sessionID: '', items: [], loaded: false, refreshTick: -1 });
+      setDetailError('');
       setHasEarlierEntries(false); setLoadingEarlierEntries(false);
       return;
     }
-    setApiRequestsState({ sessionID: '', items: [] });
+    setApiRequestsState(prev => prev.sessionID === hit.session_id
+      ? prev
+      : { sessionID: '', items: [], loaded: false, refreshTick: -1 });
     setRequestsLoading(false);
     setHasEarlierEntries(false);
     setLoadingEarlierEntries(false);
@@ -2052,17 +2061,36 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     setActiveTabRaw(normalizeDetailTab(initialTab));
   }, [initialTab, hit?.session_id]);
 
-  // Fetch API requests when the tab is switched, or proactively.
+  // Fetch API requests when the tab is switched or live data changes.
   useEffect(() => {
     if (!hit || activeTab !== 'requests') return;
-    if (apiRequestsState.sessionID === hit.session_id && apiRequestsState.items.length > 0) return; // already loaded
+    if (apiRequestsState.sessionID === hit.session_id &&
+        apiRequestsState.loaded &&
+        apiRequestsState.refreshTick === detailRefreshTick) {
+      return;
+    }
 
+    let cancelled = false;
     setRequestsLoading(true);
     api('session/' + hit.session_id + '/requests')
-      .then(reqs => setApiRequestsState({ sessionID: hit.session_id, items: reqs || [] }))
-      .catch(e => console.error('failed resolving requests', e))
-      .finally(() => setRequestsLoading(false));
-  }, [hit?.session_id, activeTab]);
+      .then(reqs => {
+        if (!cancelled) {
+          setApiRequestsState({
+            sessionID: hit.session_id,
+            items: reqs || [],
+            loaded: true,
+            refreshTick: detailRefreshTick,
+          });
+        }
+      })
+      .catch(e => {
+        if (!cancelled) console.error('failed resolving requests', e);
+      })
+      .finally(() => {
+        if (!cancelled) setRequestsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [hit?.session_id, activeTab, detailRefreshTick]);
 
   // Auto-scroll during streaming.
   useEffect(() => {
