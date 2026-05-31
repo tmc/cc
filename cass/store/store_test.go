@@ -718,7 +718,7 @@ func TestSkillsRoundTrip(t *testing.T) {
 	}
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE sessions
-		SET skill_count = 99, selected_skill_count = 88, loaded_skill_count = 77
+		SET skill_count = 0, selected_skill_count = 88, loaded_skill_count = 77
 		WHERE id = ?`, sess.ID); err != nil {
 		t.Fatal(err)
 	}

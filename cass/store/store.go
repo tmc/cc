@@ -24,6 +24,8 @@ const hitStatsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, 
 
 const hitAPIRequestCountCol = `(SELECT count(*) FROM api_requests ar WHERE ar.session_id = s.id OR ar.session_id IN (SELECT m.claude_session FROM session_mapping m WHERE m.cass_session = s.id) OR (ar.session_id = '' AND ar.it2_session_id = s.id))`
 
+const skillsJSONPresentExpr = `skills_json <> '' AND skills_json <> '[]'`
+
 type hitScanner interface {
 	Scan(dest ...any) error
 }
@@ -1229,7 +1231,7 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 
 	// Top skills by session signal count.
 	skillRows, err := s.db.QueryContext(ctx, `
-		SELECT skills_json FROM sessions `+where+` AND skill_count > 0`, args...)
+		SELECT skills_json FROM sessions `+where+` AND `+skillsJSONPresentExpr, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1607,7 +1609,7 @@ func (s *DB) Skills(ctx context.Context, skill string, kind string, limit int) (
 	if limit <= 0 {
 		limit = 100
 	}
-	query := `SELECT id, agent, title, workspace, source_path, started_at, ended_at, skills_json FROM sessions WHERE skill_count > 0`
+	query := `SELECT id, agent, title, workspace, source_path, started_at, ended_at, skills_json FROM sessions WHERE ` + skillsJSONPresentExpr
 	var args []any
 	if skill != "" {
 		query += ` AND skills_json LIKE ?`
