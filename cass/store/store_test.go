@@ -584,6 +584,13 @@ func TestSkillsRoundTrip(t *testing.T) {
 func TestBatchIndexSubagentRuns(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
+	if err := s.SaveAgentDef(ctx, AgentDef{
+		Name:        "reviewer",
+		Description: "review code changes",
+		SourcePath:  "/tmp/agents/reviewer.json",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	t0 := time.Now().Add(-time.Hour)
 	sess := cass.Session{
@@ -618,6 +625,7 @@ func TestBatchIndexSubagentRuns(t *testing.T) {
 				AgentID:         "agB",
 				ParentSessionID: "parent1",
 				Workspace:       "/tmp/proj",
+				AgentType:       "reviewer",
 				Status:          "unknown",
 				StartedAt:       t0.Add(3 * time.Minute),
 				EndedAt:         t0.Add(4 * time.Minute),
@@ -693,6 +701,31 @@ func TestBatchIndexSubagentRuns(t *testing.T) {
 		if r.AgentID == "acompact-agA" {
 			t.Fatalf("GraphSubagents included compaction run: %+v", r)
 		}
+	}
+	listRuns, err := s.SubagentRuns(ctx, SubagentRunFilter{AgentType: "reviewer", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listRuns) != 1 {
+		t.Fatalf("SubagentRuns reviewer = %d, want 1", len(listRuns))
+	}
+	if listRuns[0].AgentDefName != "reviewer" || listRuns[0].AgentDefDescription != "review code changes" {
+		t.Fatalf("SubagentRuns agent def link = %+v, want reviewer definition", listRuns[0])
+	}
+	if listRuns[0].AgentDefSourcePath != "/tmp/agents/reviewer.json" {
+		t.Fatalf("AgentDefSourcePath = %q, want /tmp/agents/reviewer.json", listRuns[0].AgentDefSourcePath)
+	}
+	foundReviewerGraph := false
+	for _, r := range graphRuns {
+		if r.AgentID == "agB" {
+			foundReviewerGraph = true
+			if r.AgentDefName != "reviewer" || r.AgentDefDescription != "review code changes" {
+				t.Fatalf("GraphSubagents agent def link = %+v, want reviewer definition", r)
+			}
+		}
+	}
+	if !foundReviewerGraph {
+		t.Fatalf("GraphSubagents missing agB")
 	}
 
 	// Re-index with a different set of runs (drop agA, keep agB, add agC).

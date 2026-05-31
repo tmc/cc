@@ -23,7 +23,11 @@ type SubagentRunFilter struct {
 // with the parent session's title for display.
 type SubagentRunListEntry struct {
 	cass.SubagentRun
-	ParentTitle string `json:"parent_title,omitempty"`
+	ParentTitle         string `json:"parent_title,omitempty"`
+	AgentDefName        string `json:"agent_def_name,omitempty"`
+	AgentDefDescription string `json:"agent_def_description,omitempty"`
+	AgentDefSourcePath  string `json:"agent_def_source_path,omitempty"`
+	AgentDefDisabled    bool   `json:"agent_def_disabled,omitempty"`
 }
 
 // SubagentRuns lists subagent runs ordered by started_at DESC.
@@ -62,9 +66,12 @@ func (s *DB) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentR
 			r.status, r.tool_use_id, r.output_file, r.worktree_path, r.worktree_branch,
 			r.total_tokens, r.tool_uses, r.duration_ms, r.entry_count,
 			r.source_path, r.meta_path, r.is_compaction,
-			COALESCE(s.title, '')
+			COALESCE(s.title, ''),
+			COALESCE(ad.name, ''), COALESCE(ad.description, ''),
+			COALESCE(ad.source_path, ''), COALESCE(ad.disabled, 0)
 		FROM subagent_runs r
 		LEFT JOIN sessions s ON s.id = r.parent_session_id
+		LEFT JOIN agent_defs ad ON ad.name = r.agent_type
 		%s
 		ORDER BY r.started_at DESC
 		LIMIT ? OFFSET ?
@@ -83,6 +90,7 @@ func (s *DB) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentR
 			e                                        SubagentRunListEntry
 			enqUnix, deqUnix, startedUnix, endedUnix int64
 			isCompaction                             int
+			agentDefDisabled                         int
 		)
 		if err := rows.Scan(
 			&e.ParentSessionID, &e.AgentID, &e.ParentClaudeSID, &e.Workspace, &e.GitCommonDir,
@@ -92,6 +100,7 @@ func (s *DB) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentR
 			&e.TotalTokens, &e.ToolUses, &e.DurationMs, &e.EntryCount,
 			&e.SourcePath, &e.MetaPath, &isCompaction,
 			&e.ParentTitle,
+			&e.AgentDefName, &e.AgentDefDescription, &e.AgentDefSourcePath, &agentDefDisabled,
 		); err != nil {
 			return nil, err
 		}
@@ -100,6 +109,7 @@ func (s *DB) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentR
 		e.StartedAt = unixOrZero(startedUnix)
 		e.EndedAt = unixOrZero(endedUnix)
 		e.IsCompaction = isCompaction != 0
+		e.AgentDefDisabled = agentDefDisabled != 0
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -151,14 +161,18 @@ func (s *DB) SubagentRunsSummary(ctx context.Context) (SubagentRunSummary, error
 // GraphSubagentRow is the lightweight form of a subagent run used to build
 // graph nodes and edges: just the parent link, identity, and display fields.
 type GraphSubagentRow struct {
-	ParentSessionID string
-	AgentID         string
-	AgentType       string
-	Description     string
-	Model           string
-	Status          string
-	StartedAt       int64
-	TotalTokens     int
+	ParentSessionID     string
+	AgentID             string
+	AgentType           string
+	Description         string
+	AgentDefName        string
+	AgentDefDescription string
+	AgentDefSourcePath  string
+	AgentDefDisabled    bool
+	Model               string
+	Status              string
+	StartedAt           int64
+	TotalTokens         int
 }
 
 // GraphSubagents returns every indexed subagent run as a graph row, ordered by
@@ -166,11 +180,14 @@ type GraphSubagentRow struct {
 // excluded; they are bookkeeping, not real fan-out.
 func (s *DB) GraphSubagents(ctx context.Context) ([]GraphSubagentRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT parent_session_id, agent_id, agent_type, description, model, status,
-			started_at, total_tokens
-		FROM subagent_runs
-		WHERE is_compaction = 0
-		ORDER BY started_at, agent_id
+		SELECT r.parent_session_id, r.agent_id, r.agent_type, r.description,
+			COALESCE(ad.name, ''), COALESCE(ad.description, ''),
+			COALESCE(ad.source_path, ''), COALESCE(ad.disabled, 0),
+			r.model, r.status, r.started_at, r.total_tokens
+		FROM subagent_runs r
+		LEFT JOIN agent_defs ad ON ad.name = r.agent_type
+		WHERE r.is_compaction = 0
+		ORDER BY r.started_at, r.agent_id
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("query graph subagents: %w", err)
@@ -179,12 +196,15 @@ func (s *DB) GraphSubagents(ctx context.Context) ([]GraphSubagentRow, error) {
 	var out []GraphSubagentRow
 	for rows.Next() {
 		var r GraphSubagentRow
+		var agentDefDisabled int
 		if err := rows.Scan(
-			&r.ParentSessionID, &r.AgentID, &r.AgentType, &r.Description, &r.Model,
-			&r.Status, &r.StartedAt, &r.TotalTokens,
+			&r.ParentSessionID, &r.AgentID, &r.AgentType, &r.Description,
+			&r.AgentDefName, &r.AgentDefDescription, &r.AgentDefSourcePath, &agentDefDisabled,
+			&r.Model, &r.Status, &r.StartedAt, &r.TotalTokens,
 		); err != nil {
 			return nil, fmt.Errorf("scan graph subagent: %w", err)
 		}
+		r.AgentDefDisabled = agentDefDisabled != 0
 		out = append(out, r)
 	}
 	return out, rows.Err()

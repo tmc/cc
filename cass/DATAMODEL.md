@@ -294,8 +294,10 @@ subagent `Task` spawns.
 A user-defined agent template stored at `~/.claude/agents/<name>.json`.
 Definitions under `~/.claude/agents/.disabled/` are inactive but still
 indexed. Distinct from V3 SubagentSession: AgentDef is the *template*;
-SubagentSession is one runtime invocation. The two are not yet linked
-authoritatively (no shared ID); a heuristic edge by name is possible.
+SubagentSession is one runtime invocation. There is no shared runtime ID,
+so Cass links the two heuristically when `SubagentRun.agent_type` exactly
+matches `AgentDef.name`; list and graph views surface the matched
+definition metadata when present.
 
     ID:         name (e.g. "sitrep-agent")
     Source:     ~/.claude/agents/[.disabled/]<name>.json
