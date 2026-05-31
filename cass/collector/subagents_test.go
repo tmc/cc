@@ -276,16 +276,31 @@ func TestExtractSubagentRuns_AcompactOnly(t *testing.T) {
 	}
 	writeJSONL(t, parentPath, parent)
 
-	// Only an acompact subagent — must be ignored.
+	// Only an acompact subagent — it is indexed as compaction metadata, not
+	// merged into the parent transcript or graph fan-out.
 	acomp := []jsonlEntry{
 		{"type": "user", "uuid": "x1", "sessionId": parentID, "agentId": "acompact-aaa", "isSidechain": true, "timestamp": t0.Add(10 * time.Second).Format(time.RFC3339Nano)},
+		{"type": "assistant", "uuid": "x2", "sessionId": parentID, "agentId": "acompact-aaa", "isSidechain": true, "timestamp": t0.Add(20 * time.Second).Format(time.RFC3339Nano), "message": map[string]any{"role": "assistant", "model": "claude-haiku-4-5", "content": "summary"}},
 	}
 	writeJSONL(t, filepath.Join(proj, parentID, "subagents", "agent-acompact-aaa.jsonl"), acomp)
 
 	sessions := scanCollector(t, root)
 	sess := findSession(t, sessions)
-	if len(sess.Subagents) != 0 {
-		t.Errorf("acompact must not produce SubagentRun, got %d", len(sess.Subagents))
+	if len(sess.Subagents) != 1 {
+		t.Fatalf("Subagents = %d, want 1 compaction record", len(sess.Subagents))
+	}
+	r := sess.Subagents[0]
+	if !r.IsCompaction {
+		t.Errorf("IsCompaction = false, want true")
+	}
+	if r.AgentID != "acompact-aaa" {
+		t.Errorf("AgentID = %q, want acompact-aaa", r.AgentID)
+	}
+	if r.Model != "claude-haiku-4-5" {
+		t.Errorf("Model = %q, want claude-haiku-4-5", r.Model)
+	}
+	if r.EntryCount != 2 {
+		t.Errorf("EntryCount = %d, want 2", r.EntryCount)
 	}
 }
 

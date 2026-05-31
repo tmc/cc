@@ -16,8 +16,8 @@ import (
 const agentFilePrefix = "agent-"
 
 // agentCompactPrefix marks compaction subagents that supplement the
-// primary agent JSONL. Excluded from SubagentRun emission for now;
-// see Q1 in /tmp/cc-option3-plan.md for the --include-compaction flag.
+// primary agent JSONL. They are emitted as SubagentRun records with
+// IsCompaction set, but excluded from parent FTS merging and graph fan-out.
 const agentCompactPrefix = "agent-acompact"
 
 // extractSubagentRuns builds SubagentRun records for each agent-<id>.jsonl
@@ -52,9 +52,7 @@ func extractSubagentRuns(ctx context.Context, sessionPath string, parentEntries 
 		if !strings.HasPrefix(name, agentFilePrefix) {
 			continue
 		}
-		if strings.HasPrefix(name, agentCompactPrefix) {
-			continue
-		}
+		isCompaction := strings.HasPrefix(name, agentCompactPrefix)
 		agentID := strings.TrimSuffix(strings.TrimPrefix(name, agentFilePrefix), ".jsonl")
 		if agentID == "" {
 			continue
@@ -74,6 +72,7 @@ func extractSubagentRuns(ctx context.Context, sessionPath string, parentEntries 
 			SourcePath:      runPath,
 			EntryCount:      len(entries),
 			Status:          "unknown",
+			IsCompaction:    isCompaction,
 		}
 		populateRunFromEntries(&run, entries)
 

@@ -121,11 +121,14 @@ Model selection is determined by `subagent_type` in the Task tool input:
     (custom)        → specified by `model` parameter
 
 Compaction variant: `agent-acompact-<id>.jsonl` supplements (does not
-replace) the original subagent file.
+replace) the original subagent file. Cass records these as
+`SubagentRun{IsCompaction:true}` for auditability but excludes them from
+parent FTS merging and graph fan-out to avoid duplicate content.
 
-**Indexed by cass**: entries from subagent JSONL files are merged into
-the parent session during collection (claudecode.go). The `subagents/`
-directory is walked; `agent-acompact-*` files are excluded.
+**Indexed by cass**: entries from primary subagent JSONL files are merged
+into the parent session during collection (claudecode.go). The
+`subagents/` directory is walked; `agent-acompact-*` files are indexed as
+compaction metadata only.
 
 ### V4: APIRequest
 

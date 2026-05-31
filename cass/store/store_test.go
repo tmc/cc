@@ -623,6 +623,16 @@ func TestBatchIndexSubagentRuns(t *testing.T) {
 				EndedAt:         t0.Add(4 * time.Minute),
 				EntryCount:      2,
 			},
+			{
+				AgentID:         "acompact-agA",
+				ParentSessionID: "parent1",
+				Workspace:       "/tmp/proj",
+				Status:          "unknown",
+				StartedAt:       t0.Add(5 * time.Minute),
+				EndedAt:         t0.Add(6 * time.Minute),
+				EntryCount:      1,
+				IsCompaction:    true,
+			},
 		},
 	}
 
@@ -634,8 +644,8 @@ func TestBatchIndexSubagentRuns(t *testing.T) {
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM subagent_runs WHERE parent_session_id = ?", sess.ID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 {
-		t.Fatalf("subagent_runs count = %d, want 2", count)
+	if count != 3 {
+		t.Fatalf("subagent_runs count = %d, want 3", count)
 	}
 
 	// Verify denorm counter.
@@ -643,8 +653,8 @@ func TestBatchIndexSubagentRuns(t *testing.T) {
 	if err := s.db.QueryRowContext(ctx, "SELECT subagent_run_count FROM sessions WHERE id = ?", sess.ID).Scan(&denormCount); err != nil {
 		t.Fatal(err)
 	}
-	if denormCount != 2 {
-		t.Errorf("sessions.subagent_run_count = %d, want 2", denormCount)
+	if denormCount != 3 {
+		t.Errorf("sessions.subagent_run_count = %d, want 3", denormCount)
 	}
 
 	// Spot-check one row.
@@ -664,6 +674,25 @@ func TestBatchIndexSubagentRuns(t *testing.T) {
 	}
 	if gotTotalTokens != 1234 || gotToolUses != 5 || gotDurationMs != 9000 {
 		t.Errorf("agA usage: tokens=%d toolUses=%d ms=%d", gotTotalTokens, gotToolUses, gotDurationMs)
+	}
+
+	var gotCompaction int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT is_compaction FROM subagent_runs WHERE parent_session_id = ? AND agent_id = ?
+	`, sess.ID, "acompact-agA").Scan(&gotCompaction); err != nil {
+		t.Fatal(err)
+	}
+	if gotCompaction != 1 {
+		t.Errorf("acompact is_compaction = %d, want 1", gotCompaction)
+	}
+	graphRuns, err := s.GraphSubagents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range graphRuns {
+		if r.AgentID == "acompact-agA" {
+			t.Fatalf("GraphSubagents included compaction run: %+v", r)
+		}
 	}
 
 	// Re-index with a different set of runs (drop agA, keep agB, add agC).
