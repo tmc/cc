@@ -280,8 +280,8 @@ func TestGraphExpandedMode(t *testing.T) {
 	if promptTitleNode.ID == "" {
 		t.Fatalf("missing workflow agent node for agent-2")
 	}
-	if promptTitleNode.Title != "Explore 2" || promptTitleNode.Phase != "Stress" || promptTitleNode.AgentType != "Explore" {
-		t.Errorf("agent-2 graph node = %+v, want prompt title hidden with phase/type metadata", promptTitleNode)
+	if promptTitleNode.Label != "Stress" || promptTitleNode.Title != "Explore 2" || promptTitleNode.Phase != "Stress" || promptTitleNode.AgentType != "Explore" {
+		t.Errorf("agent-2 graph node = %+v, want phase label with prompt title kept as subtitle", promptTitleNode)
 	}
 }
 
