@@ -345,6 +345,124 @@ func TestSessionEntriesPagination(t *testing.T) {
 	}
 }
 
+func TestSessionEntriesRecentPageSkipsOldOversizeLine(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-tail-1.jsonl")
+	var b strings.Builder
+	b.WriteString(`{"type":"user","x":"`)
+	b.WriteString(strings.Repeat("x", cc.MaxLineSize))
+	b.WriteString("\"}\n")
+	b.WriteString(`{"type":"user","timestamp":"2026-05-28T10:02:00Z","uuid":"recent-a","sessionId":"session-tail-1","message":{"role":"user","content":"recent a"}}` + "\n")
+	b.WriteString(`{"type":"assistant","timestamp":"2026-05-28T10:03:00Z","uuid":"recent-b","sessionId":"session-tail-1","message":{"role":"assistant","content":"recent b"}}` + "\n")
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: []cass.Session{{
+			ID:         "session-tail-1",
+			Agent:      "codex-cli",
+			Title:      "Tail pagination",
+			Workspace:  "/work/tail",
+			SourcePath: path,
+			StartedAt:  time.Unix(100, 0),
+			EndedAt:    time.Unix(200, 0),
+			Messages:   []cass.Message{{Role: "user", Content: "tail"}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v; want 1, nil", n, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session/session-tail-1?order=desc&limit=1", nil)
+	rr := httptest.NewRecorder()
+	New(Config{Service: svc}).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
+	var entries []cc.Entry
+	if err := json.Unmarshal(rr.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(entries) != 1 || entries[0].UUID != "recent-b" {
+		t.Fatalf("paged uuids = %v, want [recent-b]", entryUUIDs(entries))
+	}
+}
+
+func TestSessionEntriesRecentPageMergesSubagents(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-merge-1.jsonl")
+	lines := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-05-28T10:00:00Z","uuid":"parent-old","sessionId":"session-merge-1","message":{"role":"user","content":"parent old"}}`,
+		`{"type":"assistant","timestamp":"2026-05-28T10:04:00Z","uuid":"parent-new","sessionId":"session-merge-1","message":{"role":"assistant","content":"parent new"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	subDir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
+	if err := os.MkdirAll(filepath.Join(subDir, "workflows", "wf_1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subLines := strings.Join([]string{
+		`{"type":"assistant","timestamp":"2026-05-28T10:02:00Z","uuid":"sub-mid","sessionId":"session-merge-1","message":{"role":"assistant","content":"sub mid"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(subDir, "agent-sub.jsonl"), []byte(subLines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wfLines := strings.Join([]string{
+		`{"type":"assistant","timestamp":"2026-05-28T10:03:00Z","uuid":"wf-mid","sessionId":"session-merge-1","message":{"role":"assistant","content":"wf mid"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(subDir, "workflows", "wf_1", "agent-wf.jsonl"), []byte(wfLines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: []cass.Session{{
+			ID:         "session-merge-1",
+			Agent:      "codex-cli",
+			Title:      "Merge pagination",
+			Workspace:  "/work/merge",
+			SourcePath: path,
+			StartedAt:  time.Unix(100, 0),
+			EndedAt:    time.Unix(200, 0),
+			Messages:   []cass.Message{{Role: "user", Content: "merge"}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v; want 1, nil", n, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session/session-merge-1?order=desc&limit=3", nil)
+	rr := httptest.NewRecorder()
+	New(Config{Service: svc}).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
+	var entries []cc.Entry
+	if err := json.Unmarshal(rr.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := entryUUIDs(entries); strings.Join(got, ",") != "parent-new,wf-mid,sub-mid" {
+		t.Fatalf("paged uuids = %v, want [parent-new wf-mid sub-mid]", got)
+	}
+	if entries[1].AgentID != "wf" || !entries[1].IsSidechain || entries[2].AgentID != "sub" || !entries[2].IsSidechain {
+		t.Fatalf("sidechain tags = [%q/%v %q/%v], want wf/sub sidechains",
+			entries[1].AgentID, entries[1].IsSidechain, entries[2].AgentID, entries[2].IsSidechain)
+	}
+}
+
 func TestGraphWorkflowModes(t *testing.T) {
 	ctx := context.Background()
 	start := time.Unix(1_700_000_000, 0).UTC()

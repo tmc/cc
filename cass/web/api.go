@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -336,6 +337,16 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if wantsRecentPage(r) {
+		entries, err := readRecentSessionEntriesWithSubagents(sourcePath, r)
+		if err != nil {
+			writeError(w, err, http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, entries)
+		return
+	}
+
 	// Default: return all entries as JSON array (including subagent entries).
 	entries, err := readSessionEntriesWithSubagents(sourcePath)
 	if err != nil {
@@ -366,6 +377,16 @@ func (s *Server) handleWorkflowAgent(w http.ResponseWriter, r *http.Request) {
 		s.streamSession(w, r, path)
 		return
 	}
+	if wantsRecentPage(r) {
+		entries, err := readRecentSessionEntries(path, r)
+		if err != nil {
+			writeError(w, err, http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, entries)
+		return
+	}
+
 	// Single agent file: no subagent merge (an agent has no subagents/ of its own).
 	entries, err := readSessionEntries(path)
 	if err != nil {
@@ -730,6 +751,163 @@ func readSessionEntriesWithSubagents(path string) ([]cc.Entry, error) {
 		return entries[i].Timestamp.Before(entries[j].Timestamp)
 	})
 	return entries, nil
+}
+
+type sessionEntrySource struct {
+	path      string
+	agentID   string
+	sidechain bool
+}
+
+func sessionEntrySources(path string) []sessionEntrySource {
+	sources := []sessionEntrySource{{path: path}}
+	subagentDir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
+	infos, err := os.ReadDir(subagentDir)
+	if err == nil {
+		for _, fi := range infos {
+			name := fi.Name()
+			if !strings.HasSuffix(name, ".jsonl") || strings.HasPrefix(name, "agent-acompact") {
+				continue
+			}
+			sources = append(sources, sessionEntrySource{
+				path:      filepath.Join(subagentDir, name),
+				agentID:   strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl"),
+				sidechain: true,
+			})
+		}
+	}
+	wfAgents, _ := filepath.Glob(filepath.Join(subagentDir, "workflows", "*", "agent-*.jsonl"))
+	for _, wfPath := range wfAgents {
+		base := filepath.Base(wfPath)
+		if strings.HasPrefix(base, "agent-acompact") {
+			continue
+		}
+		sources = append(sources, sessionEntrySource{
+			path:      wfPath,
+			agentID:   strings.TrimSuffix(strings.TrimPrefix(base, "agent-"), ".jsonl"),
+			sidechain: true,
+		})
+	}
+	return sources
+}
+
+func wantsRecentPage(r *http.Request) bool {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	return q.Get("order") == "desc" && limit > 0
+}
+
+func readRecentSessionEntries(path string, r *http.Request) ([]cc.Entry, error) {
+	return readRecentEntriesFromSources(r.Context(), []sessionEntrySource{{path: path}}, r)
+}
+
+func readRecentSessionEntriesWithSubagents(path string, r *http.Request) ([]cc.Entry, error) {
+	return readRecentEntriesFromSources(r.Context(), sessionEntrySources(path), r)
+}
+
+func readRecentEntriesFromSources(ctx context.Context, sources []sessionEntrySource, r *http.Request) ([]cc.Entry, error) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	need := limit + offset
+	if need <= 0 {
+		return nil, nil
+	}
+
+	var entries []cc.Entry
+	for _, src := range sources {
+		sub, err := readFileTailEntries(ctx, src.path, need)
+		if err != nil {
+			if src.sidechain {
+				continue
+			}
+			return nil, err
+		}
+		if src.sidechain {
+			for i := range sub {
+				if sub[i].AgentID == "" {
+					sub[i].AgentID = src.agentID
+				}
+				sub[i].IsSidechain = true
+			}
+		}
+		entries = append(entries, sub...)
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].Timestamp.After(entries[j].Timestamp)
+	})
+	if offset >= len(entries) {
+		return []cc.Entry{}, nil
+	}
+	entries = entries[offset:]
+	if limit > 0 && limit < len(entries) {
+		entries = entries[:limit]
+	}
+	return entries, nil
+}
+
+func readFileTailEntries(ctx context.Context, path string, limit int) ([]cc.Entry, error) {
+	if limit <= 0 {
+		return readSessionEntries(path)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := fi.Size()
+	const chunkSize int64 = 64 * 1024
+	var data []byte
+	var entries []cc.Entry
+	start := size
+	for {
+		if start == 0 {
+			break
+		}
+		n := chunkSize
+		if start < n {
+			n = start
+		}
+		start -= n
+		chunk := make([]byte, n)
+		if _, err := f.ReadAt(chunk, start); err != nil {
+			return nil, err
+		}
+		data = append(chunk, data...)
+		decoded, err := decodeTailEntries(ctx, data, start > 0)
+		if err != nil {
+			return nil, err
+		}
+		entries = decoded
+		if len(entries) >= limit {
+			break
+		}
+	}
+	if len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+	return entries, nil
+}
+
+func decodeTailEntries(ctx context.Context, data []byte, truncated bool) ([]cc.Entry, error) {
+	if truncated {
+		i := bytes.IndexByte(data, '\n')
+		if i < 0 {
+			return nil, nil
+		}
+		data = data[i+1:]
+	}
+	return cc.ReadAll(ctx, bytes.NewReader(data))
 }
 
 func pageSessionEntries(entries []cc.Entry, r *http.Request) []cc.Entry {
