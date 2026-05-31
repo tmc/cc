@@ -2511,13 +2511,13 @@ func (s *DB) SaveRateLimitSnapshots(ctx context.Context, snapshots []cass.RateLi
 	return tx.Commit()
 }
 
-// QueryRequests returns API requests ordered by timestamp. When sessionID is
+// QueryRequests returns API requests ordered newest first. When sessionID is
 // non-empty, it returns requests linked to that session.
 func (s *DB) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIRequest, error) {
 	return s.QueryRequestsFiltered(ctx, cass.APIRequestFilter{SessionID: sessionID})
 }
 
-// QueryRequestsFiltered returns API requests matching f, ordered by timestamp.
+// QueryRequestsFiltered returns API requests matching f, ordered newest first.
 func (s *DB) QueryRequestsFiltered(ctx context.Context, f cass.APIRequestFilter) ([]cass.APIRequest, error) {
 	query := `
 		SELECT id, session_id, request_id, timestamp,
@@ -2557,7 +2557,7 @@ func (s *DB) QueryRequestsFiltered(ctx context.Context, f cass.APIRequestFilter)
 	if len(where) > 0 {
 		query += " WHERE " + strings.Join(where, " AND ")
 	}
-	query += ` ORDER BY timestamp`
+	query += ` ORDER BY timestamp DESC, id DESC`
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query requests: %w", err)

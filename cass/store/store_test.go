@@ -815,11 +815,11 @@ func TestQueryRequestsEmptySessionReturnsAll(t *testing.T) {
 	if len(reqs) != 2 {
 		t.Fatalf("QueryRequests empty session = %d, want all 2: %+v", len(reqs), reqs)
 	}
-	if reqs[0].ID != "req-a" || reqs[1].ID != "req-b" {
-		t.Fatalf("QueryRequests empty session order = %+v, want timestamp order req-a, req-b", reqs)
+	if reqs[0].ID != "req-b" || reqs[1].ID != "req-a" {
+		t.Fatalf("QueryRequests empty session order = %+v, want newest-first order req-b, req-a", reqs)
 	}
-	if reqs[0].Method != "GET" || reqs[1].Method != "POST" {
-		t.Fatalf("QueryRequests methods = %+v, want GET/POST", reqs)
+	if reqs[0].Method != "POST" || reqs[1].Method != "GET" {
+		t.Fatalf("QueryRequests methods = %+v, want POST/GET", reqs)
 	}
 }
 
