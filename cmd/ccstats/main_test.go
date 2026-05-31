@@ -315,7 +315,7 @@ func TestAnalyzeCharacteristicsReportsCoreMetrics(t *testing.T) {
 	*longRunningThresholdFlag = 8 * time.Hour
 
 	files := writeCharacteristicsFixture(t)
-	report, err := analyzeCharacteristics(files)
+	report, err := analyzeCharacteristics(files, pricingConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestAnalyzeCharacteristicsKeepsNoUsageRequestsInSessionCounts(t *testing.T)
 		},
 	})
 
-	report, err := analyzeCharacteristics([]string{path})
+	report, err := analyzeCharacteristics([]string{path}, pricingConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestAnalyzeCharacteristicsWidensParallelWindowForShortSince(t *testing.T) {
 		assistantEntry("session-d", "session-d", "", base.Add(4*time.Minute+30*time.Second), false, "claude-sonnet-4-6", 10, 1, 0, 0, toolBlocks("", 0)),
 	})
 
-	report, err := analyzeCharacteristics([]string{path})
+	report, err := analyzeCharacteristics([]string{path}, pricingConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestAnalyzeCharacteristicsReadsCodexUsage(t *testing.T) {
 	dir := t.TempDir()
 	path := writeCodexCharacteristicsFixture(t, dir)
 
-	report, err := analyzeCharacteristics([]string{path})
+	report, err := analyzeCharacteristics([]string{path}, pricingConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,6 +481,46 @@ func TestAnalyzeCharacteristicsReadsCodexUsage(t *testing.T) {
 	}
 	if got := report.Characteristics["parallel4+"].Weight; got != 0 {
 		t.Fatalf("parallel4+ weight = %f, want 0", got)
+	}
+}
+
+func TestAnalyzeCharacteristicsAppliesPricingOverrides(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong, oldSince, oldPricing := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag, *sinceFlag, *pricingFileFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+		*sinceFlag = oldSince
+		*pricingFileFlag = oldPricing
+	})
+	*unitFlag = "cost"
+	*verboseFlag = false
+	*formatFlag = "text"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+
+	dir := t.TempDir()
+	path := writeCharacteristicsSession(t, dir, "pricing.jsonl", []ccpkg.Entry{
+		assistantEntry("session-p", "session-p", "", time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC), false, "claude-sonnet-4-6", 100, 20, 10, 5, toolBlocks("", 0)),
+	})
+	pricingPath := filepath.Join(dir, "pricing.json")
+	writePricingOverride(t, pricingPath)
+	pricingCfg, err := loadPricingConfig(pricingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := analyzeCharacteristics([]string{path}, pricingCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := report.Totals.Weight, 100*2.0+20*2.0+10*0.2+5*0.4; got != want {
+		t.Fatalf("weight = %f, want %f", got, want)
 	}
 }
 
@@ -723,6 +763,34 @@ func writeRawJSONL(t *testing.T, path string, rows ...map[string]any) {
 		}
 	}
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writePricingOverride(t *testing.T, path string) {
+	t.Helper()
+
+	override := map[string]any{
+		"default": map[string]any{
+			"input":        1.0,
+			"output":       1.0,
+			"cache_read":   0.1,
+			"cache_create": 0.2,
+		},
+		"models": map[string]any{
+			"sonnet": map[string]any{
+				"input":        2.0,
+				"output":       2.0,
+				"cache_read":   0.2,
+				"cache_create": 0.4,
+			},
+		},
+	}
+	b, err := json.Marshal(override)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

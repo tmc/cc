@@ -19,6 +19,7 @@ var (
 	sinceFlag                = flag.String("since", "", "Find sessions modified within duration (e.g. 16h, 7d)")
 	formatFlag               = flag.String("format", "text", "Output format: text, json")
 	redactFlag               = flag.Bool("redact", false, "Redact session identifiers and file paths from JSON output")
+	pricingFileFlag          = flag.String("pricing-file", "", "JSON file with pricing overrides for characteristics")
 	verboseFlag              = flag.Bool("verbose", false, "Include additional usage characteristics")
 	unitFlag                 = flag.String("unit", "cost", "Characteristics weighting unit: cost, tokens, requests")
 	parallelWindowFlag       = flag.Duration("parallel-window", 2*time.Minute, "Parallelism lookback window")

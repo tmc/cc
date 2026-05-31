@@ -6,7 +6,8 @@
 //
 // ccstats characteristics reports cross-session usage characteristics over
 // the same file set. It supports -unit, -verbose, -parallel-window,
-// -context-threshold, -long-running-threshold, and -redact for JSON output.
+// -context-threshold, -long-running-threshold, -pricing-file, and -redact
+// for JSON output.
 //
 // # Usage
 //

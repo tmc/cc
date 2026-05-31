@@ -30,6 +30,11 @@ type requestRecord struct {
 	CompactFollow  bool
 }
 
+type pricingConfig struct {
+	Default *pricing           `json:"default,omitempty"`
+	Models  map[string]pricing `json:"models,omitempty"`
+}
+
 type sessionAgg struct {
 	FirstTS        time.Time
 	LastTS         time.Time
@@ -92,7 +97,11 @@ type modelShare struct {
 }
 
 func runCharacteristics(files []string) error {
-	report, err := analyzeCharacteristics(files)
+	pricingCfg, err := loadPricingConfig(*pricingFileFlag)
+	if err != nil {
+		return err
+	}
+	report, err := analyzeCharacteristics(files, pricingCfg)
 	if err != nil {
 		return err
 	}
@@ -108,7 +117,7 @@ func runCharacteristics(files []string) error {
 	return nil
 }
 
-func analyzeCharacteristics(files []string) (*characteristicsReport, error) {
+func analyzeCharacteristics(files []string, pricingCfg pricingConfig) (*characteristicsReport, error) {
 	var requests []requestRecord
 	sessions := make(map[string]*sessionAgg)
 	compactBudgets := make(map[string]int)
@@ -165,7 +174,7 @@ func analyzeCharacteristics(files []string) (*characteristicsReport, error) {
 				req.CacheRead = usage.CacheReadInputTokens
 				req.CacheCreate = usage.CacheCreationInputTokens
 				req.ContextSize = req.InputTokens + req.CacheRead + req.CacheCreate
-				req.Weight = requestWeight(req)
+				req.Weight = requestWeight(req, pricingCfg)
 			}
 			if family := modelFamily(req.Model); family == req.Model && family != "" && family != "unknown" {
 				unknownModels[req.Model] = struct{}{}
@@ -347,15 +356,15 @@ func renderCharacteristicsReport(report *characteristicsReport) {
 	}
 }
 
-func requestWeight(req requestRecord) float64 {
+func requestWeight(req requestRecord, pricingCfg pricingConfig) float64 {
+	rates := pricingForModel(req.Model, pricingCfg)
 	switch strings.ToLower(*unitFlag) {
 	case "requests":
 		return 1
 	case "tokens":
 		return float64(req.InputTokens + req.OutputTokens + req.CacheRead + req.CacheCreate)
 	default:
-		r := pricingForModel(req.Model)
-		return float64(req.InputTokens)*r.Input + float64(req.OutputTokens)*r.Output + float64(req.CacheRead)*r.CacheRead + float64(req.CacheCreate)*r.CacheCreate
+		return float64(req.InputTokens)*rates.Input + float64(req.OutputTokens)*rates.Output + float64(req.CacheRead)*rates.CacheRead + float64(req.CacheCreate)*rates.CacheCreate
 	}
 }
 
@@ -375,17 +384,49 @@ func effectiveParallelWindow() time.Duration {
 }
 
 type pricing struct {
-	Input, Output, CacheRead, CacheCreate float64
+	Input       float64 `json:"input"`
+	Output      float64 `json:"output"`
+	CacheRead   float64 `json:"cache_read"`
+	CacheCreate float64 `json:"cache_create"`
 }
 
-func pricingForModel(model string) pricing {
+var defaultPricing = pricing{Input: 1.0, Output: 1.0, CacheRead: 0.10, CacheCreate: 0.20}
+
+func loadPricingConfig(path string) (pricingConfig, error) {
+	cfg := pricingConfig{Models: make(map[string]pricing)}
+	if path == "" {
+		return cfg, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return pricingConfig{}, fmt.Errorf("read pricing file: %w", err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return pricingConfig{}, fmt.Errorf("parse pricing file: %w", err)
+	}
+	if cfg.Models == nil {
+		cfg.Models = make(map[string]pricing)
+	}
+	return cfg, nil
+}
+
+func pricingForModel(model string, cfg pricingConfig) pricing {
+	if p, ok := cfg.Models[model]; ok {
+		return p
+	}
+	if p, ok := cfg.Models[modelFamily(model)]; ok {
+		return p
+	}
+	if cfg.Default != nil {
+		return *cfg.Default
+	}
 	switch modelFamily(model) {
 	case "opus":
 		return pricing{Input: 1.5, Output: 1.5, CacheRead: 0.15, CacheCreate: 0.30}
 	case "haiku":
 		return pricing{Input: 0.3, Output: 0.3, CacheRead: 0.03, CacheCreate: 0.06}
 	default:
-		return pricing{Input: 1.0, Output: 1.0, CacheRead: 0.10, CacheCreate: 0.20}
+		return defaultPricing
 	}
 }
 
