@@ -79,8 +79,8 @@ export const meta = {
   description: 'Independent review',
   phases: [
     { title: 'Lenses', detail: 'independent analytical perspectives' },
-    { title: 'Stress', detail: 'adversarial verification' },
-    { title: 'Synthesize', detail: 'merge surviving conclusions' },
+    { detail: 'adversarial verification', title: 'Stress' },
+    { title: 'Synthesize' },
   ],
 }
 const LENSES = [
@@ -97,6 +97,9 @@ agent('synth', { phase: 'Synthesize', label: 'synthesize' })
 	info := workflowScriptInfoFromScript(script)
 	if len(info.Phases) != 3 {
 		t.Fatalf("phases = %d, want 3", len(info.Phases))
+	}
+	if info.Phases[1].Title != "Stress" || info.Phases[1].Detail != "adversarial verification" || info.Phases[2].Title != "Synthesize" {
+		t.Fatalf("phases = %+v, want reversed-detail and title-only phases", info.Phases)
 	}
 	if len(info.AgentSpecs) != 7 {
 		t.Fatalf("agent specs = %d, want 7", len(info.AgentSpecs))

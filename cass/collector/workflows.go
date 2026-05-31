@@ -18,6 +18,8 @@ import (
 var (
 	workflowMetaRE         = regexp.MustCompile(`(?m)\b(name|description)\s*:\s*['"]([^'"]+)['"]`)
 	workflowPhaseRE        = regexp.MustCompile(`(?s)\{\s*title\s*:\s*['"]([^'"]+)['"]\s*,\s*detail\s*:\s*['"]([^'"]*)['"]\s*\}`)
+	workflowPhaseRevRE     = regexp.MustCompile(`(?s)\{\s*detail\s*:\s*['"]([^'"]*)['"]\s*,\s*title\s*:\s*['"]([^'"]+)['"]\s*\}`)
+	workflowPhaseTitleRE   = regexp.MustCompile(`(?s)\{\s*title\s*:\s*['"]([^'"]+)['"]\s*,?\s*\}`)
 	workflowPhaseCallRE    = regexp.MustCompile(`\bphase\(\s*['"]([^'"]+)['"]\s*\)`)
 	workflowLensKeyRE      = regexp.MustCompile(`\bkey\s*:\s*['"]([^'"]+)['"]`)
 	workflowLabelKeyRE     = regexp.MustCompile("label\\s*:\\s*`([^`]*\\$\\{l\\.key\\}[^`]*)`\\s*,\\s*phase\\s*:\\s*['\"]([^'\"]+)['\"]([^}]*)")
@@ -284,6 +286,12 @@ func workflowScriptInfoFromScript(script string) workflowScriptInfo {
 	}
 	for _, m := range workflowPhaseRE.FindAllStringSubmatch(script, -1) {
 		addWorkflowPhase(&info, cass.WorkflowPhase{Title: m[1], Detail: m[2]})
+	}
+	for _, m := range workflowPhaseRevRE.FindAllStringSubmatch(script, -1) {
+		addWorkflowPhase(&info, cass.WorkflowPhase{Title: m[2], Detail: m[1]})
+	}
+	for _, m := range workflowPhaseTitleRE.FindAllStringSubmatch(script, -1) {
+		addWorkflowPhase(&info, cass.WorkflowPhase{Title: m[1]})
 	}
 	for _, m := range workflowPhaseCallRE.FindAllStringSubmatch(script, -1) {
 		addWorkflowPhase(&info, cass.WorkflowPhase{Title: m[1]})
