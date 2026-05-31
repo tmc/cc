@@ -524,6 +524,45 @@ func TestAnalyzeCharacteristicsAppliesPricingOverrides(t *testing.T) {
 	}
 }
 
+func TestRunCharacteristicsLoadsPricingFileFlag(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong, oldPricing := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag, *pricingFileFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+		*pricingFileFlag = oldPricing
+	})
+	*unitFlag = "cost"
+	*verboseFlag = false
+	*formatFlag = "json"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+
+	dir := t.TempDir()
+	path := writeCharacteristicsSession(t, dir, "pricing-flag.jsonl", []ccpkg.Entry{
+		assistantEntry("session-p", "session-p", "", time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC), false, "claude-sonnet-4-6", 50, 0, 0, 0, toolBlocks("", 0)),
+	})
+	pricingPath := filepath.Join(dir, "pricing.json")
+	writePricingOverride(t, pricingPath)
+	*pricingFileFlag = pricingPath
+
+	gotJSON := captureStdout(t, func() error {
+		return runCharacteristics([]string{path})
+	})
+	var report characteristicsReport
+	if err := json.Unmarshal([]byte(gotJSON), &report); err != nil {
+		t.Fatalf("decode JSON report: %v\n%s", err, gotJSON)
+	}
+	if got, want := report.Totals.Weight, 50*2.0; got != want {
+		t.Fatalf("weight = %f, want %f", got, want)
+	}
+}
+
 func TestRunCharacteristicsVerboseJSON(t *testing.T) {
 	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
 	oldParallel, oldContext, oldLong := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag

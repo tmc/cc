@@ -1,6 +1,6 @@
 # ccstats: Usage-Characteristics Report
 
-Status: First slice shipped in `cmd/ccstats` (M1); remaining items stay draft.
+Status: First slice shipped in `cmd/ccstats`; the report now includes the hosted characteristics, the local-only additions, JSON output, redaction, and pricing overrides.
 Author: tmc
 Date: 2026-04-20
 Scope: Add a second report tier to `ccstats` (or a sibling `ccanalyze` if we decide to split) that mirrors the cross-session "usage characteristics" view Claude Code and other session providers surface in their consumer UIs.
@@ -96,7 +96,7 @@ Because we have the raw `.jsonl`, we can compute things the hosted UI can't or d
 10. **`model distribution`** — not a percentage line; a bar of `opus / sonnet / haiku` share of the unit of usage.
     Not framed as a "characteristic" line because it's a breakdown, not an independent yes/no.
 
-We ship 5.1 by default; 5.2 behind `-verbose` to avoid firehose by default.
+We ship 5.1 by default; 5.2 behind `-verbose` to avoid firehose by default. The default pricing table is embedded, and `-pricing-file` lets the user override it with a small JSON file when their local model mix differs from the built-in rates.
 
 ## 6. Choosing the unit of usage
 
@@ -279,14 +279,15 @@ Flags deliberately kept few and thresholds named (not positional) — `ccstats` 
 - **Unit: predicate correctness.** Table-driven. Feed synthetic `Request` with known values, assert characteristic assignment.
 - **Unit: ParallelIndex.** Small fixture, compare `ActiveAt` outputs against a naive O(N²) reference.
 - **Golden: report format.** Fixture with a known set of sessions → golden `.txt` and `.json`. Update via `-update` flag.
+- **Pricing override.** `-pricing-file` should accept a small JSON file with `default` and `models` entries, and the CLI path should load it before the report is rendered.
 - **Integration: live data.** `ccstats characteristics -since 24h` run against the user's own `.jsonl` — smoke test, values must be in `[0,1]`, `total_weight > 0`, JSON round-trips.
 - **Property: denominators.** For any non-trivial window, each `characteristic.weight ≤ total_weight`. Percentages must be in `[0, 1]`. Sum is *not* bounded — that's the whole point.
 
 ## 12. Implementation plan
 
-1. **M1** — Add `cmd/ccstats/analyze.go` + `pricing.go` + `parallel.go`. Implement 5.1 only. Ship.
-2. **M2** — Add 5.2 characteristics behind `-verbose`.
-3. **M3** — JSON schema + golden tests.
+1. **M1** — Add `cmd/ccstats/analyze.go` + `pricing.go` + `parallel.go`. Implement 5.1 only. Ship. Done.
+2. **M2** — Add 5.2 characteristics behind `-verbose`. Done.
+3. **M3** — JSON schema + golden tests. Done.
 4. **M4** — Refactor shared parsing out of `cmd/ccstats/main.go` into an internal package if the file grows past ~500 LOC.
 5. **M5** — (Optional) a small `ccstats watch` that refreshes the report every 60s, for users who want the Claude-Code-panel-shaped experience in their terminal.
 
