@@ -1485,6 +1485,11 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         ${h.goal_count > 0 && html`<span class="hit-goals">${h.active_goal_count || 0} active / ${h.completed_goal_count || 0} complete</span>`}
         ${shownSkillCount > 0 && html`<span class="hit-skills">${h.selected_skill_count || 0} selected / ${h.loaded_skill_count || 0} loaded</span>`}
         ${h.workflow_count > 0 && html`<span class="hit-workflows">${h.workflow_count} workflow${h.workflow_count === 1 ? '' : 's'} · ${h.workflow_agent_count || 0} agents${h.workflow_task_op_count ? ' · ' + h.workflow_task_op_count + ' task ops' : ''}</span>`}
+        ${(h.workflows || []).length > 0 && html`
+          <span class="hit-workflow-name" title=${h.workflows[0].summary || h.workflows[0].description || h.workflows[0].run_id || ''}>
+            ${h.workflows[0].name || h.workflows[0].run_id || 'workflow'}
+          </span>
+        `}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
       </div>
       <${ToolMicroBar} breakdown=${h.tool_breakdown} onToolClick=${onToolClick} />

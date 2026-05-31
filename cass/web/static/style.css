@@ -313,6 +313,18 @@ input::placeholder { color: var(--faint); }
 .hit-goals { color: var(--orange); }
 .hit-skills { color: var(--cyan); }
 .hit-workflows { color: var(--magenta); }
+.hit-workflow-name {
+  color: var(--magenta);
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--magenta) 55%, var(--border));
+  border-radius: 3px;
+  padding: 0 4px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .hit-goal-badge {
   font-size: 10px;
   color: var(--orange);
