@@ -178,6 +178,71 @@ func TestReadFileCodexCLI(t *testing.T) {
 	}
 }
 
+func TestReadFileCodexTokenCountUsage(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "session.jsonl")
+
+	writeJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-02-25T10:00:00Z",
+			"type":      "session_meta",
+			"payload": map[string]any{
+				"id":          "sid-usage-123",
+				"timestamp":   "2026-02-25T10:00:00Z",
+				"cwd":         "/tmp/myproj",
+				"originator":  "codex_cli_rs",
+				"source":      "cli",
+				"cli_version": "0.58.0",
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-02-25T10:00:01Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "assistant",
+				"content": []map[string]any{
+					{"type": "output_text", "text": "working"},
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-02-25T10:00:02Z",
+			"type":      "event_msg",
+			"payload": map[string]any{
+				"type": "token_count",
+				"info": map[string]any{
+					"last_token_usage": map[string]any{
+						"input_tokens":            17,
+						"cached_input_tokens":     9,
+						"output_tokens":           5,
+						"reasoning_output_tokens": 2,
+						"total_tokens":            31,
+					},
+				},
+			},
+		},
+	)
+
+	entries, err := ReadFile(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+	got := entries[1]
+	if got.SessionID != "sid-usage-123" {
+		t.Fatalf("assistant sessionID = %q, want sid-usage-123", got.SessionID)
+	}
+	if got.Message == nil || got.Message.Usage == nil {
+		t.Fatalf("assistant usage missing: %#v", got.Message)
+	}
+	if got.Message.Usage.InputTokens != 17 || got.Message.Usage.OutputTokens != 5 || got.Message.Usage.CacheReadInputTokens != 9 {
+		t.Fatalf("assistant usage = %+v, want input=17 output=5 cache_read=9", got.Message.Usage)
+	}
+}
+
 func TestReadFileCodexTurnContextCWD(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "session.jsonl")

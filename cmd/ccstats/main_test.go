@@ -408,6 +408,44 @@ func TestAnalyzeCharacteristicsWidensParallelWindowForShortSince(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCharacteristicsReadsCodexUsage(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong, oldSince := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag, *sinceFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+		*sinceFlag = oldSince
+	})
+	*unitFlag = "cost"
+	*verboseFlag = false
+	*formatFlag = "text"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+	*sinceFlag = "24h"
+
+	dir := t.TempDir()
+	path := writeCodexCharacteristicsFixture(t, dir)
+
+	report, err := analyzeCharacteristics([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Totals.Requests != 1 {
+		t.Fatalf("requests = %d, want 1", report.Totals.Requests)
+	}
+	if report.Totals.Weight <= 0 {
+		t.Fatalf("weight = %f, want > 0", report.Totals.Weight)
+	}
+	if got := report.Characteristics["parallel4+"].Weight; got != 0 {
+		t.Fatalf("parallel4+ weight = %f, want 0", got)
+	}
+}
+
 func TestRunCharacteristicsVerboseJSON(t *testing.T) {
 	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
 	oldParallel, oldContext, oldLong := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag
@@ -588,6 +626,67 @@ func writeCharacteristicsSession(t *testing.T, dir, name string, entries []ccpkg
 		t.Fatal(err)
 	}
 	return path
+}
+
+func writeCodexCharacteristicsFixture(t *testing.T, dir string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, "codex.jsonl")
+	writeRawJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-05-31T12:00:00Z",
+			"type":      "session_meta",
+			"payload": map[string]any{
+				"id":         "codex-session-1",
+				"cwd":        "/work/codex",
+				"originator": "codex_cli_rs",
+				"source":     "cli",
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-31T12:00:01Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "assistant",
+				"content": []map[string]any{
+					{"type": "output_text", "text": "hello from codex"},
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-05-31T12:00:02Z",
+			"type":      "event_msg",
+			"payload": map[string]any{
+				"type": "token_count",
+				"info": map[string]any{
+					"last_token_usage": map[string]any{
+						"input_tokens":            120,
+						"cached_input_tokens":     20,
+						"output_tokens":           30,
+						"reasoning_output_tokens": 12,
+						"total_tokens":            182,
+					},
+				},
+			},
+		},
+	)
+	return path
+}
+
+func writeRawJSONL(t *testing.T, path string, rows ...map[string]any) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	for _, row := range rows {
+		if err := enc.Encode(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func assistantEntry(sessionID, slug, title string, ts time.Time, sidechain bool, model string, input, output, cacheRead, cacheCreate int, content json.RawMessage) ccpkg.Entry {

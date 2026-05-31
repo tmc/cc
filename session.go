@@ -32,6 +32,7 @@ type Entry struct {
 	Todos                   json.RawMessage `json:"todos,omitempty"`
 	RequestID               string          `json:"requestId,omitempty"`
 	SourceToolAssistantUUID string          `json:"sourceToolAssistantUUID,omitempty"`
+	Usage                   *Usage          `json:"usage,omitempty"`
 
 	// Custom title set via /rename command.
 	CustomTitle string `json:"customTitle,omitempty"`

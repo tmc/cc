@@ -102,7 +102,9 @@ func decodeEntryLine(line []byte) (Entry, bool) {
 			Subtype:   "compact_boundary",
 			Timestamp: env.Timestamp,
 		}, true
-	case "event_msg", "reasoning", "ghost_snapshot":
+	case "event_msg":
+		return decodeCodexEventMsg(env)
+	case "reasoning", "ghost_snapshot":
 		return Entry{}, false
 	default:
 		return Entry{}, false
@@ -397,6 +399,42 @@ func decodeCodexWebSearch(env codexEnvelope) (Entry, bool) {
 	}, true
 }
 
+func decodeCodexEventMsg(env codexEnvelope) (Entry, bool) {
+	var payload struct {
+		Type string `json:"type"`
+		Info struct {
+			LastTokenUsage struct {
+				InputTokens           int `json:"input_tokens"`
+				CachedInputTokens     int `json:"cached_input_tokens"`
+				OutputTokens          int `json:"output_tokens"`
+				ReasoningOutputTokens int `json:"reasoning_output_tokens"`
+				TotalTokens           int `json:"total_tokens"`
+			} `json:"last_token_usage"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(env.Payload, &payload); err != nil {
+		return Entry{}, false
+	}
+	if payload.Type != "token_count" {
+		return Entry{}, false
+	}
+	u := &Usage{
+		InputTokens:              payload.Info.LastTokenUsage.InputTokens,
+		OutputTokens:             payload.Info.LastTokenUsage.OutputTokens,
+		CacheReadInputTokens:     payload.Info.LastTokenUsage.CachedInputTokens,
+		CacheCreationInputTokens: 0,
+	}
+	if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadInputTokens == 0 {
+		return Entry{}, false
+	}
+	return Entry{
+		Type:      "system",
+		Subtype:   "token_count",
+		Timestamp: env.Timestamp,
+		Usage:     u,
+	}, true
+}
+
 // isCodexSystemPreamble detects codex user messages that contain injected
 // system instructions (AGENTS.md, permissions, etc.) rather than actual user input.
 func isCodexSystemPreamble(blocks []ContentBlock) bool {
@@ -606,12 +644,11 @@ func (r *Reader) Err() error { return r.err }
 
 // ReadAll reads all entries from the reader.
 func ReadAll(ctx context.Context, r io.Reader) ([]Entry, error) {
-	rd := NewReader(ctx, r)
-	var entries []Entry
-	for rd.Next() {
-		entries = append(entries, rd.Entry())
+	entries, _, partial, err := readComplete(ctx, r)
+	if partial != nil {
+		entries = append(entries, *partial)
 	}
-	return entries, rd.Err()
+	return entries, err
 }
 
 // ReadFile reads all entries from a JSONL file.
@@ -720,6 +757,8 @@ func ReadFileWithOffset(ctx context.Context, path string) (entries []Entry, offs
 func readComplete(ctx context.Context, r io.Reader) (entries []Entry, consumed int64, partial *Entry, err error) {
 	br := bufio.NewReaderSize(r, initialBufferSize)
 	n := 0
+	currentSessionID := ""
+	lastAssistant := -1
 	for {
 		line, complete, readErr := readLine(br)
 		if readErr != nil && readErr != io.EOF {
@@ -737,7 +776,23 @@ func readComplete(ctx context.Context, r io.Reader) (entries []Entry, consumed i
 				}
 			}
 			if entry, ok := decodeLine(line); ok {
+				if entry.SessionID != "" {
+					currentSessionID = entry.SessionID
+				} else if currentSessionID != "" {
+					entry.SessionID = currentSessionID
+				}
+				if entry.Type == "system" && entry.Subtype == "token_count" && entry.Usage != nil {
+					if lastAssistant >= 0 && lastAssistant < len(entries) {
+						if msg := entries[lastAssistant].Message; msg != nil && msg.Role == "assistant" {
+							msg.Usage = entry.Usage
+						}
+					}
+					continue
+				}
 				entries = append(entries, entry)
+				if entry.Message != nil && entry.Message.Role == "assistant" {
+					lastAssistant = len(entries) - 1
+				}
 			}
 		} else if len(line) > 0 {
 			// An unterminated final line: decode it for the returned set
