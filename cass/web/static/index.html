@@ -2912,7 +2912,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
       <div class="empty" style="margin-top:20px;">
         No API requests found. <br/><br/>
         Index API request exports with <code>cass index --api-request-dir &lt;dir&gt;</code>
-        or <code>cass index --har-dir &lt;dir&gt;</code>, or
+        or, for compatibility, <code>cass index --har-dir &lt;dir&gt;</code>, or
         Proxyman session archives with <code>cass index --session-dir &lt;path&gt;</code>.
       </div>
     `;
@@ -4961,7 +4961,7 @@ function RateLimitGauges({ latestLimits }) {
     return html`
       <div class="rl-no-data">
         No rate-limit data — run <code>cass index --api-request-dir &lt;api-request-export-dir&gt;</code>
-        or <code>cass index --har-dir &lt;api-request-export-dir&gt;</code>
+        or, for compatibility, <code>cass index --har-dir &lt;api-request-export-dir&gt;</code>
         or ensure proxyman artifact files exist at <code>~/.it2/sessions/*/proxy-traffic.*.jsonl</code>
       </div>
     `;
