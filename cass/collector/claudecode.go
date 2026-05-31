@@ -232,7 +232,7 @@ func (c *ClaudeCode) parseSession(ctx context.Context, config cass.ScanConfig, p
 	session := cass.Session{
 		ID:           id,
 		Agent:        "claude-code",
-		Title:        titleFromSummary(sum),
+		Title:        titleFromSummaryAndWorkflows(sum, workflows),
 		Workspace:    workspace,
 		GitCommonDir: sum.GitCommonDir,
 		Branch:       sum.Branch,
@@ -294,9 +294,43 @@ func titleFromSummary(s cc.SessionSummary) string {
 	return filepath.Base(s.File)
 }
 
+func titleFromSummaryAndWorkflows(s cc.SessionSummary, workflows []cass.WorkflowRun) string {
+	if s.CustomTitle != "" || !bareCommandPrompt(s.FirstPrompt) || len(workflows) == 0 {
+		return titleFromSummary(s)
+	}
+	if title := workflowSessionTitle(workflows); title != "" {
+		return truncateTitle(title)
+	}
+	return titleFromSummary(s)
+}
+
+func workflowSessionTitle(workflows []cass.WorkflowRun) string {
+	if len(workflows) == 0 {
+		return ""
+	}
+	name := workflowTitle(workflows[0])
+	if len(workflows) == 1 {
+		return name
+	}
+	if name != "" {
+		return fmt.Sprintf("%d workflows: %s", len(workflows), name)
+	}
+	return fmt.Sprintf("%d workflows", len(workflows))
+}
+
+func workflowTitle(w cass.WorkflowRun) string {
+	for _, s := range []string{w.Name, w.Description, w.Summary, w.RunID} {
+		if s = compactTitleText(s); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 var (
 	commandNameTitleRE    = regexp.MustCompile(`(?is)<command-name>(.*?)</command-name>`)
 	commandMessageTitleRE = regexp.MustCompile(`(?is)<command-message>(.*?)</command-message>`)
+	commandArgsTitleRE    = regexp.MustCompile(`(?is)<command-args>(.*?)</command-args>`)
 	goalObjectiveTitleRE  = regexp.MustCompile(`(?is)<goal_context>.*?<objective>(.*?)</objective>.*?</goal_context>`)
 	untrustedObjectiveRE  = regexp.MustCompile(`(?is)<untrusted_objective>\s*(.*?)\s*</untrusted_objective>`)
 	goalContextTitleRE    = regexp.MustCompile(`(?i)</?goal_context>`)
@@ -333,6 +367,19 @@ func cleanGeneratedTitle(title string) string {
 		return "image input"
 	}
 	return title
+}
+
+func bareCommandPrompt(title string) bool {
+	if len(commandNameTitleRE.FindStringSubmatch(title)) != 2 {
+		return false
+	}
+	if m := commandArgsTitleRE.FindStringSubmatch(title); len(m) == 2 && compactTitleText(m[1]) != "" {
+		return false
+	}
+	rest := commandNameTitleRE.ReplaceAllString(title, " ")
+	rest = commandMessageTitleRE.ReplaceAllString(rest, " ")
+	rest = commandArgsTitleRE.ReplaceAllString(rest, " ")
+	return compactTitleText(rest) == ""
 }
 
 func compactTitleText(text string) string {

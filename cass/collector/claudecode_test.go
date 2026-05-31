@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/cass"
 )
 
 func TestWorkspaceFromPath(t *testing.T) {
@@ -214,6 +215,34 @@ func TestTitleFromSummary(t *testing.T) {
 				t.Errorf("titleFromSummary() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTitleFromSummaryAndWorkflows(t *testing.T) {
+	summary := cc.SessionSummary{
+		FirstPrompt: "<command-name>/effort</command-name>\n" +
+			"<command-message>effort</command-message>\n" +
+			"<command-args></command-args>",
+		File: "/path/to/session.jsonl",
+	}
+	workflows := []cass.WorkflowRun{{
+		Name:        "mlxc-codegen-review",
+		Description: "Independent multi-lens review",
+		RunID:       "wf_123",
+	}}
+	if got := titleFromSummaryAndWorkflows(summary, workflows); got != "mlxc-codegen-review" {
+		t.Fatalf("titleFromSummaryAndWorkflows() = %q, want workflow name", got)
+	}
+
+	summary.CustomTitle = "custom title"
+	if got := titleFromSummaryAndWorkflows(summary, workflows); got != "custom title" {
+		t.Fatalf("custom title override = %q, want custom title", got)
+	}
+
+	summary.CustomTitle = ""
+	summary.FirstPrompt = "<command-name>/effort</command-name><command-message>effort</command-message><command-args>now</command-args>"
+	if got := titleFromSummaryAndWorkflows(summary, workflows); got != "effort" {
+		t.Fatalf("command with args = %q, want ordinary command title", got)
 	}
 }
 
