@@ -42,6 +42,7 @@ let refreshTimer = null;
 function dispatchRefresh() {
   refreshLast = Date.now();
   refreshTimer = null;
+  workflowAgentCache.clear();
   window.dispatchEvent(new CustomEvent('cass:refresh'));
 }
 
