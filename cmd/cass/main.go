@@ -197,6 +197,7 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"indexed":            count,
+			"api_requests":       harCount,
 			"har_requests":       harCount,
 			"sessionv2_requests": sessionV2Count,
 			"artifact_requests":  artifactCount,

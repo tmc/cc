@@ -252,6 +252,47 @@ func TestRunRequestsNoRequestsMessage(t *testing.T) {
 	}
 }
 
+func TestRunIndexJSONUsesApiRequestsKey(t *testing.T) {
+	ctx := context.Background()
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{cassTestCollector{sessions: []cass.Session{{
+			ID:        "index-json-1",
+			Agent:     "codex-cli",
+			Title:     "index json",
+			Workspace: "/work/index",
+			StartedAt: time.Now().Add(-time.Minute),
+			EndedAt:   time.Now(),
+			Messages:  []cass.Message{{Role: "user", Content: "hello"}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+
+	if _, err := svc.Index(ctx, true); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+
+	raw, err := captureStdout(t, func() error {
+		return runIndex(ctx, svc, nil, true)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, raw)
+	}
+	if _, ok := got["api_requests"]; !ok {
+		t.Fatalf("index JSON missing api_requests key: %#v", got)
+	}
+	if _, ok := got["har_requests"]; !ok {
+		t.Fatalf("index JSON missing legacy har_requests key: %#v", got)
+	}
+}
+
 func workflowByRunID(workflows []workflowListEntry, id string) *workflowListEntry {
 	for i := range workflows {
 		if workflows[i].RunID == id {
