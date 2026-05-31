@@ -147,7 +147,7 @@ func analyzeCharacteristics(files []string) (*characteristicsReport, error) {
 					agg.HasLoop = true
 				}
 			}
-			if e.Message == nil || e.Message.Role != "assistant" || e.Message.Usage == nil {
+			if e.Message == nil || e.Message.Role != "assistant" {
 				continue
 			}
 
@@ -156,14 +156,16 @@ func analyzeCharacteristics(files []string) (*characteristicsReport, error) {
 				Timestamp:    e.Timestamp,
 				Model:        e.Message.Model,
 				IsSidechain:  e.IsSidechain,
-				InputTokens:  e.Message.Usage.InputTokens,
-				OutputTokens: e.Message.Usage.OutputTokens,
-				CacheRead:    e.Message.Usage.CacheReadInputTokens,
-				CacheCreate:  e.Message.Usage.CacheCreationInputTokens,
 				ToolUseCount: len(e.Message.ToolUses()),
 			}
-			req.ContextSize = req.InputTokens + req.CacheRead + req.CacheCreate
-			req.Weight = requestWeight(req)
+			if usage := e.Message.Usage; usage != nil {
+				req.InputTokens = usage.InputTokens
+				req.OutputTokens = usage.OutputTokens
+				req.CacheRead = usage.CacheReadInputTokens
+				req.CacheCreate = usage.CacheCreationInputTokens
+				req.ContextSize = req.InputTokens + req.CacheRead + req.CacheCreate
+				req.Weight = requestWeight(req)
+			}
 			if family := modelFamily(req.Model); family == req.Model && family != "" && family != "unknown" {
 				unknownModels[req.Model] = struct{}{}
 			}

@@ -297,6 +297,76 @@ func TestAnalyzeCharacteristicsReportsCoreMetrics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCharacteristicsKeepsNoUsageRequestsInSessionCounts(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+	})
+	*unitFlag = "cost"
+	*verboseFlag = true
+	*formatFlag = "text"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+
+	dir := t.TempDir()
+	path := writeCharacteristicsSession(t, dir, "missing-usage.jsonl", []ccpkg.Entry{
+		{
+			Type:        "assistant",
+			SessionID:   "session-u",
+			Slug:        "session-u",
+			Timestamp:   time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC),
+			IsSidechain: true,
+			Message: &ccpkg.Message{
+				Role:    "assistant",
+				Model:   "claude-sonnet-4-6",
+				Content: toolBlocks("", 0),
+			},
+		},
+		{
+			Type:        "assistant",
+			SessionID:   "session-u",
+			Slug:        "session-u",
+			Timestamp:   time.Date(2026, 5, 31, 12, 1, 0, 0, time.UTC),
+			IsSidechain: false,
+			Message: &ccpkg.Message{
+				Role:    "assistant",
+				Model:   "claude-sonnet-4-6",
+				Content: toolBlocks("", 0),
+				Usage: &ccpkg.Usage{
+					InputTokens:              100,
+					OutputTokens:             10,
+					CacheReadInputTokens:     5,
+					CacheCreationInputTokens: 2,
+				},
+			},
+		},
+	})
+
+	report, err := analyzeCharacteristics([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Totals.Requests != 2 {
+		t.Fatalf("requests = %d, want 2", report.Totals.Requests)
+	}
+	if report.Totals.Weight <= 0 {
+		t.Fatalf("total weight = %f, want > 0", report.Totals.Weight)
+	}
+	if got := report.Characteristics["subagentHeavy"].Weight; got <= 0 {
+		t.Fatalf("subagentHeavy weight = %f, want > 0", got)
+	}
+	if got := report.Characteristics["subagentHeavy"].Pct; got <= 0 {
+		t.Fatalf("subagentHeavy pct = %f, want > 0", got)
+	}
+}
+
 func TestRunCharacteristicsVerboseJSON(t *testing.T) {
 	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
 	oldParallel, oldContext, oldLong := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag
