@@ -5360,7 +5360,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('iTerm2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
           agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
         ${card('team operations', fmtNum(agg.team_inbox_reads + agg.team_inbox_sends + agg.team_task_ops + agg.team_spawns),
-          agg.team_inbox_reads + ' reads · ' + agg.team_inbox_sends + ' messages · ' + agg.team_task_ops + ' tasks · ' + agg.team_spawns + ' spawns')}
+          agg.team_inbox_reads + ' reads · ' + agg.team_inbox_sends + ' messages · ' + agg.team_task_ops + ' task operations · ' + agg.team_spawns + ' spawns')}
         ${card('last indexed', lastIdx)}
       </div>
 
