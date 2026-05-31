@@ -2051,12 +2051,20 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
   }
 
+  function canScroll(el, deltaY) {
+    if (!el || el.scrollHeight <= el.clientHeight + 1) return false;
+    if (deltaY < 0) return el.scrollTop > 0;
+    if (deltaY > 0) return el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+    return false;
+  }
+
   function onDetailWheel(e) {
     e.stopPropagation();
-    if (e.target.closest('.detail-body, .detail-skills-scroll')) {
+    const scrollTarget = e.target?.closest?.('.detail-body, .detail-header, .detail-skills-scroll, .conv-content');
+    if (canScroll(scrollTarget, e.deltaY)) {
       return;
     }
-    if (bodyRef.current) {
+    if (canScroll(bodyRef.current, e.deltaY)) {
       e.preventDefault();
       bodyRef.current.scrollTop += e.deltaY;
     }

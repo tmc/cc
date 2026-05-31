@@ -585,6 +585,9 @@ input::placeholder { color: var(--faint); }
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .detail-header-top {
   display: flex;
@@ -644,6 +647,7 @@ input::placeholder { color: var(--faint); }
 
 .detail-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 12px 16px;
