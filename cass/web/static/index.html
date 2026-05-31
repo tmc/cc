@@ -1536,7 +1536,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         ${h.workspace && html`<span class="hit-workspace">${shortProject(h.workspace)}</span>`}
         ${h.started_at && html`<span class="hit-time">${relTime(h.started_at)}${h.ended_at && relTime(h.ended_at) !== relTime(h.started_at) ? ' → ' + relTime(h.ended_at) : ''}</span>`}
         ${totalTok > 0 && html`<span class="hit-tokens" title=${'in: ' + fmtNum(inTok) + ' | out: ' + fmtNum(outTok) + (cacheTok ? ' | cache: ' + fmtNum(cacheTok) : '')}>
-          <span class="hit-tokens-total">${fmtNum(totalTok)}</span><span class="hit-tokens-label"> tok</span>
+          <span class="hit-tokens-total">${fmtNum(totalTok)}</span><span class="hit-tokens-label"> tokens</span>
           <span class="hit-tokens-breakdown">
             <span class="hit-tokens-in" title=${'input: ' + fmtNum(inTok)}>${fmtNum(inTok)}↓</span>
             <span class="hit-tokens-out" title=${'output: ' + fmtNum(outTok)}>${fmtNum(outTok)}↑</span>
@@ -1840,7 +1840,7 @@ function AgentsTab({ agentData, workflows }) {
                 ${type && html`<span class="agent-tree-type">${type}</span>`}
                 <span class="agent-tree-stats">
                   <${RollingNum} value=${a.toolUses} label="tool uses" /> tool use${a.toolUses !== 1 ? 's' : ''}
-                  · <${RollingNum} value=${totalTok} label="tokens" /> tok
+                  · <${RollingNum} value=${totalTok} label="tokens" /> tokens
                   · <${RollingNum} value=${a.durationSecs} format=${fmtDuration} />
                 </span>
               </div>
@@ -2349,7 +2349,7 @@ function WorkflowsTab({ workflows, focusAgent, onFocusAgentChange }) {
                             a.phase && a.phase !== name ? a.phase : '',
                             a.agent_type,
                             a.tool_calls ? a.tool_calls + ' tools' : '',
-                            a.tokens ? fmtNum(a.tokens) + ' tok' : '',
+                            a.tokens ? fmtNum(a.tokens) + ' tokens' : '',
                             a.status && a.status !== 'unknown' ? a.status : '',
                           ].filter(Boolean).join(' · ');
                           return html`
@@ -3081,7 +3081,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
               <div class="detail-goal-objective">${goal.objective}</div>
               <div class="detail-goal-meta">
                 ${goal.time_used_seconds > 0 && html`<span>${fmtDuration(goal.time_used_seconds)}</span>`}
-                ${used > 0 && html`<span>${fmtNum(used)} tok${budget ? ' / ' + fmtNum(budget) : ''}</span>`}
+                ${used > 0 && html`<span>${fmtNum(used)} tokens${budget ? ' / ' + fmtNum(budget) : ''}</span>`}
                 ${goal.thread_id && html`<span>${goal.thread_id.slice(0, 8)}</span>`}
                 ${rawStatusNote && html`<span>${rawStatusNote}</span>`}
               </div>
@@ -3243,7 +3243,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
             ${hit.turns > 1 && html`<span>${hit.turns} turns</span>`}
             ${hit.files_edited && html`<span>${hit.files_edited} files</span>`}
             ${hit.duration_secs && html`<span>${fmtDuration(hit.duration_secs)}</span>`}
-            ${(hit.input_tokens || hit.output_tokens) && html`<span>${fmtNum((hit.input_tokens||0)+(hit.output_tokens||0))} tok</span>`}
+            ${(hit.input_tokens || hit.output_tokens) && html`<span>${fmtNum((hit.input_tokens||0)+(hit.output_tokens||0))} tokens</span>`}
             ${hit.compactions > 0 && html`<span class="hit-compactions">${hit.compactions} compaction${hit.compactions > 1 ? 's' : ''}</span>`}
             ${hit.goal_count > 0 && html`<span class="hit-goals">${hit.active_goal_count || 0} active goals / ${hit.completed_goal_count || 0} complete</span>`}
             ${detailSkillCount > 0 && html`<span class="hit-skills">${hit.selected_skill_count || 0} selected skills / ${hit.loaded_skill_count || 0} loaded</span>`}
@@ -3479,7 +3479,7 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
             ${[
               n.tool_calls && n.tool_calls + ' tools',
               n.turns && n.turns + ' turns',
-              tok >= 1000 && fmtNum(tok) + ' tok',
+              tok >= 1000 && fmtNum(tok) + ' tokens',
             ].filter(Boolean).join(' · ') || 'no stats'}
           </div>
           ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
