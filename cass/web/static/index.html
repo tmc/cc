@@ -5269,7 +5269,10 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
       const [b, a, u] = await Promise.all([
         api('stats'),
         api('stats?aggregate=true' + (since ? '&since=' + since : '')),
-        api('usage?since=' + (since || '0s')),
+        api('usage?since=' + (since || '0s')).catch(e => {
+          console.error('usage:', e);
+          return { api_request_count: 0 };
+        }),
       ]);
       loadedAt.current = Date.now();
       setBasic(b);
