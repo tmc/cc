@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 )
 
 var version = "dev"
@@ -187,11 +188,16 @@ Run 'cctl help <command>' for more information on a specific command.
 func printVersion() {
 	fmt.Printf("cctl version %s\n", version)
 	fmt.Println("\nSubcommands:")
-	for name, spec := range subcommands {
-		// Skip aliases
+	names := make([]string, 0, len(subcommands))
+	for name := range subcommands {
 		if len(name) == 1 {
 			continue
 		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		spec := subcommands[name]
 		if path, err := exec.LookPath(spec.binary); err == nil {
 			fmt.Printf("  %-10s %s\n", name, path)
 		} else {
