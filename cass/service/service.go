@@ -574,7 +574,7 @@ func (s *Service) IndexArtifactDirs(ctx context.Context, root string) (int, erro
 		return 0, nil
 	}
 
-	s.log.Info("artifact dir scan", "root", root, "requests", len(requests))
+	s.log.Info("artifact dir scan", "root", root, "api_requests", len(requests))
 
 	if err := s.store.BatchIndexRequests(ctx, requests); err != nil {
 		return 0, fmt.Errorf("index artifact requests: %w", err)
@@ -619,7 +619,7 @@ func (s *Service) IndexSessionV2(ctx context.Context, path string) (int, error) 
 		return 0, nil
 	}
 
-	s.log.Info("sessionv2 scan", "path", path, "requests", len(requests))
+	s.log.Info("sessionv2 scan", "path", path, "api_requests", len(requests))
 
 	if err := s.store.BatchIndexRequests(ctx, requests); err != nil {
 		return 0, fmt.Errorf("index sessionv2 requests: %w", err)
