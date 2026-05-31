@@ -213,6 +213,11 @@ function shortPath(p) {
   return parts.length > 0 ? parts[parts.length - 1] : String(p);
 }
 
+function requestMetaItem(label, value, title) {
+  if (!value) return null;
+  return html`<span title=${title || value}>${label} ${value}</span>`;
+}
+
 function normalizeDetailTab(tab) {
   return tab === 'agents' || tab === 'requests' || tab === 'workflows' ? tab : 'conversation';
 }
@@ -2811,6 +2816,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
               <div class="req-meta">
                 ${req.request_id && html`<span title=${req.request_id}>req ${shortSessionID(req.request_id)}</span>`}
                 ${req.source_file && html`<span title=${req.source_file}>src ${shortPath(req.source_file)}</span>`}
+                ${requestMetaItem('it2', shortSessionID(req.it2_session_id), req.it2_session_id)}
+                ${requestMetaItem('pid', req.client_pid ? String(req.client_pid) : '', req.client_pid ? String(req.client_pid) : '')}
+                ${requestMetaItem('acct', shortSessionID(req.account_uuid), req.account_uuid)}
+                ${requestMetaItem('org', shortSessionID(req.org_id), req.org_id)}
               </div>
 
               <div class="req-metrics">
