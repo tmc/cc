@@ -218,6 +218,26 @@ function requestMetaItem(label, value, title) {
   return html`<span title=${title || value}>${label} ${value}</span>`;
 }
 
+function requestRateLimitSummary(rl) {
+  if (!rl) return null;
+  const items = [];
+  const add = (label, util, resetAt) => {
+    if (!util && !resetAt) return;
+    const pct = util ? Math.round(util * 100) + '%' : '0%';
+    const reset = fmtResetCountdown(resetAt);
+    items.push(html`<span title=${resetAt ? label + ' ' + pct + ' ' + reset : label + ' ' + pct}>${label} ${pct}${reset ? ' · ' + reset : ''}</span>`);
+  };
+  add('5h', rl.utilization_5h, rl.reset_5h);
+  add('7d', rl.utilization_7d, rl.reset_7d);
+  if (rl.model_bucket) {
+    const label = rl.model_bucket;
+    const pct = rl.model_utilization ? Math.round(rl.model_utilization * 100) + '%' : '0%';
+    const reset = fmtResetCountdown(rl.model_reset);
+    items.push(html`<span title=${label + ' ' + pct + (reset ? ' ' + reset : '')}>${label} ${pct}${reset ? ' · ' + reset : ''}</span>`);
+  }
+  return items.length > 0 ? items : null;
+}
+
 function normalizeDetailTab(tab) {
   return tab === 'agents' || tab === 'requests' || tab === 'workflows' ? tab : 'conversation';
 }
@@ -2803,6 +2823,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
         ${apiRequests.map((req, i) => {
           const bd = req.breakdown;
           const hasBd = bd && Object.keys(bd).length > 0 && req.total_request_bytes > 0;
+          const rl = req.rate_limits;
+          const rateLimitItems = requestRateLimitSummary(rl);
           return html`
             <div class="api-request-card" key=${req.id}>
               <div class="req-header">
@@ -2820,6 +2842,9 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                 ${requestMetaItem('pid', req.client_pid ? String(req.client_pid) : '', req.client_pid ? String(req.client_pid) : '')}
                 ${requestMetaItem('acct', shortSessionID(req.account_uuid), req.account_uuid)}
                 ${requestMetaItem('org', shortSessionID(req.org_id), req.org_id)}
+                ${rateLimitItems && html`
+                  <span class="req-rate-limits">${rateLimitItems}</span>
+                `}
               </div>
 
               <div class="req-metrics">

@@ -2285,6 +2285,12 @@ mark.search-hl {
   white-space: nowrap;
   max-width: 100%;
 }
+.req-rate-limits {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
 
 .req-metrics {
   display: grid;
