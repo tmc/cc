@@ -3466,7 +3466,9 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
               n.tool_calls && n.tool_calls + ' tools',
               n.turns && n.turns + ' turns',
               tok >= 1000 && fmtNum(tok) + ' tok',
-              n.workflow_count && n.workflow_count + ' workflows',
+              (n.workflow_names || []).length > 0
+                ? (n.workflow_names.length + ' workflow' + (n.workflow_names.length === 1 ? '' : 's'))
+                : (n.workflow_count && n.workflow_count + ' workflows'),
             ].filter(Boolean).join(' · ') || 'no stats'}
           </div>
           ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
