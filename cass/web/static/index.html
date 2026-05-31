@@ -1549,7 +1549,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         ${shownSkillCount > 0 && html`<span class="hit-skills">${h.selected_skill_count || 0} selected / ${h.loaded_skill_count || 0} loaded</span>`}
         ${h.workflow_count > 0 && html`<span class="hit-workflows">${h.workflow_count} workflow${h.workflow_count === 1 ? '' : 's'} · ${h.workflow_agent_count || 0} agents${h.workflow_task_op_count ? ' · ' + h.workflow_task_op_count + ' task operations' : ''}</span>`}
         ${renderWorkflowBadges(h.workflows, 3)}
-        ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
+        ${it2.length > 0 && html`<span class="hit-it2">iTerm2: ${it2.join(', ')}</span>`}
       </div>
       <${ToolMicroBar} breakdown=${h.tool_breakdown} onToolClick=${onToolClick} />
     </li>
@@ -2947,7 +2947,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                 ${req.request_id && html`<span title=${req.request_id}>req ${shortSessionID(req.request_id)}</span>`}
                 ${req.source_file && html`<span title=${req.source_file}>src ${shortPath(req.source_file)}</span>`}
                 ${requestMetaItem('hash', shortSessionID(req.source_hash), req.source_hash)}
-                ${requestMetaItem('it2', shortSessionID(req.it2_session_id), req.it2_session_id)}
+                ${requestMetaItem('iTerm2', shortSessionID(req.it2_session_id), req.it2_session_id)}
                 ${requestMetaItem('pid', req.client_pid ? String(req.client_pid) : '', req.client_pid ? String(req.client_pid) : '')}
                 ${requestMetaItem('user', shortSessionID(req.user_hash), req.user_hash)}
                 ${requestMetaItem('acct', shortSessionID(req.account_uuid), req.account_uuid)}
@@ -4305,7 +4305,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
         <div class="filter-chips">
           <button class="filter-chip ${edgeFilter.message ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, message: !f.message }))}>
-            <span style="color:var(--accent)">—</span> it2 msg</button>
+            <span style="color:var(--accent)">—</span> iTerm2 msg</button>
           <button class="filter-chip ${edgeFilter.observation ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, observation: !f.observation }))}>
             <span style="color:var(--faint)">--</span> observe</button>
@@ -4519,7 +4519,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--cyan)"></span>running</span>
           <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--yellow)"></span>async</span>
         ` : html`
-          <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--accent)"></span>it2 msg</span>
+          <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--accent)"></span>iTerm2 msg</span>
           <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--faint)"></span>observe</span>
           <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--green)"></span>split</span>
           <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--magenta)"></span>team msg</span>
