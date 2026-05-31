@@ -106,6 +106,52 @@ function qs(params) {
   return p.toString();
 }
 
+function entryContentKey(e) {
+  const msg = e?.message || {};
+  const content = msg.content;
+  if (typeof content === 'string') return content.slice(0, 240);
+  if (Array.isArray(content)) {
+    return content.map(block => {
+      if (!block) return '';
+      if (block.type === 'tool_use') return ['tool_use', block.id || '', block.name || ''].join(':');
+      if (block.type === 'tool_result') return ['tool_result', block.tool_use_id || '', block.is_error ? 'error' : 'ok'].join(':');
+      return String(block.text || block.type || '').slice(0, 80);
+    }).join('|').slice(0, 240);
+  }
+  if (e?.content) return String(e.content).slice(0, 240);
+  if (e?.summary) return String(e.summary).slice(0, 240);
+  return '';
+}
+
+function entryKey(e) {
+  if (!e) return '';
+  if (e.uuid) return 'uuid:' + e.uuid;
+  const msg = e.message || {};
+  const parts = [
+    e.timestamp || '',
+    e.type || '',
+    e.subtype || '',
+    e.agentId || '',
+    msg.id || '',
+    msg.role || '',
+    entryContentKey(e),
+  ];
+  const key = parts.join('|');
+  return key === '||||||' ? '' : 'entry:' + key;
+}
+
+function mergeNewestEntries(page, existing) {
+  const seen = new Set();
+  const next = [];
+  for (const e of (page || []).concat(existing || [])) {
+    const key = entryKey(e);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    next.push(e);
+  }
+  return next;
+}
+
 function shellQuote(s) {
   if (!s) return "''";
   if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(s)) return s;
@@ -1641,6 +1687,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
   const [hasEarlier, setHasEarlier] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  const sourceRef = useRef('');
 
   function fetchPage(offset) {
     return api('workflow-agent?' + qs({
@@ -1653,23 +1700,34 @@ function WorkflowAgentTranscript({ sourcePath }) {
 
   useEffect(() => {
     let cancelled = false;
-    setEntries([]);
-    setLoaded(false);
-    setHasEarlier(false);
-    setError(null);
-    const cached = workflowAgentCache.get(sourcePath);
-    if (cached) {
-      setEntries(cached.entries || []);
-      setHasEarlier(!!cached.hasEarlier);
-      setLoaded(true);
-      return () => { cancelled = true; };
+    const sourceChanged = sourceRef.current !== sourcePath;
+    sourceRef.current = sourcePath;
+    if (sourceChanged) {
+      setEntries([]);
+      setLoaded(false);
+      setHasEarlier(false);
+      setError(null);
+      const cached = workflowAgentCache.get(sourcePath);
+      if (cached) {
+        setEntries(cached.entries || []);
+        setHasEarlier(!!cached.hasEarlier);
+        setLoaded(true);
+        return () => { cancelled = true; };
+      }
+    } else {
+      setError(null);
     }
     fetchPage(0)
       .then(data => {
         if (cancelled) return;
         const page = data || [];
-        setEntries(page);
-        setHasEarlier(page.length === workflowAgentPageSize);
+        if (sourceChanged) {
+          setEntries(page);
+          setHasEarlier(page.length === workflowAgentPageSize);
+        } else {
+          setEntries(prev => mergeNewestEntries(page, prev));
+          setHasEarlier(prev => page.length === workflowAgentPageSize || prev);
+        }
         setLoaded(true);
       })
       .catch(e => { if (!cancelled) setError(errorMessage(e, 'workflow agent unavailable')); });
@@ -1752,7 +1810,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
   return html`
     <div class="wf-agent-transcript">
       ${renderableEntries.map(item => html`
-        <div class="wf-agent-msg" key=${item.idx}>
+        <div class="wf-agent-msg" key=${entryKey(item.entry) || item.idx}>
           ${item.blocks.map((block, bi) => html`
             <div class="wf-agent-block ${block.isError ? 'error' : ''}" key=${bi}>
               <span class="wf-agent-role ${block.role}">${block.role}</span>
@@ -2056,11 +2114,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
         if (cancelled) return;
         const page = Array.isArray(e) ? e : [];
         if (activeTab === 'conversation') {
-          const keepOlder = entries.length > page.length ? entries.slice(page.length) : [];
-          const next = page.concat(keepOlder);
+          const next = mergeNewestEntries(page, entries);
           setEntries(next);
           setEntryCount(next.length);
-          setHasEarlierEntries(page.length === sessionEntryPageSize || (keepOlder.length > 0 && hasEarlierEntries));
+          setHasEarlierEntries(page.length === sessionEntryPageSize || (next.length > page.length && hasEarlierEntries));
           return;
         }
         setEntries(page);
@@ -2212,6 +2269,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       const isMatch = searchQuery && matchSet.has(idx);
       const dimClass = searchQuery && !isMatch ? ' search-dimmed' : '';
       const hlClass = isMatch && matchIndices[matchCursor] === idx ? ' search-current' : '';
+      const entryID = entryKey(entry) || String(idx);
 
       // Compact boundary: horizontal divider with metadata badge.
       if (entry.type === 'system' && entry.subtype === 'compact_boundary') {
@@ -2220,7 +2278,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
           ? (meta.trigger || 'auto') + (meta.preTokens ? ' | ' + fmtNum(meta.preTokens) + ' tok' : '')
           : 'compacted';
         return html`
-          <div class="conv-compact-boundary${dimClass}" key=${idx} data-eidx=${idx}>
+          <div class="conv-compact-boundary${dimClass}" key=${entryID} data-eidx=${idx}>
             <span class="conv-compact-badge">compacted (${label})</span>
           </div>
         `;
@@ -2232,10 +2290,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
           || (entry.message && typeof entry.message.content === 'string' ? entry.message.content : '')
           || '';
         if (summaryText) {
-          const key = 'cs-' + idx;
+          const key = 'cs-' + entryID;
           const isExp = expanded[key];
           return html`
-            <div class="conv-compact-summary${dimClass}${hlClass}" key=${idx} data-eidx=${idx} onClick=${() => toggleExpand(key)}>
+            <div class="conv-compact-summary${dimClass}${hlClass}" key=${entryID} data-eidx=${idx} onClick=${() => toggleExpand(key)}>
               <div class="conv-role">
                 <span>compact summary</span>
                 <span class="conv-tool-toggle">${isExp ? '[-]' : '[+]'}</span>
@@ -2248,7 +2306,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
       // Custom title rename.
       if (entry.type === 'custom-title' && entry.customTitle) {
-        return html`<div class="conv-custom-title${dimClass}" key=${idx} data-eidx=${idx}>renamed: ${entry.customTitle}</div>`;
+        return html`<div class="conv-custom-title${dimClass}" key=${entryID} data-eidx=${idx}>renamed: ${entry.customTitle}</div>`;
       }
 
       // System entries (non-compact).
@@ -2256,7 +2314,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
         const text = entry.content || entry.summary || '';
         if (!text) return null;
         return html`
-          <div class="conv-entry role-system${dimClass}${hlClass}" key=${idx} data-eidx=${idx}>
+          <div class="conv-entry role-system${dimClass}${hlClass}" key=${entryID} data-eidx=${idx}>
             <div class="conv-role">system</div>
             ${renderAnsiContent(text, 500)}
           </div>
@@ -2267,7 +2325,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
         const text = attachmentSummary(entry.attachment);
         if (!text) return null;
         return html`
-          <div class="conv-entry role-system${dimClass}${hlClass}" key=${idx} data-eidx=${idx}>
+          <div class="conv-entry role-system${dimClass}${hlClass}" key=${entryID} data-eidx=${idx}>
             <div class="conv-role">attachment</div>
             ${renderAnsiContent(text, 500)}
           </div>
@@ -2280,9 +2338,9 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       const content = msg.content;
 
       if (Array.isArray(content)) {
-        return html`<div data-eidx=${idx} class="${dimClass}${hlClass}">
+        return html`<div key=${entryID} data-eidx=${idx} class="${dimClass}${hlClass}">
           ${content.map((block, bi) => {
-            const key = idx + '-' + bi;
+            const key = entryID + '-' + bi;
             if (block.type === 'tool_use') {
               const isExp = expanded[key];
               const inputText = typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2);
@@ -2329,7 +2387,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
       if (typeof content === 'string' && content.length > 0) {
         return html`
-          <div class="conv-entry role-${role}${dimClass}${hlClass}" key=${idx} data-eidx=${idx}>
+          <div class="conv-entry role-${role}${dimClass}${hlClass}" key=${entryID} data-eidx=${idx}>
             <div class="conv-role">${role}</div>
             ${renderAnsiContent(content, 2000)}
           </div>
