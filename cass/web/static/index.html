@@ -32,6 +32,8 @@ function setDbBusy(busy) {
 // fetch instead of stacking. GET params are already encoded in path via qs().
 const inflightGets = new Map();
 const workflowAgentCache = new Map();
+const sessionEntryPageSize = 80;
+const workflowAgentPageSize = 40;
 
 const refreshMinInterval = 2500;
 let refreshLast = 0;
@@ -1563,32 +1565,65 @@ function AgentsTab({ agentData, workflows }) {
 // transcript by source_path. Workflow agents are not sessions, so they are
 // fetched via the dedicated /api/workflow-agent endpoint.
 function WorkflowAgentTranscript({ sourcePath }) {
-  const [entries, setEntries] = useState(null);
+  const [entries, setEntries] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
-  const [visibleCount, setVisibleCount] = useState(40);
+  const [hasEarlier, setHasEarlier] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+
+  function fetchPage(offset) {
+    return api('workflow-agent?' + qs({
+      source_path: sourcePath,
+      order: 'desc',
+      limit: String(workflowAgentPageSize),
+      offset: offset ? String(offset) : '',
+    }));
+  }
 
   useEffect(() => {
     let cancelled = false;
-    setVisibleCount(40);
-    setEntries(null);
+    setEntries([]);
+    setLoaded(false);
+    setHasEarlier(false);
     setError(null);
     const cached = workflowAgentCache.get(sourcePath);
     if (cached) {
-      setEntries(cached);
+      setEntries(cached.entries || []);
+      setHasEarlier(!!cached.hasEarlier);
+      setLoaded(true);
       return () => { cancelled = true; };
     }
-    api('workflow-agent?source_path=' + encodeURIComponent(sourcePath))
-      .then(data => { if (!cancelled) setEntries(data || []); })
+    fetchPage(0)
+      .then(data => {
+        if (cancelled) return;
+        const page = data || [];
+        setEntries(page);
+        setHasEarlier(page.length === workflowAgentPageSize);
+        setLoaded(true);
+      })
       .catch(e => { if (!cancelled) setError(errorMessage(e, 'workflow agent unavailable')); });
     return () => { cancelled = true; };
   }, [sourcePath]);
 
   useEffect(() => {
-    if (entries !== null) workflowAgentCache.set(sourcePath, entries);
-  }, [sourcePath, entries]);
+    if (loaded) workflowAgentCache.set(sourcePath, { entries, hasEarlier });
+  }, [sourcePath, entries, hasEarlier, loaded]);
+
+  function loadEarlier() {
+    if (loadingEarlier || !hasEarlier) return;
+    setLoadingEarlier(true);
+    fetchPage(entries.length)
+      .then(data => {
+        const page = data || [];
+        setEntries(prev => prev.concat(page));
+        setHasEarlier(page.length === workflowAgentPageSize);
+      })
+      .catch(e => setError(errorMessage(e, 'workflow agent unavailable')))
+      .finally(() => setLoadingEarlier(false));
+  }
 
   if (error) return html`<div class="detail-error wf-agent-error">${error}</div>`;
-  if (entries === null) return html`<div class="wf-agent-loading">loading transcript...</div>`;
+  if (!loaded) return html`<div class="wf-agent-loading">loading transcript...</div>`;
   if (entries.length === 0) return html`<div class="wf-agent-empty">empty transcript</div>`;
 
   const messageEntries = entries.filter(e => {
@@ -1601,14 +1636,21 @@ function WorkflowAgentTranscript({ sourcePath }) {
           : '');
     return !!text;
   });
-  if (messageEntries.length === 0) return html`<div class="wf-agent-empty">empty transcript</div>`;
-  const newestFirst = messageEntries.slice().reverse();
-  const visible = newestFirst.slice(0, visibleCount);
-  const hidden = newestFirst.length - visible.length;
+  const earlierButton = hasEarlier && html`
+    <button class="wf-agent-more" disabled=${loadingEarlier} onClick=${loadEarlier}>
+      ${loadingEarlier ? 'loading...' : 'load earlier messages'}
+    </button>
+  `;
+  if (messageEntries.length === 0) return html`
+    <div class="wf-agent-transcript">
+      <div class="wf-agent-empty">empty transcript</div>
+      ${earlierButton}
+    </div>
+  `;
 
   return html`
     <div class="wf-agent-transcript">
-      ${visible.map((e, i) => {
+      ${messageEntries.map((e, i) => {
         const msg = e.message;
         const text = typeof msg.content === 'string'
           ? msg.content
@@ -1620,11 +1662,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
           </div>
         `;
       })}
-      ${hidden > 0 && html`
-        <button class="wf-agent-more" onClick=${() => setVisibleCount(n => n + 40)}>
-          load ${Math.min(40, hidden)} earlier message${Math.min(40, hidden) === 1 ? '' : 's'}
-        </button>
-      `}
+      ${earlierButton}
     </div>
   `;
 }
@@ -1753,6 +1791,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [entryCount, setEntryCount] = useState(0);
+  const [hasEarlierEntries, setHasEarlierEntries] = useState(false);
+  const [loadingEarlierEntries, setLoadingEarlierEntries] = useState(false);
   const [expanded, setExpanded] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [detailError, setDetailError] = useState('');
@@ -1786,14 +1826,41 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     onFilterChange && onFilterChange(v);
   }
 
+  function sessionEntriesPath(offset) {
+    if (!hit) return '';
+    if (activeTab === 'agents') return 'session/' + hit.session_id;
+    return 'session/' + hit.session_id + '?' + qs({
+      order: 'desc',
+      limit: String(sessionEntryPageSize),
+      offset: offset ? String(offset) : '',
+    });
+  }
+
+  function loadEarlierSessionEntries() {
+    if (!hit || loadingEarlierEntries || !hasEarlierEntries) return;
+    setLoadingEarlierEntries(true);
+    api(sessionEntriesPath(entries.length))
+      .then(e => {
+        const page = Array.isArray(e) ? e : [];
+        setEntries(prev => prev.concat(page));
+        setEntryCount(c => c + page.length);
+        setHasEarlierEntries(page.length === sessionEntryPageSize);
+      })
+      .catch(e => setDetailError(errorMessage(e, 'session unavailable')))
+      .finally(() => setLoadingEarlierEntries(false));
+  }
+
   useEffect(() => {
     if (!hit) {
       setEntries([]); setEntryCount(0); setSearchQuery('');
       setActiveTabRaw('conversation'); setApiRequests([]); setDetailError('');
+      setHasEarlierEntries(false); setLoadingEarlierEntries(false);
       return;
     }
     setApiRequests([]);
     setRequestsLoading(false);
+    setHasEarlierEntries(false);
+    setLoadingEarlierEntries(false);
     if (!needsSessionEntries) {
       setLoading(false);
       setStreaming(false);
@@ -1803,7 +1870,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       return;
     }
     setLoading(true);
-    setStreaming(true);
+    setStreaming(false);
     setEntries([]);
     setEntryCount(0);
     setDetailError(hit.meta_error || '');
@@ -1815,70 +1882,24 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       return;
     }
 
-    const controller = new AbortController();
+    let cancelled = false;
+    api(sessionEntriesPath(0))
+      .then(e => {
+        if (cancelled) return;
+        const page = Array.isArray(e) ? e : [];
+        setEntries(page);
+        setEntryCount(page.length);
+        setHasEarlierEntries(activeTab === 'conversation' && page.length === sessionEntryPageSize);
+      })
+      .catch(e => {
+        if (!cancelled) setDetailError(errorMessage(e, 'session unavailable'));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
-    fetch('api/session/' + hit.session_id + '?follow=true', {
-      headers: { 'Accept': 'text/event-stream' },
-      signal: controller.signal,
-    }).then(res => {
-      if (!res.ok) throw new Error('failed');
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      function read() {
-        reader.read().then(({ done, value }) => {
-          if (done) { setLoading(false); setStreaming(false); return; }
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          const batch = [];
-          let currentEvent = 'entry';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              currentEvent = line.slice(7).trim();
-              continue;
-            }
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (currentEvent === 'done') {
-                setLoading(false); setStreaming(false);
-                return;
-              }
-              if (currentEvent === 'caught_up') {
-                // Initial load complete, now tailing live.
-                setLoading(false);
-                // Keep streaming=true — we're still receiving live updates.
-                currentEvent = 'entry';
-                continue;
-              }
-              if (currentEvent === 'entry') {
-                try { batch.push(JSON.parse(data)); } catch {}
-              }
-              currentEvent = 'entry';
-            }
-          }
-          if (batch.length > 0) {
-            setEntries(prev => [...prev, ...batch]);
-            setEntryCount(c => c + batch.length);
-          }
-          read();
-        }).catch(() => { setLoading(false); setStreaming(false); });
-      }
-      read();
-    }).catch(err => {
-      if (err.name === 'AbortError') return;
-      // Fallback to JSON.
-      api('session/' + hit.session_id).then(e => {
-        setEntries(Array.isArray(e) ? e : []);
-        setEntryCount(Array.isArray(e) ? e.length : 0);
-      }).catch(e => {
-        setDetailError(errorMessage(e, 'session unavailable'));
-      }).finally(() => { setLoading(false); setStreaming(false); });
-    });
-
-    return () => controller.abort();
-  }, [hit?.session_id, needsSessionEntries]);
+    return () => { cancelled = true; };
+  }, [hit?.session_id, activeTab]);
 
   // Apply initialFilter from tool click on search hit.
   useEffect(() => {
@@ -1950,7 +1971,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     }
   }
 
-  // Search: always show all entries, track which ones match.
+  // Search the entries currently loaded in the detail panel.
   const { visibleEntries, matchIndices } = useMemo(() => {
     const all = entries.map((e, i) => ({ entry: e, idx: i }));
     if (!searchQuery) return { visibleEntries: all, matchIndices: [] };
@@ -1962,6 +1983,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   }, [entries, searchQuery]);
 
   const agentData = useAgentData(entries);
+  const hasAgentTab = agentData.hasAgents || (hit?.subagent_entries || 0) > 0 || (hit?.subagent_spawns || 0) > 0;
 
   const matchCount = matchIndices.length;
   const matchSet = useMemo(() => new Set(matchIndices), [matchIndices]);
@@ -2423,12 +2445,12 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
                     onClick=${() => setActiveTab('conversation')}>
               Conversation
             </button>
-            ${agentData.hasAgents && html`
+            ${hasAgentTab && html`
               <button class="detail-tab ${activeTab === 'agents' ? 'active' : ''}"
                       onClick=${() => setActiveTab('agents')}>
-                Agents (${agentData.runningCount > 0
+                Agents (${agentData.hasAgents && agentData.runningCount > 0
                   ? agentData.runningCount + '/' + agentData.totalAgents + ' running'
-                  : agentData.totalAgents})
+                  : (agentData.hasAgents ? agentData.totalAgents : (hit.subagent_spawns || hit.subagent_entries || 0))})
               </button>
             `}
             ${(hit.workflows || []).length > 0 && html`
@@ -2474,8 +2496,15 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
             ${detailError && html`<div class="detail-error">${detailError}</div>`}
             ${loading && entries.length === 0 && html`<div class="loading">loading session...</div>`}
             ${!detailError && html`<div class="conversation">${renderConversation()}</div>`}
+            ${hasEarlierEntries && !detailError && html`
+              <button class="detail-load-earlier" disabled=${loadingEarlierEntries} onClick=${loadEarlierSessionEntries}>
+                ${loadingEarlierEntries ? 'loading...' : 'load earlier messages'}
+              </button>
+            `}
           ` : activeTab === 'agents' ? html`
-            <${AgentsTab} agentData=${agentData} workflows=${hit.workflows} />
+            ${loading && entries.length === 0
+              ? html`<div class="loading">loading agents...</div>`
+              : html`<${AgentsTab} agentData=${agentData} workflows=${hit.workflows} />`}
           ` : activeTab === 'workflows' ? html`
             <${WorkflowsTab} workflows=${hit.workflows} />
           ` : renderRequestsTab()}

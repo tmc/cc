@@ -291,7 +291,7 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, entries)
+	writeJSON(w, pageSessionEntries(entries, r))
 }
 
 // handleWorkflowAgent serves a single workflow fan-out agent transcript by its
@@ -321,7 +321,7 @@ func (s *Server) handleWorkflowAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, entries)
+	writeJSON(w, pageSessionEntries(entries, r))
 }
 
 // validateWorkflowAgentPath confirms p is a workflow-agent transcript safely
@@ -679,6 +679,34 @@ func readSessionEntriesWithSubagents(path string) ([]cc.Entry, error) {
 		return entries[i].Timestamp.Before(entries[j].Timestamp)
 	})
 	return entries, nil
+}
+
+func pageSessionEntries(entries []cc.Entry, r *http.Request) []cc.Entry {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	if limit <= 0 && offset <= 0 && q.Get("order") != "desc" {
+		return entries
+	}
+
+	out := entries
+	if q.Get("order") == "desc" {
+		out = append([]cc.Entry(nil), entries...)
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(out) {
+		return []cc.Entry{}
+	}
+	out = out[offset:]
+	if limit > 0 && limit < len(out) {
+		out = out[:limit]
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/cass/service"
 )
@@ -90,6 +93,56 @@ func TestSessionMeta(t *testing.T) {
 	}
 	if hit.ToolBreakdown["exec"] != 2 {
 		t.Fatalf("tool breakdown = %#v", hit.ToolBreakdown)
+	}
+}
+
+func TestSessionEntriesPagination(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session-page-1.jsonl")
+	lines := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-05-28T10:00:00Z","uuid":"a","sessionId":"session-page-1","message":{"role":"user","content":"first"}}`,
+		`{"type":"assistant","timestamp":"2026-05-28T10:01:00Z","uuid":"b","sessionId":"session-page-1","message":{"role":"assistant","content":"second"}}`,
+		`{"type":"user","timestamp":"2026-05-28T10:02:00Z","uuid":"c","sessionId":"session-page-1","message":{"role":"user","content":"third"}}`,
+		`{"type":"assistant","timestamp":"2026-05-28T10:03:00Z","uuid":"d","sessionId":"session-page-1","message":{"role":"assistant","content":"fourth"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(dir, "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: []cass.Session{{
+			ID:         "session-page-1",
+			Agent:      "claude-code",
+			Title:      "Paged session",
+			Workspace:  "/work/page",
+			SourcePath: path,
+			StartedAt:  time.Unix(100, 0),
+			EndedAt:    time.Unix(200, 0),
+			Messages:   []cass.Message{{Role: "user", Content: "first"}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v; want 1, nil", n, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session/session-page-1?order=desc&limit=2&offset=1", nil)
+	rr := httptest.NewRecorder()
+	New(Config{Service: svc}).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
+	var entries []cc.Entry
+	if err := json.Unmarshal(rr.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(entries) != 2 || entries[0].UUID != "c" || entries[1].UUID != "b" {
+		t.Fatalf("paged uuids = %v, want [c b]", entryUUIDs(entries))
 	}
 }
 
@@ -183,6 +236,14 @@ func TestGraphWorkflowModes(t *testing.T) {
 	if agent != 2 || spawn != 2 {
 		t.Fatalf("expanded: agents=%d spawn=%d, want 2/2", agent, spawn)
 	}
+}
+
+func entryUUIDs(entries []cc.Entry) []string {
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.UUID
+	}
+	return out
 }
 
 func TestSessionMetaNotFound(t *testing.T) {

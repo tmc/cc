@@ -713,6 +713,19 @@ input::placeholder { color: var(--faint); }
 }
 .conv-error { color: var(--danger); }
 .conv-success { color: var(--green); }
+.detail-load-earlier {
+  display: block;
+  margin: 12px auto 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.detail-load-earlier:hover:not(:disabled) { background: var(--hover); }
+.detail-load-earlier:disabled { color: var(--faint); cursor: default; }
 
 /* in-session search */
 .detail-search {
@@ -2298,4 +2311,5 @@ mark.search-hl {
   font-size: 11px;
   cursor: pointer;
 }
-.wf-agent-more:hover { background: var(--hover); }
+.wf-agent-more:hover:not(:disabled) { background: var(--hover); }
+.wf-agent-more:disabled { color: var(--faint); cursor: default; }
