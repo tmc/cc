@@ -9,48 +9,55 @@ import (
 
 var version = "dev"
 
-// subcommands maps command names and aliases to binary names.
-var subcommands = map[string]string{
+type subcommandSpec struct {
+	binary string
+	args   []string
+}
+
+// subcommands maps command names and aliases to binaries and default args.
+var subcommands = map[string]subcommandSpec{
 	// Full names
-	"msg":      "cmsg",
-	"replay":   "creplay",
-	"sid":      "mksid",
-	"history":  "cchistory",
-	"config":   "ccconfig",
-	"loc":      "ccloc",
-	"sessions": "ccsessions",
-	"cat":      "cccat",
-	"stats":    "ccstats",
-	"tool":     "cctool",
-	"files":    "ccfiles",
-	"diff":     "ccdiff",
-	"time":     "cctime",
-	"err":      "ccerr",
-	"team":     "ccteam",
-	"spawn":    "ccspawn",
-	"inbox":    "ccinbox",
-	"task":     "cctask",
-	"agent":    "ccagent",
-	"approve":  "ccapprove",
-	"handoff":  "cchandoff",
-	"memory":   "ccmemory",
+	"cass":     {binary: "cass"},
+	"msg":      {binary: "cmsg"},
+	"replay":   {binary: "creplay"},
+	"sid":      {binary: "mksid"},
+	"history":  {binary: "cchistory"},
+	"config":   {binary: "ccconfig"},
+	"loc":      {binary: "ccloc"},
+	"sessions": {binary: "ccsessions"},
+	"cat":      {binary: "cccat"},
+	"stats":    {binary: "ccstats"},
+	"tool":     {binary: "cctool"},
+	"files":    {binary: "ccfiles"},
+	"diff":     {binary: "ccdiff"},
+	"time":     {binary: "cctime"},
+	"err":      {binary: "ccerr"},
+	"team":     {binary: "ccteam"},
+	"spawn":    {binary: "ccspawn"},
+	"inbox":    {binary: "ccinbox"},
+	"task":     {binary: "cctask"},
+	"agent":    {binary: "ccagent"},
+	"approve":  {binary: "ccapprove"},
+	"handoff":  {binary: "cchandoff"},
+	"memory":   {binary: "ccmemory"},
+	"requests": {binary: "cass", args: []string{"requests"}},
 
 	// Short aliases
-	"m":  "cmsg",
-	"r":  "creplay",
-	"s":  "mksid",
-	"h":  "cchistory",
-	"c":  "ccconfig",
-	"l":  "ccloc",
-	"ss": "ccsessions",
-	"t":  "ccteam",
-	"sp": "ccspawn",
-	"in": "ccinbox",
-	"tk": "cctask",
-	"ag": "ccagent",
-	"ap": "ccapprove",
-	"ho": "cchandoff",
-	"mm": "ccmemory",
+	"m":  {binary: "cmsg"},
+	"r":  {binary: "creplay"},
+	"s":  {binary: "mksid"},
+	"h":  {binary: "cchistory"},
+	"c":  {binary: "ccconfig"},
+	"l":  {binary: "ccloc"},
+	"ss": {binary: "ccsessions"},
+	"t":  {binary: "ccteam"},
+	"sp": {binary: "ccspawn"},
+	"in": {binary: "ccinbox"},
+	"tk": {binary: "cctask"},
+	"ag": {binary: "ccagent"},
+	"ap": {binary: "ccapprove"},
+	"ho": {binary: "cchandoff"},
+	"mm": {binary: "ccmemory"},
 }
 
 func main() {
@@ -78,14 +85,14 @@ func main() {
 	}
 
 	// Look up subcommand
-	binary, ok := subcommands[cmd]
+	spec, ok := subcommands[cmd]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "cctl: unknown command %q\n", cmd)
 		fmt.Fprintf(os.Stderr, "Run 'cctl help' for usage.\n")
 		os.Exit(2)
 	}
 
-	os.Exit(runSubcommand(binary, args))
+	os.Exit(runSubcommand(spec.binary, append(spec.args, args...)))
 }
 
 func runSubcommand(binary string, args []string) int {
@@ -132,6 +139,7 @@ Usage:
   cctl <command> [options] [args]
 
 Commands:
+  cass         Show the cass CLI
   msg, m       Format stdin as Claude messages
   replay, r    Replay Claude Code sessions in TUI
   sid, s       Generate session IDs
@@ -146,6 +154,7 @@ Commands:
   approve, ap  Handle approval workflows
   handoff, ho  Build cross-tool session handoff prompt
   memory, mm   List and read auto-memory files
+  requests     Show indexed API request breakdown
   help         Show help for a command
   version      Show version information
 
@@ -169,7 +178,7 @@ func printVersion() {
 		if len(name) == 1 {
 			continue
 		}
-		if path, err := exec.LookPath(binary); err == nil {
+		if path, err := exec.LookPath(binary.binary); err == nil {
 			fmt.Printf("  %-10s %s\n", name, path)
 		} else {
 			fmt.Printf("  %-10s (not installed)\n", name)

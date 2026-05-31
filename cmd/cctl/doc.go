@@ -12,6 +12,7 @@
 //
 // # Subcommands
 //
+//	cass         → cass        Show the cass CLI.
 //	msg,     m   → cmsg        Format stdin as Claude messages.
 //	replay,  r   → creplay     Replay sessions in a terminal UI.
 //	sid,     s   → mksid       Generate session IDs.
@@ -34,6 +35,7 @@
 //	approve, ap  → ccapprove   Handle approval workflows.
 //	handoff, ho  → cchandoff   Build cross-tool handoff prompts.
 //	memory,  mm  → ccmemory    List and read auto-memory files.
+//	requests     → cass requests Show indexed API request breakdown.
 //
 //	help [cmd]   Show usage for cctl or a subcommand.
 //	version      Show cctl version and resolved subcommand paths.
