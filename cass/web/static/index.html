@@ -2284,6 +2284,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
     refreshTick: -1,
   });
   const [agentsLoading, setAgentsLoading] = useState(false);
+  const [showAvailableSkills, setShowAvailableSkills] = useState(false);
 
   const bodyRef = useRef(null);
   const searchRef = useRef(null);
@@ -2320,6 +2321,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
     setSearchQuery(v);
     onFilterChange && onFilterChange(v);
   }
+
+  useEffect(() => {
+    setShowAvailableSkills(false);
+  }, [hit?.session_id]);
 
   function sessionEntriesPath(offset) {
     if (!hit) return '';
@@ -2966,14 +2971,17 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
           </details>
         `}
         ${available.length > 0 && html`
-          <details class="detail-skill-section">
+          <details class="detail-skill-section" open=${showAvailableSkills}
+                   onToggle=${e => setShowAvailableSkills(e.currentTarget.open)}>
             <summary>
               <span>available skills</span>
               <strong>${available.length}</strong>
             </summary>
-            <div class="detail-skills-scroll detail-skill-list available">
-              ${available.map(renderCard)}
-            </div>
+            ${showAvailableSkills && html`
+              <div class="detail-skills-scroll detail-skill-list available">
+                ${available.map(renderCard)}
+              </div>
+            `}
           </details>
         `}
       </div>
