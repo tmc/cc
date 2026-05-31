@@ -101,6 +101,7 @@ type Hit struct {
 	IT2Sends                 int    `json:"it2_sends,omitempty"`
 	IT2Screens               int    `json:"it2_screens,omitempty"`
 	IT2Splits                int    `json:"it2_splits,omitempty"`
+	APIRequestCount          int    `json:"api_request_count,omitempty"`
 
 	ToolBreakdown map[string]int `json:"tool_breakdown,omitempty"`
 

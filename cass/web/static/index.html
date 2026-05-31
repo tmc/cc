@@ -1303,28 +1303,48 @@ function AgentStatusIcon({ status }) {
 }
 
 function workflowAgentAliases(workflows) {
-  const aliases = {};
+  const aliases = { byID: {}, byIndex: [] };
   for (const wf of workflows || []) {
     for (const a of wf.agents || []) {
       if (!a || !a.id) continue;
-      aliases[a.id] = {
+      const meta = {
         label: a.label || '',
         phase: a.phase || '',
         agentType: a.agent_type || '',
         title: a.title || '',
       };
+      aliases.byID[a.id] = meta;
+      aliases.byIndex.push(meta);
     }
   }
   return aliases;
 }
 
-function agentDisplayName(a, aliases) {
-  const meta = aliases[a.id] || {};
-  return meta.label || a.agentName || a.description || meta.title || a.id.slice(0, 7);
+function numberedAgentName(index) {
+  return 'agent ' + String((index || 0) + 1).padStart(2, '0');
 }
 
-function agentDisplayType(a, aliases) {
-  const meta = aliases[a.id] || {};
+function looksLikePromptTitle(title) {
+  const t = (title || '').trim();
+  if (!t) return false;
+  return t.length > 72 || /^you are\b/i.test(t) || /\bREAD THESE FILES FIRST\b/i.test(t);
+}
+
+function agentAliasFor(a, aliases, index) {
+  return aliases.byID[a.id] || aliases.byIndex[index] || {};
+}
+
+function agentDisplayName(a, aliases, index) {
+  const meta = agentAliasFor(a, aliases, index);
+  if (meta.label) return meta.label;
+  if (a.agentName) return a.agentName;
+  const candidate = a.description || meta.title || '';
+  if (candidate && !looksLikePromptTitle(candidate)) return candidate;
+  return numberedAgentName(index);
+}
+
+function agentDisplayType(a, aliases, index) {
+  const meta = agentAliasFor(a, aliases, index);
   return meta.phase || meta.agentType || a.subagentType || '';
 }
 
@@ -1351,8 +1371,8 @@ function AgentsTab({ agentData, workflows }) {
           const connector = isLast ? '\u2514\u2500' : '\u251C\u2500';
           const isExpanded = expandedAgent === a.id;
           const totalTok = a.inputTokens + a.outputTokens;
-          const display = agentDisplayName(a, aliases);
-          const type = agentDisplayType(a, aliases);
+          const display = agentDisplayName(a, aliases, i);
+          const type = agentDisplayType(a, aliases, i);
           return html`
             <div class="agent-tree-item" key=${a.id}>
               <div class="agent-tree-row ${isExpanded ? 'expanded' : ''}" onClick=${() => toggleAgent(a.id)}>
@@ -1371,7 +1391,7 @@ function AgentsTab({ agentData, workflows }) {
                   <div class="agent-detail-grid">
                     <div class="agent-detail-item"><span class="label">status</span><span class="val agent-status-text ${a.status}">${a.status}</span></div>
                     ${a.model && html`<div class="agent-detail-item"><span class="label">model</span><span class="val">${a.model}</span></div>`}
-                    ${aliases[a.id]?.phase && html`<div class="agent-detail-item"><span class="label">phase</span><span class="val">${aliases[a.id].phase}</span></div>`}
+                    ${agentAliasFor(a, aliases, i).phase && html`<div class="agent-detail-item"><span class="label">phase</span><span class="val">${agentAliasFor(a, aliases, i).phase}</span></div>`}
                     <div class="agent-detail-item"><span class="label">input tokens</span><span class="val"><${RollingNum} value=${a.inputTokens} /></span></div>
                     <div class="agent-detail-item"><span class="label">output tokens</span><span class="val"><${RollingNum} value=${a.outputTokens} /></span></div>
                     ${a.cacheReads > 0 && html`<div class="agent-detail-item"><span class="label">cache reads</span><span class="val"><${RollingNum} value=${a.cacheReads} /></span></div>`}
@@ -1420,10 +1440,10 @@ function AgentsTab({ agentData, workflows }) {
             </tr>
           </thead>
           <tbody>
-            ${agents.map(a => {
+            ${agents.map((a, i) => {
               const totalTok = a.inputTokens + a.outputTokens;
-              const display = agentDisplayName(a, aliases);
-              const type = agentDisplayType(a, aliases);
+              const display = agentDisplayName(a, aliases, i);
+              const type = agentDisplayType(a, aliases, i);
               return html`
                 <tr key=${a.id} class=${expandedAgent === a.id ? 'expanded' : ''} onClick=${() => toggleAgent(a.id)}>
                   <td style="width:16px"><${AgentStatusIcon} status=${a.status} /></td>
@@ -1488,7 +1508,7 @@ function AgentsTab({ agentData, workflows }) {
             const x = labelW + ((t0 - minT) / range) * barW;
             const w = Math.max(2, ((t1 - t0) / range) * barW);
             const y = i * rowH + (rowH - barH) / 2;
-            const label = agentDisplayName(a, aliases);
+            const label = agentDisplayName(a, aliases, i);
             const fillColor = a.status === 'error' ? 'var(--danger)' :
                               a.status === 'running' ? 'var(--green)' : 'var(--cyan)';
             return html`
@@ -1611,8 +1631,16 @@ function WorkflowAgentTranscript({ sourcePath }) {
 // WorkflowsTab renders each workflow run on the parent session as a tree of its
 // fan-out agents; expanding an agent streams its transcript inline. The agents
 // come from hit.workflows[].agents[] (attributed to the parent, never top-level).
-function workflowAgentName(a) {
-  return a.label || a.title || a.id;
+function workflowAgentName(a, index) {
+  if (a.label) return a.label;
+  if (a.title && !looksLikePromptTitle(a.title)) return a.title;
+  return numberedAgentName(index);
+}
+
+function workflowAgentSubtitle(a, name) {
+  const title = (a.title || '').trim();
+  if (!title || title === name || title === a.label) return '';
+  return title;
 }
 
 function workflowPhaseGroups(wf) {
@@ -1679,6 +1707,8 @@ function WorkflowsTab({ workflows }) {
                           const key = ri + ':' + a.id;
                           const isOpen = expanded === key;
                           const isLast = ai === group.agents.length - 1;
+                          const name = workflowAgentName(a, ai);
+                          const subtitle = workflowAgentSubtitle(a, name);
                           const stats = [
                             a.agent_type,
                             a.tool_calls ? a.tool_calls + ' tools' : '',
@@ -1689,10 +1719,13 @@ function WorkflowsTab({ workflows }) {
                             <div class="wf-agent" key=${a.id}>
                               <div class="wf-agent-row ${isOpen ? 'expanded' : ''}"
                                    onClick=${() => setExpanded(prev => prev === key ? null : key)}
-                                   title=${a.title && a.label && a.title !== a.label ? a.title : ''}>
+                                   title=${a.title || ''}>
                                 <span class="agent-tree-connector">${isLast ? '└─' : '├─'}</span>
                                 <${AgentStatusIcon} status=${a.status} />
-                                <span class="wf-agent-name">@${workflowAgentName(a)}</span>
+                                <span class="wf-agent-text">
+                                  <span class="wf-agent-name">@${name}</span>
+                                  ${subtitle && html`<span class="wf-agent-subtitle">${subtitle}</span>`}
+                                </span>
                                 <span class="wf-agent-stats">${stats}</span>
                               </div>
                               ${isOpen && a.source_path && html`
@@ -1738,6 +1771,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const needsSessionEntries = activeTab === 'conversation' || activeTab === 'agents';
   const detailTitle = displaySessionTitle(hit);
   const detailSkillCount = (hit?.selected_skill_count || 0) + (hit?.loaded_skill_count || 0);
+  const requestCount = hit?.api_request_count || 0;
+  const showRequestsTab = activeTab === 'requests' || requestCount > 0 || apiRequests.length > 0;
 
   function setActiveTab(tab) {
     const normalized = normalizeDetailTab(tab);
@@ -1756,6 +1791,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       setActiveTabRaw('conversation'); setApiRequests([]); setDetailError('');
       return;
     }
+    setApiRequests([]);
+    setRequestsLoading(false);
     if (!needsSessionEntries) {
       setLoading(false);
       setStreaming(false);
@@ -2398,10 +2435,12 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
                 Workflows (${hit.workflows.length})
               </button>
             `}
-            <button class="detail-tab ${activeTab === 'requests' ? 'active' : ''}"
-                    onClick=${() => setActiveTab('requests')}>
-              API Requests
-            </button>
+            ${showRequestsTab && html`
+              <button class="detail-tab ${activeTab === 'requests' ? 'active' : ''}"
+                      onClick=${() => setActiveTab('requests')}>
+                API Requests${requestCount > 0 ? ' (' + requestCount + ')' : ''}
+              </button>
+            `}
           </div>
         </div>
         ${(hit.team_name || hit.it2_splits > 0) && html`

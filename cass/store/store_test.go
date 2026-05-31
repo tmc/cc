@@ -467,6 +467,12 @@ func TestSessionReturnsIndexedMetadata(t *testing.T) {
 	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.BatchIndexRequests(ctx, []cass.APIRequest{
+		{ID: "req-1", SessionID: "meta-1", RequestID: "r1", Timestamp: 150},
+		{ID: "req-2", IT2SessionID: "meta-1", RequestID: "r2", Timestamp: 151},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	h, err := s.Session(ctx, "meta-1")
 	if err != nil {
 		t.Fatal(err)
@@ -479,6 +485,17 @@ func TestSessionReturnsIndexedMetadata(t *testing.T) {
 	}
 	if h.ToolBreakdown["exec"] != 2 {
 		t.Fatalf("tool breakdown = %#v", h.ToolBreakdown)
+	}
+	if h.APIRequestCount != 2 {
+		t.Fatalf("api request count = %d, want 2", h.APIRequestCount)
+	}
+
+	result, err := s.Search(ctx, cass.SearchRequest{Query: "metadata", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].APIRequestCount != 2 {
+		t.Fatalf("search request count hit = %#v", result.Hits)
 	}
 }
 

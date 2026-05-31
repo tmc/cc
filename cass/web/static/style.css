@@ -2249,12 +2249,24 @@ mark.search-hl {
 .wf-agent-row { display: flex; align-items: center; gap: 6px; padding: 3px 4px; cursor: pointer; border-radius: 3px; font-size: 12px; }
 .wf-agent-row:hover { background: var(--border); }
 .wf-agent-row.expanded { background: var(--border); }
+.wf-agent-text {
+  display: grid;
+  min-width: 0;
+}
 .wf-agent-name {
   color: var(--cyan);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.wf-agent-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: 10px;
 }
 .wf-agent-stats {
   font-size: 11px;

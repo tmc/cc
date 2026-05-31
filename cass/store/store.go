@@ -21,6 +21,8 @@ type DB struct {
 
 const hitStatsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goals_json, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count`
 
+const hitAPIRequestCountCol = `(SELECT count(*) FROM api_requests ar WHERE ar.session_id = s.id OR (ar.session_id = '' AND ar.it2_session_id = s.id))`
+
 type hitScanner interface {
 	Scan(dest ...any) error
 }
@@ -716,22 +718,24 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 	if req.Query != "" {
 		query = fmt.Sprintf(`
 			SELECT s.id, s.agent, s.title, snippet(session_fts, 1, '>>>', '<<<', '...', 40) as snip,
-				bm25(session_fts, 5.0, 1.0, 2.0) as score, s.workspace, s.source_path, s.started_at%s
+				bm25(session_fts, 5.0, 1.0, 2.0) as score, s.workspace, s.source_path, s.started_at,
+				%s AS api_request_count%s
 			FROM session_fts
 			JOIN sessions s ON s.rowid = session_fts.rowid
 			%s
 			%s
 			LIMIT ? OFFSET ?
-		`, statsCols, whereClause, orderClause)
+		`, hitAPIRequestCountCol, statsCols, whereClause, orderClause)
 	} else {
 		query = fmt.Sprintf(`
 			SELECT s.id, s.agent, s.title, substr(s.content, 1, 200) as snip,
-				0.0 as score, s.workspace, s.source_path, s.started_at%s
+				0.0 as score, s.workspace, s.source_path, s.started_at,
+				%s AS api_request_count%s
 			FROM sessions s
 			%s
 			%s
 			LIMIT ? OFFSET ?
-		`, statsCols, whereClause, orderClause)
+		`, hitAPIRequestCountCol, statsCols, whereClause, orderClause)
 	}
 	args = append(args, req.Limit, req.Offset)
 
@@ -1013,7 +1017,8 @@ func (s *DB) SourcePath(ctx context.Context, id string) (string, error) {
 
 // Session returns indexed metadata for a single session.
 func (s *DB) Session(ctx context.Context, id string) (cass.Hit, error) {
-	query := `SELECT id, agent, title, substr(content, 1, 200) as snip, 0.0 as score, workspace, source_path, started_at, ` + hitStatsCols + ` FROM sessions WHERE id = ?`
+	query := `SELECT s.id, s.agent, s.title, substr(s.content, 1, 200) as snip, 0.0 as score, s.workspace, s.source_path, s.started_at, ` +
+		hitAPIRequestCountCol + ` AS api_request_count, s.` + strings.ReplaceAll(hitStatsCols, ", ", ", s.") + ` FROM sessions s WHERE s.id = ?`
 	hit, err := scanHit(s.db.QueryRowContext(ctx, query, id))
 	if err != nil {
 		return cass.Hit{}, err
@@ -1034,7 +1039,7 @@ func scanHit(row hitScanner) (cass.Hit, error) {
 	var isTeamLead int
 	if err := row.Scan(
 		&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
-		&endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
+		&h.APIRequestCount, &endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
 		&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
 		&h.GitCommonDir, &h.Branch, &goalsJSON, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount,
 		&skillsJSON, &h.SkillCount, &h.SelectedSkillCount, &h.LoadedSkillCount,
