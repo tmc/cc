@@ -1270,41 +1270,41 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   return html`
     <div class="search-workspace ${selected ? 'has-detail' : ''}">
       <section class="search-list-pane" aria-label="Sessions">
-      <div class="search-bar">
-        <input ref=${searchRef} class="search-input" type="text" placeholder="search sessions..."
+        <div class="search-bar">
+          <input ref=${searchRef} class="search-input" type="text" placeholder="Search sessions..."
           value=${query} onInput=${e => setQuery(e.target.value)} autofocus />
-        <span class="search-kbd">/</span>
-      </div>
-      <div class="filters">
-        <div class="filter-chips">
+          <span class="search-kbd">/</span>
+        </div>
+        <div class="filters">
+          <div class="filter-chips">
           ${timePresets.map(t => html`
             <button class="filter-chip ${since === t.value ? 'active' : ''}"
               onClick=${() => setSince(since === t.value ? '' : t.value)}>${t.label}</button>
           `)}
-        </div>
-        <input class="filter-input" placeholder="agent" value=${agent}
+          </div>
+          <input class="filter-input" placeholder="Agent" value=${agent}
           onInput=${e => setAgent(e.target.value)} style="width:100px" />
-        <input class="filter-input" placeholder="workspace" value=${workspace}
+          <input class="filter-input" placeholder="Workspace" value=${workspace}
           onInput=${e => setWorkspace(e.target.value)} />
-        <input class="filter-input" placeholder="team" value=${team}
+          <input class="filter-input" placeholder="Team" value=${team}
           onInput=${e => setTeam(e.target.value)} style="width:100px" />
-        <input class="filter-input" placeholder="used skill" value=${skill}
+          <input class="filter-input" placeholder="Used skill" value=${skill}
           onInput=${e => setSkill(e.target.value)} style="width:110px" />
-        <span class="filter-chips">
-          <button class="filter-chip ${goalStatus === 'active' ? 'active' : ''}"
-            onClick=${() => setGoalStatus(goalStatus === 'active' ? '' : 'active')}>active goals</button>
-          <button class="filter-chip ${goalStatus === 'complete' ? 'active' : ''}"
-            onClick=${() => setGoalStatus(goalStatus === 'complete' ? '' : 'complete')}>complete goals</button>
-        </span>
-        <span class="sort-group">
-          ${sortModes.map(m => html`
-            <button class="sort-pill ${effectiveSort === m.value ? 'active' : ''}"
-              onClick=${() => setSort(sort === m.value ? '' : m.value)}>${m.label}</button>
-          `)}
-        </span>
-      </div>
+          <span class="filter-chips">
+            <button class="filter-chip ${goalStatus === 'active' ? 'active' : ''}"
+              onClick=${() => setGoalStatus(goalStatus === 'active' ? '' : 'active')}>active goals</button>
+            <button class="filter-chip ${goalStatus === 'complete' ? 'active' : ''}"
+              onClick=${() => setGoalStatus(goalStatus === 'complete' ? '' : 'complete')}>complete goals</button>
+          </span>
+          <span class="sort-group">
+            ${sortModes.map(m => html`
+              <button class="sort-pill ${effectiveSort === m.value ? 'active' : ''}"
+                onClick=${() => setSort(sort === m.value ? '' : m.value)}>${m.label}</button>
+            `)}
+          </span>
+        </div>
 
-      ${loading && !results && html`<div class="loading">searching...</div>`}
+      ${loading && !results && html`<div class="loading">Searching...</div>`}
       ${results && html`<div class="result-count" style="text-align:right;padding:0 0 8px">${resultCountLabel(results)}</div>`}
       ${results && results.hits && results.hits.length > 0 && html`
         <ul class="results">
@@ -3266,7 +3266,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
           </div>
           <div class="detail-search">
             <input ref=${searchRef} class="detail-search-input" type="text"
-              placeholder="search in session... (Enter/Shift+Enter to navigate)"
+              placeholder="Search in session... (Enter/Shift+Enter to navigate)"
               value=${searchQuery}
               onInput=${e => setDetailSearch(e.target.value)}
               onKeyDown=${e => {
@@ -4251,7 +4251,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   return html`
     <div class="graph-panel">
       <div class="filters" style="margin-bottom:4px">
-        <input class="filter-input" placeholder="search graph..." value=${graphQuery}
+        <input class="filter-input" placeholder="Search graph..." value=${graphQuery}
           onInput=${e => setGraphQuery(e.target.value)} style="width:180px" />
         <div class="filter-chips">
           ${timePresets.map(t => html`
@@ -4661,7 +4661,7 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
             <div class="team-sessions">
               <div class="team-search-bar">
                 <input class="team-search-input" type="text"
-                  placeholder="search in team..."
+                  placeholder="Search in team..."
                   value=${teamSearch}
                   onInput=${e => setTeamSearch(e.target.value)}
                   onKeyDown=${e => { if (e.key === 'Escape') { setTeamSearch(''); e.target.blur(); } }} />
@@ -4903,7 +4903,7 @@ function MapPanel({ urlParams, updateParams, navVersion }) {
   return html`
     <div>
       <div class="filters" style="margin-bottom:12px">
-        <input class="filter-input" placeholder="filter..." value=${filter}
+        <input class="filter-input" placeholder="Filter..." value=${filter}
           onInput=${e => setFilter(e.target.value)} style="width:240px" />
       </div>
       ${loading && html`<div class="loading">Loading mappings...</div>`}
@@ -5208,7 +5208,7 @@ function UsagePanel({ urlParams, updateParams, navVersion }) {
         </div>
       </div>
 
-      ${!data && html`<div class="loading">loading usage...</div>`}
+      ${!data && html`<div class="loading">Loading usage...</div>`}
 
       ${data && html`
         <div class="usage-section">
@@ -5290,7 +5290,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
     setIndexing(false);
   }
 
-  if (!basic || !agg) return html`<div class="loading">loading stats...</div>`;
+  if (!basic || !agg) return html`<div class="loading">Loading stats...</div>`;
 
   const lastIdx = basic.last_indexed
     ? new Date(parseInt(basic.last_indexed) * 1000).toLocaleString()
