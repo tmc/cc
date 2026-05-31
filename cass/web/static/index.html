@@ -2987,7 +2987,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                 <div class="req-breakdown">
                   ${toolEntries.length > 0 && html`
                     <div class="req-breakdown-row">
-                      <span class="req-breakdown-label">top tools</span>
+                      <span class="req-breakdown-label">Top tools</span>
                       <div class="req-breakdown-chips">
                         ${toolEntries.map(([name, bytes]) => html`
                           <span class="tool-chip" key=${name} title="${name}: ${bytes}b">${name} ${fmtReqBytes(bytes)}</span>
@@ -2997,7 +2997,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                   `}
                   ${serverEntries.length > 0 && html`
                     <div class="req-breakdown-row">
-                      <span class="req-breakdown-label">top MCP servers</span>
+                      <span class="req-breakdown-label">Top MCP servers</span>
                       <div class="req-breakdown-chips">
                         ${serverEntries.map(([name, bytes]) => html`
                           <span class="tool-chip" key=${name} title="${name}: ${bytes}b">${name} ${fmtReqBytes(bytes)}</span>
@@ -3097,7 +3097,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
               `}
               ${goal.completion_budget_report && html`
                 <div class="detail-goal-report ${status === 'blocked' ? 'stale' : ''}">
-                  ${status === 'blocked' ? html`<strong>raw completion report</strong> ` : null}
+                  ${status === 'blocked' ? html`<strong>Raw completion report</strong> ` : null}
                   ${goal.completion_budget_report}
                 </div>
               `}
@@ -3117,10 +3117,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
     const selected = hit.skills.filter(skill => skill.kind === 'selected' || skill.kind === 'tool').length;
     const loaded = hit.skills.filter(skill => skill.kind === 'loaded').length;
     const counts = [
-      selected ? selected + ' selected' : '',
-      loaded ? loaded + ' loaded' : '',
-      context.length ? context.length + ' context' : '',
-      available.length ? available.length + ' available' : '',
+      selected ? selected + ' Selected' : '',
+      loaded ? loaded + ' Loaded' : '',
+      context.length ? context.length + ' Context' : '',
+      available.length ? available.length + ' Available' : '',
     ].filter(Boolean).join(' / ');
     const renderCard = (skill, i) => html`
       <div class="detail-skill-card ${skill.kind || 'skill'}" key=${i}>
@@ -3153,7 +3153,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
         ${context.length > 0 && html`
           <details class="detail-skill-section">
             <summary>
-              <span>context skills</span>
+              <span>Context skills</span>
               <strong>${context.length}</strong>
             </summary>
             <div class="detail-skills-scroll detail-skill-list context">
@@ -3165,7 +3165,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
           <details class="detail-skill-section" open=${showAvailableSkills}
                    onToggle=${e => setShowAvailableSkills(e.currentTarget.open)}>
             <summary>
-              <span>available skills</span>
+              <span>Available skills</span>
               <strong>${available.length}</strong>
             </summary>
             ${showAvailableSkills && html`
@@ -3230,7 +3230,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
         <div class="detail-header">
           <div class="detail-header-top">
             <div class="detail-title" title=${hit.title && hit.title !== detailTitle ? hit.title : ''}>${detailTitle}</div>
-            <button class="detail-close" onClick=${onClose}>close</button>
+            <button class="detail-close" onClick=${onClose}>Close</button>
           </div>
           <div class="detail-badges">
             <span class="hit-agent">[${hit.agent}]</span>
