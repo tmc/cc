@@ -3245,15 +3245,15 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
             ${hit.duration_secs && html`<span>${fmtDuration(hit.duration_secs)}</span>`}
             ${(hit.input_tokens || hit.output_tokens) && html`<span>${fmtNum((hit.input_tokens||0)+(hit.output_tokens||0))} tokens</span>`}
             ${hit.compactions > 0 && html`<span class="hit-compactions">${hit.compactions} compaction${hit.compactions > 1 ? 's' : ''}</span>`}
-            ${hit.goal_count > 0 && html`<span class="hit-goals">${hit.active_goal_count || 0} active goals / ${hit.completed_goal_count || 0} complete</span>`}
-            ${detailSkillCount > 0 && html`<span class="hit-skills">${hit.selected_skill_count || 0} selected skills / ${hit.loaded_skill_count || 0} loaded</span>`}
-            ${hit.workflow_count > 0 && html`<span class="hit-workflows">${hit.workflow_count} workflow${hit.workflow_count === 1 ? '' : 's'} / ${hit.workflow_agent_count || 0} agents / ${hit.workflow_task_op_count || 0} task operations</span>`}
-            ${hit.subagent_entries > 0 && html`<span>${hit.subagent_mirrored_entries || 0}/${hit.subagent_entries} mirrored</span>`}
+            ${hit.goal_count > 0 && html`<span class="hit-goals">${hit.active_goal_count || 0} Active goals / ${hit.completed_goal_count || 0} Complete</span>`}
+            ${detailSkillCount > 0 && html`<span class="hit-skills">${hit.selected_skill_count || 0} Selected skills / ${hit.loaded_skill_count || 0} Loaded</span>`}
+            ${hit.workflow_count > 0 && html`<span class="hit-workflows">${hit.workflow_count} Workflow${hit.workflow_count === 1 ? '' : 's'} / ${hit.workflow_agent_count || 0} Agents / ${hit.workflow_task_op_count || 0} Task operations</span>`}
+            ${hit.subagent_entries > 0 && html`<span>${hit.subagent_mirrored_entries || 0}/${hit.subagent_entries} Mirrored</span>`}
           </div>
           ${renderWorkflowBadges(hit.workflows, 4)}
           <div class="detail-session-id">
             <div class="detail-session-line">
-              <span class="detail-session-label">session</span>
+              <span class="detail-session-label">Session</span>
               <button class="detail-session-copy" onClick=${() => copyText(hit.session_id)} title="Copy session ID">${hit.session_id}</button>
             </div>
             ${resumeCmd && html`
@@ -3307,17 +3307,17 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
         </div>
         ${(hit.team_name || hit.it2_splits > 0) && html`
           <div class="detail-team-context">
-            <div class="detail-team-context-title">${hit.team_name ? 'team context' : 'ad-hoc team'}</div>
+            <div class="detail-team-context-title">${hit.team_name ? 'Team context' : 'Ad-hoc team'}</div>
             ${hit.team_name ? html`
               <div style="margin-bottom:4px">
                 <span class="team-role-icon" style="color:var(--magenta)">${hit.is_team_lead ? '\u265B' : '\u25CF'}</span>
                 <span style="color:var(--magenta);font-weight:600">${hit.team_name}</span>
                 ${hit.agent_name && html`<span style="color:var(--dim)"> / ${hit.agent_name}</span>`}
-                <span style="color:var(--faint);margin-left:4px">${hit.is_team_lead ? 'lead' : 'member'}</span>
+                <span style="color:var(--faint);margin-left:4px">${hit.is_team_lead ? 'Lead' : 'Member'}</span>
               </div>
             ` : html`
               <div style="margin-bottom:4px;color:var(--cyan)">
-                \u2442 ${hit.it2_splits} terminal split${hit.it2_splits !== 1 ? 's' : ''}
+                \u2442 ${hit.it2_splits} Terminal split${hit.it2_splits !== 1 ? 's' : ''}
                 ${hit.it2_sends ? html` · ${hit.it2_sends} message${hit.it2_sends !== 1 ? 's' : ''} sent` : null}
               </div>
             `}
