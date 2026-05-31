@@ -2100,7 +2100,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
   }
 
   if (error) return html`<div class="detail-error wf-agent-error">${error}</div>`;
-  if (!loaded) return html`<div class="wf-agent-loading">loading transcript...</div>`;
+  if (!loaded) return html`<div class="wf-agent-loading">Loading transcript...</div>`;
   if (entries.length === 0) return html`<div class="wf-agent-empty">Empty transcript</div>`;
 
   function blockText(block) {
@@ -2145,7 +2145,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
     .filter(item => item.blocks.length > 0);
   const earlierButton = hasEarlier && html`
     <button class="wf-agent-more" disabled=${loadingEarlier} onClick=${loadEarlier}>
-      ${loadingEarlier ? 'loading...' : 'Load earlier messages'}
+      ${loadingEarlier ? 'Loading...' : 'Load earlier messages'}
     </button>
   `;
   if (renderableEntries.length === 0) return html`
@@ -2907,7 +2907,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
   }
 
   function renderRequestsTab() {
-    if (requestsLoading) return html`<div class="loading">loading api requests...</div>`;
+    if (requestsLoading) return html`<div class="loading">Loading API requests...</div>`;
     if (apiRequests.length === 0) return html`
       <div class="empty" style="margin-top:20px;">
         No API requests found. <br/><br/>
@@ -3279,7 +3279,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
             `}
             ${searchHasUnloadedEntries && html`
               <button class="detail-search-earlier" disabled=${loadingEarlierEntries} onClick=${loadEarlierSessionEntries}>
-                ${loadingEarlierEntries ? 'loading...' : 'Search earlier'}
+                ${loadingEarlierEntries ? 'Loading...' : 'Search earlier'}
               </button>
             `}
           </div>
@@ -3326,7 +3326,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
         ${streaming && html`
           <div class="detail-streaming">
             <div class="streaming-dot"></div>
-            ${loading ? 'streaming...' : 'live'} ${entryCount} entries
+            ${loading ? 'Streaming...' : 'Live'} ${entryCount} entries
           </div>
         `}
         <div class="detail-body" ref=${bodyRef}>
@@ -3347,16 +3347,16 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
           `}
           ${activeTab === 'conversation' ? html`
             ${detailError && html`<div class="detail-error">${detailError}</div>`}
-            ${loading && entries.length === 0 && html`<div class="loading">loading session...</div>`}
+            ${loading && entries.length === 0 && html`<div class="loading">Loading session...</div>`}
             ${!detailError && html`<div class="conversation">${renderConversation()}</div>`}
             ${hasEarlierEntries && !detailError && html`
               <button class="detail-load-earlier" disabled=${loadingEarlierEntries} onClick=${loadEarlierSessionEntries}>
-                ${loadingEarlierEntries ? 'loading...' : 'Load earlier messages'}
+                ${loadingEarlierEntries ? 'Loading...' : 'Load earlier messages'}
               </button>
             `}
           ` : activeTab === 'agents' ? html`
             ${agentsLoading && !agentData.hasAgents
-              ? html`<div class="loading">loading agents...</div>`
+              ? html`<div class="loading">Loading agents...</div>`
               : html`<${AgentsTab} agentData=${agentData} workflows=${hit.workflows} />`}
           ` : activeTab === 'workflows' ? html`
             <${WorkflowsTab} workflows=${hit.workflows} focusAgent=${workflowAgentFocus} onFocusAgentChange=${onWorkflowAgentFocusChange} />
@@ -3820,7 +3820,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     return counts;
   }, [visibleLinks]);
 
-  if (loading) return html`<div class="loading">loading graph...</div>`;
+  if (loading) return html`<div class="loading">Loading graph...</div>`;
 
   const allNodeIds = Object.keys(nodeData);
   if (allNodeIds.length === 0) return html`<div class="empty">No graph data for this range</div>`;
@@ -4622,13 +4622,13 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
     return () => clearTimeout(id);
   }, [teamSearch, selectedName]);
 
-  if (loading) return html`<div class="loading">loading teams...</div>`;
+  if (loading) return html`<div class="loading">Loading teams...</div>`;
   if (teams.length === 0) return html`<div class="empty">No agent teams found</div>`;
 
   // Detail view.
   if (selectedName) {
     const team = teams.find(t => t.name === selectedName);
-    if (detailLoading) return html`<div class="loading">loading ${selectedName}...</div>`;
+    if (detailLoading) return html`<div class="loading">Loading ${selectedName}...</div>`;
     if (!detail) return html`
       <div>
         <button class="team-detail-back" onClick=${() => setSelectedName('')}>Back</button>
@@ -4906,7 +4906,7 @@ function MapPanel({ urlParams, updateParams, navVersion }) {
         <input class="filter-input" placeholder="filter..." value=${filter}
           onInput=${e => setFilter(e.target.value)} style="width:240px" />
       </div>
-      ${loading && html`<div class="loading">loading mappings...</div>`}
+      ${loading && html`<div class="loading">Loading mappings...</div>`}
       ${!loading && mappings.length === 0 && html`<div class="empty">No session mappings found</div>`}
       ${sorted.length > 0 && html`
         <table class="map-table">
