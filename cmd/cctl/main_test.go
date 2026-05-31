@@ -133,6 +133,27 @@ func TestPrintVersionListsSubcommandsSorted(t *testing.T) {
 	}
 }
 
+func TestUsageListsRequests(t *testing.T) {
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	usage()
+	w.Close()
+	os.Stdout = oldStdout
+
+	got, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "requests     Show indexed API request breakdown") {
+		t.Fatalf("usage output missing requests entry:\n%s", got)
+	}
+}
+
 func slicesEqual[T comparable](a, b []T) bool {
 	if len(a) != len(b) {
 		return false
