@@ -238,6 +238,21 @@ function requestRateLimitSummary(rl) {
   return items.length > 0 ? items : null;
 }
 
+function fmtReqBytes(n) {
+  if (!n) return '0b';
+  if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + 'MB';
+  if (n >= 1024) return (n / 1024).toFixed(1) + 'kB';
+  return n + 'b';
+}
+
+function topEntriesByBytes(map, limit) {
+  if (!map) return [];
+  return Object.entries(map)
+    .filter(([, bytes]) => bytes > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit || 3);
+}
+
 function normalizeDetailTab(tab) {
   return tab === 'agents' || tab === 'requests' || tab === 'workflows' ? tab : 'conversation';
 }
@@ -2823,6 +2838,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
         ${apiRequests.map((req, i) => {
           const bd = req.breakdown;
           const hasBd = bd && Object.keys(bd).length > 0 && req.total_request_bytes > 0;
+          const toolEntries = bd ? topEntriesByBytes(bd.tool_bytes, 3) : [];
+          const serverEntries = bd ? topEntriesByBytes(bd.mcp_server_bytes, 3) : [];
           const rl = req.rate_limits;
           const rateLimitItems = requestRateLimitSummary(rl);
           return html`
@@ -2877,6 +2894,30 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                   </div>
                 `}
               </div>
+              ${(toolEntries.length > 0 || serverEntries.length > 0) && html`
+                <div class="req-breakdown">
+                  ${toolEntries.length > 0 && html`
+                    <div class="req-breakdown-row">
+                      <span class="req-breakdown-label">top tools</span>
+                      <div class="req-breakdown-chips">
+                        ${toolEntries.map(([name, bytes]) => html`
+                          <span class="tool-chip" key=${name} title="${name}: ${bytes}b">${name} ${fmtReqBytes(bytes)}</span>
+                        `)}
+                      </div>
+                    </div>
+                  `}
+                  ${serverEntries.length > 0 && html`
+                    <div class="req-breakdown-row">
+                      <span class="req-breakdown-label">top mcp servers</span>
+                      <div class="req-breakdown-chips">
+                        ${serverEntries.map(([name, bytes]) => html`
+                          <span class="tool-chip" key=${name} title="${name}: ${bytes}b">${name} ${fmtReqBytes(bytes)}</span>
+                        `)}
+                      </div>
+                    </div>
+                  `}
+                </div>
+              `}
 
               ${hasBd && html`
                 <div class="req-context-viz">

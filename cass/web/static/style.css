@@ -2299,6 +2299,30 @@ mark.search-hl {
   gap: 8px;
   max-width: 100%;
 }
+.req-breakdown {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.req-breakdown-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.req-breakdown-label {
+  min-width: 108px;
+  color: var(--faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-top: 4px;
+}
+.req-breakdown-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 
 .req-metrics {
   display: grid;
