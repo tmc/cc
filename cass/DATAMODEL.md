@@ -140,6 +140,7 @@ A single HTTP request/response to the Anthropic Messages API,
 captured from a Proxyman HAR export.
 
     ID:         SHA256(request_id + timestamp)[:32]
+    Method:     HTTP method used for the request
     Source:     HAR JSON file (Proxyman per-request export)
     Dedup:      source_hash = SHA256(request_id + filename)[:32]
 
