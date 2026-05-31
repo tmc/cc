@@ -129,7 +129,7 @@ the full API.
 
 | Command | Description |
 |---|---|
-| [`cctl`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctl) | Unified control command dispatching to the others (`cctl m` ≡ `cmsg`, `cctl r` ≡ `creplay`, etc.). |
+| [`cctl`](https://pkg.go.dev/github.com/tmc/cc/cmd/cctl) | Unified control command dispatching to the others (`cctl m` ≡ `cmsg`, `cctl r` ≡ `creplay`, `cctl requests` ≡ `cass requests`, etc.). |
 
 Run any binary with `-h` for full flag documentation, or read its
 [godoc](https://pkg.go.dev/github.com/tmc/cc) page.
