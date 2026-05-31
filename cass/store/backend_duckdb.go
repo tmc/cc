@@ -319,9 +319,7 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
 			h.Goals = normalizeGoals(h.Goals)
 		}
-		if skillsJSON != "" {
-			_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
-		}
+		applyHitSkills(&h, skillsJSON)
 		hits = append(hits, h)
 	}
 	if err := rows.Err(); err != nil {

@@ -1079,13 +1079,21 @@ func scanHit(row hitScanner) (cass.Hit, error) {
 		_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
 		h.Goals = normalizeGoals(h.Goals)
 	}
-	if skillsJSON != "" {
-		_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
-	}
+	applyHitSkills(&h, skillsJSON)
 	if statsJSON != "" {
 		applyHitStats(&h, statsJSON)
 	}
 	return h, nil
+}
+
+func applyHitSkills(h *cass.Hit, skillsJSON string) {
+	if h == nil || skillsJSON == "" {
+		return
+	}
+	if json.Unmarshal([]byte(skillsJSON), &h.Skills) != nil {
+		return
+	}
+	h.SkillCount, h.SelectedSkillCount, h.LoadedSkillCount = skillCounts(h.Skills)
 }
 
 func applyHitStats(h *cass.Hit, statsJSON string) {

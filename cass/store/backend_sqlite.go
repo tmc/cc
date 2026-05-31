@@ -294,9 +294,7 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)
 			h.Goals = normalizeGoals(h.Goals)
 		}
-		if skillsJSON != "" {
-			_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
-		}
+		applyHitSkills(&h, skillsJSON)
 		if statsJSON != "" {
 			applyHitStats(&h, statsJSON)
 		}

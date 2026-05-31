@@ -716,6 +716,12 @@ func TestSkillsRoundTrip(t *testing.T) {
 	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE sessions
+		SET skill_count = 99, selected_skill_count = 88, loaded_skill_count = 77
+		WHERE id = ?`, sess.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := s.Search(ctx, cass.SearchRequest{
 		Query:   "skill",
