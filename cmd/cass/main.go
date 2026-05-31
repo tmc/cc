@@ -468,6 +468,9 @@ func printHit(num int, h cass.Hit) {
 	if h.LinesWritten > 0 {
 		stats = append(stats, fmt.Sprintf("%d lines", h.LinesWritten))
 	}
+	if h.SubagentEntries > 0 {
+		stats = append(stats, fmt.Sprintf("mirrors %d/%d", h.SubagentMirroredEntries, h.SubagentEntries))
+	}
 
 	if h.InputTokens > 0 || h.OutputTokens > 0 || h.CacheReads > 0 || h.CacheCreationInputTokens > 0 {
 		var toks []string

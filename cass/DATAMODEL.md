@@ -371,6 +371,12 @@ The mirroring is **nested**: the parent progress entry has its own
 top-level UUID; the subagent UUID is embedded in `data.message.uuid`.
 There is zero overlap at the top-level UUID space.
 
+Cass records mirror coverage in `SessionStats`: sidechain UUID
+candidates, unique mirrored sidechain UUIDs, agent_progress events, and
+unmatched agent_progress events. These counters make the partial parent
+mirror explicit instead of assuming the parent progress stream is a
+complete child transcript.
+
 ### E5: APIRequest —[belongs_to]→ Session
 
     Join:        extractSessionID(apiRequest.metadata.user_id) == Session.ID
@@ -750,9 +756,5 @@ PIDs that become invalid after process exit.
 
 Ranked by value/cost ratio:
 
-1. **Progress mirroring coverage** — quantify how often
-   `agent_progress` messages can be linked back to subagent entries.
-   Low priority unless UI needs entry-level fan-out replay.
-
-2. **PID→It2 mapping durability** — test E7 persistence across
+1. **PID→It2 mapping durability** — test E7 persistence across
    subprocess exit, compaction, resume. Low priority given team infra.

@@ -1083,18 +1083,28 @@ func scanHit(row hitScanner) (cass.Hit, error) {
 		_ = json.Unmarshal([]byte(skillsJSON), &h.Skills)
 	}
 	if statsJSON != "" {
-		var stats cass.SessionStats
-		if json.Unmarshal([]byte(statsJSON), &stats) == nil {
-			h.ToolBreakdown = stats.ToolBreakdown
-			h.Compactions = stats.Compactions
-			h.CacheReads = stats.CacheReads
-			h.CacheCreationInputTokens = stats.CacheCreationInputTokens
-			h.WorkflowCount = stats.WorkflowRuns
-			h.WorkflowAgentCount = stats.WorkflowAgentRuns
-			h.WorkflowTaskOpCount = stats.WorkflowTaskOps
-		}
+		applyHitStats(&h, statsJSON)
 	}
 	return h, nil
+}
+
+func applyHitStats(h *cass.Hit, statsJSON string) {
+	var stats cass.SessionStats
+	if json.Unmarshal([]byte(statsJSON), &stats) != nil {
+		return
+	}
+	h.ToolBreakdown = stats.ToolBreakdown
+	h.Compactions = stats.Compactions
+	h.CacheReads = stats.CacheReads
+	h.CacheCreationInputTokens = stats.CacheCreationInputTokens
+	h.SubagentEntries = stats.SubagentEntries
+	h.SubagentMirroredEntries = stats.SubagentMirroredEntries
+	h.AgentProgressEvents = stats.AgentProgressEvents
+	h.AgentProgressMirrors = stats.AgentProgressMirrors
+	h.AgentProgressUnmatched = stats.AgentProgressUnmatched
+	h.WorkflowCount = stats.WorkflowRuns
+	h.WorkflowAgentCount = stats.WorkflowAgentRuns
+	h.WorkflowTaskOpCount = stats.WorkflowTaskOps
 }
 
 // SessionCount returns the number of indexed sessions.

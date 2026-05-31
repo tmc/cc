@@ -98,6 +98,11 @@ type Hit struct {
 	Sparkline                string `json:"sparkline,omitempty"`
 	Compactions              int    `json:"compactions,omitempty"`
 	SubagentSpawns           int    `json:"subagent_spawns,omitempty"`
+	SubagentEntries          int    `json:"subagent_entries,omitempty"`
+	SubagentMirroredEntries  int    `json:"subagent_mirrored_entries,omitempty"`
+	AgentProgressEvents      int    `json:"agent_progress_events,omitempty"`
+	AgentProgressMirrors     int    `json:"agent_progress_mirrors,omitempty"`
+	AgentProgressUnmatched   int    `json:"agent_progress_unmatched,omitempty"`
 	IT2Sends                 int    `json:"it2_sends,omitempty"`
 	IT2Screens               int    `json:"it2_screens,omitempty"`
 	IT2Splits                int    `json:"it2_splits,omitempty"`

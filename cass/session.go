@@ -118,6 +118,15 @@ type SessionStats struct {
 	SubagentSpawns int `json:"subagent_spawns"`
 	Compactions    int `json:"compactions"` // Context compaction count.
 
+	// Subagent mirroring. Claude Code writes parent progress entries with
+	// data.type="agent_progress" for some child subagent entries. The nested
+	// data.message.uuid is the child entry UUID; it can be joined exactly.
+	SubagentEntries         int `json:"subagent_entries,omitempty"`          // Sidechain entries with UUIDs.
+	SubagentMirroredEntries int `json:"subagent_mirrored_entries,omitempty"` // Unique sidechain UUIDs seen in agent_progress.
+	AgentProgressEvents     int `json:"agent_progress_events,omitempty"`     // Parent progress events of type agent_progress.
+	AgentProgressMirrors    int `json:"agent_progress_mirrors,omitempty"`    // agent_progress events joined to a sidechain UUID.
+	AgentProgressUnmatched  int `json:"agent_progress_unmatched,omitempty"`  // agent_progress events without a known sidechain UUID.
+
 	// it2 interactions.
 	IT2Splits  int `json:"it2_splits"`
 	IT2Sends   int `json:"it2_sends"`   // send-text + send-key.

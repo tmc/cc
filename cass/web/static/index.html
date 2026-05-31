@@ -1093,6 +1093,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
   if (h.files_edited) stats.push(h.files_edited + ' files');
   if (h.lines_written) stats.push(h.lines_written + ' lines');
   if (h.workflow_count) stats.push(h.workflow_count + ' workflow' + (h.workflow_count === 1 ? '' : 's'));
+  if (h.subagent_entries) stats.push('mirrors ' + (h.subagent_mirrored_entries || 0) + '/' + h.subagent_entries);
   if (h.duration_secs) stats.push(fmtDuration(h.duration_secs));
 
   const inTok = h.input_tokens || 0;
@@ -2369,6 +2370,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
             ${hit.goal_count > 0 && html`<span class="hit-goals">${hit.active_goal_count || 0} active goals / ${hit.completed_goal_count || 0} complete</span>`}
             ${detailSkillCount > 0 && html`<span class="hit-skills">${hit.selected_skill_count || 0} selected skills / ${hit.loaded_skill_count || 0} loaded</span>`}
             ${hit.workflow_count > 0 && html`<span class="hit-workflows">${hit.workflow_count} workflow${hit.workflow_count === 1 ? '' : 's'} / ${hit.workflow_agent_count || 0} agents / ${hit.workflow_task_op_count || 0} task ops</span>`}
+            ${hit.subagent_entries > 0 && html`<span>${hit.subagent_mirrored_entries || 0}/${hit.subagent_entries} mirrored</span>`}
           </div>
           ${renderGoalPanel()}
           ${renderSkillPanel()}

@@ -35,6 +35,13 @@ func TestBatchIndexAndSearch(t *testing.T) {
 				{Role: "user", Content: "there's a bug in the auth handler"},
 				{Role: "assistant", Content: "I see the issue in auth.go line 42"},
 			},
+			Stats: cass.SessionStats{
+				SubagentEntries:         4,
+				SubagentMirroredEntries: 3,
+				AgentProgressEvents:     5,
+				AgentProgressMirrors:    3,
+				AgentProgressUnmatched:  2,
+			},
 		},
 		{
 			ID:        "s2",
@@ -130,6 +137,18 @@ func TestBatchIndexAndSearch(t *testing.T) {
 				t.Errorf("first hit %q, want %q", result.Hits[0].SessionID, tt.wantFirst)
 			}
 		})
+	}
+
+	hit, err := s.Session(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hit.SubagentEntries != 4 || hit.SubagentMirroredEntries != 3 {
+		t.Errorf("subagent mirror fields = (%d, %d), want (4, 3)", hit.SubagentEntries, hit.SubagentMirroredEntries)
+	}
+	if hit.AgentProgressEvents != 5 || hit.AgentProgressMirrors != 3 || hit.AgentProgressUnmatched != 2 {
+		t.Errorf("agent progress fields = (%d, %d, %d), want (5, 3, 2)",
+			hit.AgentProgressEvents, hit.AgentProgressMirrors, hit.AgentProgressUnmatched)
 	}
 }
 

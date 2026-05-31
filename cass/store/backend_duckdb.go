@@ -313,16 +313,7 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 		}
 		h.IsTeamLead = isTeamLead
 		if statsJSON != "" {
-			var stats cass.SessionStats
-			if json.Unmarshal([]byte(statsJSON), &stats) == nil {
-				h.ToolBreakdown = stats.ToolBreakdown
-				h.Compactions = stats.Compactions
-				h.CacheReads = stats.CacheReads
-				h.CacheCreationInputTokens = stats.CacheCreationInputTokens
-				h.WorkflowCount = stats.WorkflowRuns
-				h.WorkflowAgentCount = stats.WorkflowAgentRuns
-				h.WorkflowTaskOpCount = stats.WorkflowTaskOps
-			}
+			applyHitStats(&h, statsJSON)
 		}
 		if goalsJSON != "" {
 			_ = json.Unmarshal([]byte(goalsJSON), &h.Goals)

@@ -73,6 +73,7 @@ var teammateSummaryPattern = regexp.MustCompile(`<teammate-message\s+teammate_id
 func ExtractStats(entries []cc.Entry) cass.SessionStats {
 	var s cass.SessionStats
 	s.ToolBreakdown = make(map[string]int)
+	countSubagentMirrors(entries, &s)
 
 	filesRead := make(map[string]bool)
 	filesWritten := make(map[string]bool)
@@ -213,6 +214,48 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 
 	s.Sparkline = buildSparkline(entries)
 	return s
+}
+
+func countSubagentMirrors(entries []cc.Entry, s *cass.SessionStats) {
+	subagentUUIDs := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsSidechain && e.UUID != "" {
+			subagentUUIDs[e.UUID] = true
+		}
+	}
+	s.SubagentEntries = len(subagentUUIDs)
+
+	mirrored := make(map[string]bool)
+	for _, e := range entries {
+		if e.Type != "progress" || len(e.Data) == 0 {
+			continue
+		}
+		uuid, ok := agentProgressMessageUUID(e.Data)
+		if !ok {
+			continue
+		}
+		s.AgentProgressEvents++
+		if uuid != "" && subagentUUIDs[uuid] {
+			s.AgentProgressMirrors++
+			mirrored[uuid] = true
+		} else {
+			s.AgentProgressUnmatched++
+		}
+	}
+	s.SubagentMirroredEntries = len(mirrored)
+}
+
+func agentProgressMessageUUID(raw json.RawMessage) (string, bool) {
+	var data struct {
+		Type    string `json:"type"`
+		Message struct {
+			UUID string `json:"uuid"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(raw, &data) != nil || data.Type != "agent_progress" {
+		return "", false
+	}
+	return strings.TrimSpace(data.Message.UUID), true
 }
 
 // ClassifyTeamRole determines whether a session is a team lead, team member,

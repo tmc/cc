@@ -190,6 +190,75 @@ func TestExtractStats_TeamMessages(t *testing.T) {
 	}
 }
 
+func TestExtractStats_AgentProgressMirrors(t *testing.T) {
+	ts := time.Date(2026, 2, 14, 21, 39, 0, 0, time.UTC)
+	mirroredData, _ := json.Marshal(map[string]any{
+		"type":    "agent_progress",
+		"agentId": "agent-a",
+		"message": map[string]any{
+			"uuid": "sub-1",
+			"type": "assistant",
+		},
+	})
+	orphanData, _ := json.Marshal(map[string]any{
+		"type":    "agent_progress",
+		"agentId": "agent-a",
+		"message": map[string]any{
+			"uuid": "missing",
+			"type": "assistant",
+		},
+	})
+	hookData, _ := json.Marshal(map[string]any{
+		"type":      "hook_progress",
+		"hookEvent": "PostToolUse",
+	})
+
+	entries := []cc.Entry{
+		{
+			Type:        "assistant",
+			UUID:        "sub-1",
+			IsSidechain: true,
+			AgentID:     "agent-a",
+			Timestamp:   ts,
+			Message: &cc.Message{
+				Role:    "assistant",
+				Content: json.RawMessage(`[{"type":"text","text":"ok"}]`),
+			},
+		},
+		{
+			Type:        "user",
+			UUID:        "sub-2",
+			IsSidechain: true,
+			AgentID:     "agent-a",
+			Timestamp:   ts.Add(time.Second),
+			Message: &cc.Message{
+				Role:    "user",
+				Content: json.RawMessage(`"next"`),
+			},
+		},
+		{Type: "progress", UUID: "p1", Timestamp: ts.Add(2 * time.Second), Data: mirroredData},
+		{Type: "progress", UUID: "p2", Timestamp: ts.Add(3 * time.Second), Data: orphanData},
+		{Type: "progress", UUID: "p3", Timestamp: ts.Add(4 * time.Second), Data: hookData},
+	}
+
+	stats := ExtractStats(entries)
+	if stats.SubagentEntries != 2 {
+		t.Errorf("SubagentEntries = %d, want 2", stats.SubagentEntries)
+	}
+	if stats.SubagentMirroredEntries != 1 {
+		t.Errorf("SubagentMirroredEntries = %d, want 1", stats.SubagentMirroredEntries)
+	}
+	if stats.AgentProgressEvents != 2 {
+		t.Errorf("AgentProgressEvents = %d, want 2", stats.AgentProgressEvents)
+	}
+	if stats.AgentProgressMirrors != 1 {
+		t.Errorf("AgentProgressMirrors = %d, want 1", stats.AgentProgressMirrors)
+	}
+	if stats.AgentProgressUnmatched != 1 {
+		t.Errorf("AgentProgressUnmatched = %d, want 1", stats.AgentProgressUnmatched)
+	}
+}
+
 func TestExtractTeamLinks(t *testing.T) {
 	ts := time.Date(2026, 2, 14, 21, 39, 0, 0, time.UTC)
 
