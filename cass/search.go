@@ -147,6 +147,7 @@ type Hit struct {
 	// parent row rather than shown as separate child rows.
 	WorkflowMatchCount      int      `json:"workflow_match_count,omitempty"`
 	MatchedWorkflowIDs      []string `json:"matched_workflow_ids,omitempty"`
+	MatchedWorkflowNames    []string `json:"matched_workflow_names,omitempty"`
 	MatchedWorkflowAgentIDs []string `json:"matched_workflow_agent_ids,omitempty"`
 	CollapsedChildren       bool     `json:"collapsed_children,omitempty"`
 

@@ -1513,6 +1513,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
             matched ${h.workflow_match_count || (h.matched_workflow_ids || []).length} agent${(h.workflow_match_count || 1) === 1 ? '' : 's'}
           </span>
         `}
+        ${renderTextBadges(h.matched_workflow_names, 2, 'matched workflow')}
         <span class="hit-title" title=${h.title && h.title !== title ? h.title : ''}>${title}</span>
         ${h.sparkline && html`<span class="hit-sparkline">${h.sparkline}</span>`}
       </div>

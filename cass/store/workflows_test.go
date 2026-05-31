@@ -687,6 +687,9 @@ func TestSearchSummaryFoldsWorkflowMatch(t *testing.T) {
 	if len(h.MatchedWorkflowIDs) != 1 || h.MatchedWorkflowIDs[0] != "wf_zzz" {
 		t.Fatalf("matched workflow ids = %v, want [wf_zzz]", h.MatchedWorkflowIDs)
 	}
+	if got, want := h.MatchedWorkflowNames, []string{"ccmagicreview"}; !slices.Equal(got, want) {
+		t.Fatalf("matched workflow names = %#v, want %#v", got, want)
+	}
 	if h.WorkflowMatchCount != 5 {
 		t.Fatalf("workflow_match_count = %d, want 5", h.WorkflowMatchCount)
 	}

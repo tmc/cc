@@ -914,6 +914,7 @@ func (s *DB) foldWorkflowMatches(ctx context.Context, hits []cass.Hit, query str
 		runMatched := termsMatch(strings.ToLower(runID+" "+name+" "+desc), terms)
 		if runMatched || matchedAgents > 0 {
 			h.MatchedWorkflowIDs = append(h.MatchedWorkflowIDs, runID)
+			h.MatchedWorkflowNames = append(h.MatchedWorkflowNames, firstNonEmptyStr(name, runID))
 			h.CollapsedChildren = true
 			if matchedAgents > 0 {
 				h.WorkflowMatchCount += matchedAgents
@@ -1014,6 +1015,7 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 		runMatched := workflowMatches(w, terms)
 		if runMatched || matchedAgents > 0 {
 			h.MatchedWorkflowIDs = append(h.MatchedWorkflowIDs, w.RunID)
+			h.MatchedWorkflowNames = append(h.MatchedWorkflowNames, firstNonEmptyStr(w.Name, w.RunID))
 			h.CollapsedChildren = true
 			if matchedAgents > 0 {
 				h.WorkflowMatchCount += matchedAgents
