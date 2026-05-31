@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,6 +111,40 @@ func TestOutputAggregatesSessionsInTextMode(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("text output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestCharacteristicsUsageMentionsSubcommand(t *testing.T) {
+	oldUsage := flag.Usage
+	t.Cleanup(func() { flag.Usage = oldUsage })
+
+	configureUsage("characteristics")
+	got := captureStderr(t, func() {
+		flag.Usage()
+	})
+	for _, want := range []string{
+		"ccstats characteristics [flags] [file...]",
+		"Reports cross-session usage characteristics",
+		"-unit string",
+		"-verbose",
+		"ccstats characteristics -since 24h",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("characteristics usage missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestDefaultUsageMentionsCharacteristicsSubcommand(t *testing.T) {
+	oldUsage := flag.Usage
+	t.Cleanup(func() { flag.Usage = oldUsage })
+
+	configureUsage("sessions")
+	got := captureStderr(t, func() {
+		flag.Usage()
+	})
+	if !strings.Contains(got, "ccstats characteristics -since 24h") {
+		t.Fatalf("default usage missing characteristics example:\n%s", got)
 	}
 }
 
@@ -383,5 +418,28 @@ func captureStdout(t *testing.T, fn func() error) string {
 	if runErr != nil {
 		t.Fatalf("operation failed: %v", runErr)
 	}
+	return buf.String()
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+
+	fn()
+
+	w.Close()
+	os.Stderr = old
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
 	return buf.String()
 }

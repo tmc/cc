@@ -25,13 +25,6 @@ var (
 	longRunningThresholdFlag = flag.Duration("long-running-threshold", 8*time.Hour, "Session duration threshold for the long-running characteristic")
 )
 
-func init() {
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage:\n  ccstats [flags] [file...]\n  ccstats characteristics [flags] [file...]\n\nFlags:\n")
-		flag.PrintDefaults()
-	}
-}
-
 // sessionStats holds aggregated statistics for a session.
 type sessionStats struct {
 	SessionID string `json:"session_id,omitempty"`
@@ -67,6 +60,7 @@ func main() {
 		mode = "characteristics"
 		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 	}
+	configureUsage(mode)
 	flag.Parse()
 	if err := run(mode); err != nil {
 		fmt.Fprintf(os.Stderr, "ccstats: %v\n", err)
@@ -105,6 +99,36 @@ func run(mode string) error {
 	})
 
 	return output(allStats)
+}
+
+func configureUsage(mode string) {
+	flag.Usage = func() {
+		switch mode {
+		case "characteristics":
+			fmt.Fprintln(os.Stderr, "Usage:")
+			fmt.Fprintln(os.Stderr, "  ccstats characteristics [flags] [file...]")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Reports cross-session usage characteristics instead of per-session stats.")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Flags:")
+			flag.PrintDefaults()
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Examples:")
+			fmt.Fprintln(os.Stderr, "  ccstats characteristics -since 24h ~/.claude/projects/*/*.jsonl")
+			fmt.Fprintln(os.Stderr, "  ccstats characteristics -since 7d -format json")
+		default:
+			fmt.Fprintln(os.Stderr, "Usage:")
+			fmt.Fprintln(os.Stderr, "  ccstats [flags] [file...]")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Flags:")
+			flag.PrintDefaults()
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Examples:")
+			fmt.Fprintln(os.Stderr, "  ccstats ~/.claude/projects/*/44fc759a*.jsonl")
+			fmt.Fprintln(os.Stderr, "  ccstats -since 16h -format json")
+			fmt.Fprintln(os.Stderr, "  ccstats characteristics -since 24h")
+		}
+	}
 }
 
 func resolveFiles() ([]string, error) {
