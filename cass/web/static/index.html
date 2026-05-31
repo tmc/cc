@@ -4631,7 +4631,7 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
     if (detailLoading) return html`<div class="loading">loading ${selectedName}...</div>`;
     if (!detail) return html`
       <div>
-        <button class="team-detail-back" onClick=${() => setSelectedName('')}>back</button>
+        <button class="team-detail-back" onClick=${() => setSelectedName('')}>Back</button>
         <div class="empty">Team not found: ${selectedName}</div>
       </div>
     `;
@@ -4651,7 +4651,7 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
     return html`
       <div>
         <div class="team-detail-header">
-          <button class="team-detail-back" onClick=${() => setSelectedName('')}>back</button>
+          <button class="team-detail-back" onClick=${() => setSelectedName('')}>Back</button>
           <span class="team-detail-name">${selectedName}</span>
           <span class="team-detail-desc">${config.description || ''}</span>
         </div>
@@ -4842,7 +4842,7 @@ function InboxViewer({ teamName, inboxes, members }) {
         <input placeholder="send message to ${selectedAgent}..." value=${msgText}
           onInput=${e => setMsgText(e.target.value)}
           onKeyDown=${e => { if (e.key === 'Enter') send(); }} />
-        <button onClick=${send} disabled=${sending}>${sending ? '...' : 'send'}</button>
+        <button onClick=${send} disabled=${sending}>${sending ? '...' : 'Send'}</button>
       </div>
     </div>
   `;
