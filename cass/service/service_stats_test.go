@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/cass/store"
 )
 
 // newStatsTestService builds a service with n indexed sessions for exercising
@@ -84,5 +85,34 @@ func TestAggregateStatsContextPerCaller(t *testing.T) {
 	// A subsequent live call must still succeed.
 	if _, err := svc.AggregateStats(context.Background(), time.Time{}, time.Time{}); err != nil {
 		t.Fatalf("live caller after cancelled one: %v", err)
+	}
+}
+
+// TestStatsIncludesAPIRequestCount verifies the basic stats contract carries
+// the request count that the UI surface now expects.
+func TestStatsIncludesAPIRequestCount(t *testing.T) {
+	db, err := store.New(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	if err := db.BatchIndexRequests(context.Background(), []cass.APIRequest{{
+		ID:        "req-1",
+		SessionID: "session-1",
+		RequestID: "request-1",
+		Timestamp: 100,
+		Method:    "POST",
+	}}); err != nil {
+		t.Fatalf("BatchIndexRequests: %v", err)
+	}
+
+	svc := &Service{store: db}
+	stats, err := svc.Stats(context.Background())
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if got := stats["api_request_count"]; got != 1 {
+		t.Fatalf("api_request_count = %#v, want 1", got)
 	}
 }

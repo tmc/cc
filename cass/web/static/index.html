@@ -5245,7 +5245,6 @@ function UsagePanel({ urlParams, updateParams, navVersion }) {
 function StatsPanel({ urlParams, updateParams, navVersion }) {
   const [basic, setBasic] = useState(null);
   const [agg, setAgg] = useState(null);
-  const [usage, setUsage] = useState(null);
   const [since, setSinceRaw] = useState(urlParams.since || '');
   const [indexing, setIndexing] = useState(false);
   const loadedAt = useRef(0);
@@ -5266,18 +5265,13 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
     if (loadingRef.current) return;
     loadingRef.current = true;
     try {
-      const [b, a, u] = await Promise.all([
+      const [b, a] = await Promise.all([
         api('stats'),
         api('stats?aggregate=true' + (since ? '&since=' + since : '')),
-        api('usage?since=' + (since || '0s')).catch(e => {
-          console.error('usage:', e);
-          return { api_request_count: 0 };
-        }),
       ]);
       loadedAt.current = Date.now();
       setBasic(b);
       setAgg(a);
-      setUsage(u);
     } catch (e) { console.error('stats:', e); }
     finally { loadingRef.current = false; }
   }, [since]);
@@ -5296,7 +5290,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
     setIndexing(false);
   }
 
-  if (!basic || !agg || !usage) return html`<div class="loading">Loading stats...</div>`;
+  if (!basic || !agg) return html`<div class="loading">Loading stats...</div>`;
 
   const lastIdx = basic.last_indexed
     ? new Date(parseInt(basic.last_indexed) * 1000).toLocaleString()
@@ -5325,8 +5319,6 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
     ? Object.entries(agg.top_skills).sort((a, b) => b[1] - a[1]).slice(0, 10)
     : [];
   const skillMax = skillEntries.length > 0 ? skillEntries[0][1] : 1;
-  const requestCount = usage.api_request_count || 0;
-
   const timePresets = [
     { label: 'All', value: '' }, { label: '24h', value: '24h' },
     { label: '7d', value: '168h' }, { label: '30d', value: '720h' },
@@ -5351,7 +5343,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('sessions', fmtNum(agg.sessions), agg.agents + (agg.agents === 1 ? ' Agent' : ' Agents') + ', ' + agg.workspaces + (agg.workspaces === 1 ? ' Workspace' : ' Workspaces'))}
         ${card('Tool calls', fmtNum(agg.tool_calls))}
         ${card('total tokens', fmtNum(agg.total_tokens), fmtNum(agg.input_tokens) + ' in / ' + fmtNum(agg.output_tokens) + ' out (JSONL undercounts output)')}
-        ${card('API requests', fmtNum(requestCount))}
+        ${card('API requests', fmtNum(basic.api_request_count || 0))}
         ${card('turns', fmtNum(agg.turns))}
         ${card('files', fmtNum(agg.files_read + agg.files_written + agg.files_edited), fmtNum(agg.files_read) + ' read · ' + fmtNum(agg.files_edited) + ' edited · ' + fmtNum(agg.files_written) + ' written')}
         ${card('lines written', fmtNum(agg.lines_written))}

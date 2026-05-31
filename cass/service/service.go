@@ -315,9 +315,14 @@ func (s *Service) Stats(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 	lastIndexed, _ := s.store.Meta(ctx, "last_indexed_at")
+	reqCount, err := s.store.APIRequestCount(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
-		"session_count": count,
-		"last_indexed":  lastIndexed,
+		"session_count":     count,
+		"last_indexed":      lastIndexed,
+		"api_request_count": reqCount,
 	}, nil
 }
 
