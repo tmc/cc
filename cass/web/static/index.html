@@ -2136,6 +2136,7 @@ function workflowAgentFocusMatch(focus, wf, ri, agent, agentIndex, key) {
 
 function WorkflowsTab({ workflows, focusAgent }) {
   const [expanded, setExpanded] = useState(null); // "<runIdx>:<agentId>"
+  const tabRef = useRef(null);
 
   useEffect(() => {
     if (!focusAgent || !workflows || workflows.length === 0) return;
@@ -2153,12 +2154,21 @@ function WorkflowsTab({ workflows, focusAgent }) {
     }
   }, [focusAgent, workflows]);
 
+  useEffect(() => {
+    if (!focusAgent) return;
+    const raf = requestAnimationFrame(() => {
+      const row = tabRef.current?.querySelector('.wf-agent-row.focused');
+      if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [focusAgent, expanded]);
+
   if (!workflows || workflows.length === 0) {
     return html`<div class="empty" style="margin-top:20px">no workflow runs in this session</div>`;
   }
 
   return html`
-    <div class="wf-tab">
+    <div class="wf-tab" ref=${tabRef}>
       ${workflows.map((wf, ri) => {
         const groups = workflowPhaseGroups(wf);
         return html`
