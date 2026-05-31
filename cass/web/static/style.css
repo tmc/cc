@@ -2391,6 +2391,21 @@ mark.search-hl {
   line-height: 1.45;
 }
 .wf-run-desc { font-size: 11px; color: var(--dim); margin: 4px 0 6px; }
+.wf-run-submeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 2px 0 6px;
+  color: var(--faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.wf-run-submeta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
 .wf-run-extra {
   display: flex;
   flex-wrap: wrap;

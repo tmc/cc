@@ -2238,6 +2238,12 @@ function WorkflowsTab({ workflows, focusAgent, onFocusAgentChange }) {
             </div>
             ${wf.summary && html`<div class="wf-run-summary">${wf.summary}</div>`}
             ${wf.description && html`<div class="wf-run-desc">${wf.description}</div>`}
+            ${(wf.started_at || wf.run_id) && html`
+              <div class="wf-run-submeta">
+                ${wf.started_at && html`<span>${relTime(wf.started_at)}${wf.completed_at ? ' → ' + relTime(wf.completed_at) : ''}</span>`}
+                ${wf.run_id && html`<span title=${wf.run_id}>run ${wf.run_id}</span>`}
+              </div>
+            `}
             ${(wf.task_id || wf.script_path || wf.transcript_dir || wf.source_path) && html`
               <div class="wf-run-extra">
                 ${wf.task_id && html`<span>task ${wf.task_id}</span>`}
