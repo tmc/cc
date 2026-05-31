@@ -2256,6 +2256,14 @@ mark.search-hl {
   font-size: 9px;
   border-radius: 2px;
 }
+.req-family-badge {
+  font-weight: 600;
+  color: var(--cyan);
+  border: 1px solid var(--cyan);
+  padding: 1px 4px;
+  font-size: 9px;
+  border-radius: 2px;
+}
 .req-purpose-badge {
   font-weight: 600;
   color: var(--magenta);
