@@ -19,15 +19,17 @@ var (
 	workflowMetaRE         = regexp.MustCompile(`(?m)\b(name|description)\s*:\s*['"]([^'"]+)['"]`)
 	workflowPhaseRE        = regexp.MustCompile(`(?s)\{\s*title\s*:\s*['"]([^'"]+)['"]\s*,\s*detail\s*:\s*['"]([^'"]*)['"]\s*\}`)
 	workflowLensKeyRE      = regexp.MustCompile(`\bkey\s*:\s*['"]([^'"]+)['"]`)
-	workflowLabelKeyRE     = regexp.MustCompile("label\\s*:\\s*`([^`]*\\$\\{l\\.key\\}[^`]*)`\\s*,\\s*phase\\s*:\\s*['\"]([^'\"]+)['\"]")
-	workflowLabelLiteralRE = regexp.MustCompile(`label\s*:\s*['"]([^'"]+)['"]\s*,\s*phase\s*:\s*['"]([^'"]+)['"]`)
+	workflowLabelKeyRE     = regexp.MustCompile("label\\s*:\\s*`([^`]*\\$\\{l\\.key\\}[^`]*)`\\s*,\\s*phase\\s*:\\s*['\"]([^'\"]+)['\"]([^}]*)")
+	workflowLabelLiteralRE = regexp.MustCompile(`label\s*:\s*['"]([^'"]+)['"]\s*,\s*phase\s*:\s*['"]([^'"]+)['"]([^}]*)`)
+	workflowAgentTypeRE    = regexp.MustCompile(`agentType\s*:\s*['"]([^'"]+)['"]`)
 	workflowStressLensRE   = regexp.MustCompile(`reviewer using the "([^"]+)" lens`)
 	workflowLensTitleRE    = regexp.MustCompile(`(?m)^LENS:\s*([^\n.]+)`)
 )
 
 type workflowAgentSpec struct {
-	Label string
-	Phase string
+	Label     string
+	Phase     string
+	AgentType string
 }
 
 type workflowScriptInfo struct {
@@ -293,15 +295,23 @@ func workflowScriptInfoFromScript(script string) workflowScriptInfo {
 		format := strings.ReplaceAll(m[1], "${l.key}", "%s")
 		for _, key := range info.LensKeys {
 			info.AgentSpecs = append(info.AgentSpecs, workflowAgentSpec{
-				Label: strings.ReplaceAll(format, "%s", key),
-				Phase: m[2],
+				Label:     strings.ReplaceAll(format, "%s", key),
+				Phase:     m[2],
+				AgentType: workflowAgentType(m[3]),
 			})
 		}
 	}
 	for _, m := range workflowLabelLiteralRE.FindAllStringSubmatch(script, -1) {
-		info.AgentSpecs = append(info.AgentSpecs, workflowAgentSpec{Label: m[1], Phase: m[2]})
+		info.AgentSpecs = append(info.AgentSpecs, workflowAgentSpec{Label: m[1], Phase: m[2], AgentType: workflowAgentType(m[3])})
 	}
 	return info
+}
+
+func workflowAgentType(optionsTail string) string {
+	if m := workflowAgentTypeRE.FindStringSubmatch(optionsTail); len(m) == 2 {
+		return m[1]
+	}
+	return ""
 }
 
 // readWorkflowAgents reads per-agent metadata for the fan-out transcripts in a
@@ -380,9 +390,12 @@ func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo) []cass.Wo
 		if meta := readWorkflowAgentMeta(strings.TrimSuffix(path, ".jsonl") + ".meta.json"); meta.AgentType != "" {
 			a.AgentType = meta.AgentType
 		}
-		if spec := inferWorkflowAgentSpec(entries, script, i); spec.Label != "" || spec.Phase != "" {
+		if spec := inferWorkflowAgentSpec(entries, script, i); spec.Label != "" || spec.Phase != "" || spec.AgentType != "" {
 			a.Label = spec.Label
 			a.Phase = spec.Phase
+			if a.AgentType == "" {
+				a.AgentType = spec.AgentType
+			}
 		}
 		agents = append(agents, a)
 	}
@@ -441,11 +454,23 @@ func readWorkflowAgentMeta(path string) workflowAgentMeta {
 
 func inferWorkflowAgentSpec(entries []cc.Entry, script workflowScriptInfo, index int) workflowAgentSpec {
 	prompt := workflowAgentPrompt(entries)
-	if spec := workflowAgentSpecFromPrompt(prompt, script.LensKeys); spec.Label != "" || spec.Phase != "" {
-		return spec
+	if fromPrompt := workflowAgentSpecFromPrompt(prompt, script.LensKeys); fromPrompt.Label != "" || fromPrompt.Phase != "" {
+		if fromScript := workflowAgentSpecByName(script.AgentSpecs, fromPrompt); fromScript.AgentType != "" {
+			fromPrompt.AgentType = fromScript.AgentType
+		}
+		return fromPrompt
 	}
 	if index >= 0 && index < len(script.AgentSpecs) {
 		return script.AgentSpecs[index]
+	}
+	return workflowAgentSpec{}
+}
+
+func workflowAgentSpecByName(specs []workflowAgentSpec, want workflowAgentSpec) workflowAgentSpec {
+	for _, spec := range specs {
+		if spec.Label == want.Label && spec.Phase == want.Phase {
+			return spec
+		}
 	}
 	return workflowAgentSpec{}
 }

@@ -85,9 +85,9 @@ const LENSES = [
   { key: 'custom-jaccl', prompt: 'LENS: CUSTOM/HANDWRITTEN APIs (esp. JACCL).' },
 ]
 phase('Lenses')
-agent(l.prompt, { label: ` + "`" + `lens:${l.key}` + "`" + `, phase: 'Lenses', agentType: 'Explore' })
-agent('stress', { label: ` + "`" + `stress-strong:${l.key}` + "`" + `, phase: 'Stress', agentType: 'Explore' })
-agent('stress', { label: ` + "`" + `stress-weak:${l.key}` + "`" + `, phase: 'Stress', agentType: 'Explore' })
+agent(l.prompt, { label: ` + "`" + `lens:${l.key}` + "`" + `, phase: 'Lenses', schema: LENS_SCHEMA, agentType: 'Explore' })
+agent('stress', { label: ` + "`" + `stress-strong:${l.key}` + "`" + `, phase: 'Stress', schema: VERDICT_SCHEMA, agentType: 'Explore' })
+agent('stress', { label: ` + "`" + `stress-weak:${l.key}` + "`" + `, phase: 'Stress', schema: VERDICT_SCHEMA, agentType: 'Explore' })
 phase('Synthesize')
 agent('synth', { label: 'synthesize', phase: 'Synthesize' })
 `
@@ -97,6 +97,10 @@ agent('synth', { label: 'synthesize', phase: 'Synthesize' })
 	}
 	if len(info.AgentSpecs) != 7 {
 		t.Fatalf("agent specs = %d, want 7", len(info.AgentSpecs))
+	}
+	if info.AgentSpecs[0].AgentType != "Explore" || info.AgentSpecs[2].AgentType != "Explore" {
+		t.Fatalf("agent types = %q, %q, want Explore",
+			info.AgentSpecs[0].AgentType, info.AgentSpecs[2].AgentType)
 	}
 
 	writeWorkflowAgentTestFile(t, filepath.Join(dir, "agent-b.jsonl"),
@@ -134,7 +138,7 @@ LENS: CUSTOM/HANDWRITTEN APIs (esp. JACCL). Decide.`)
 		status    string
 		agentType string
 	}{
-		{0, "b", "stress-strong:architecture", "Stress", "running", ""},
+		{0, "b", "stress-strong:architecture", "Stress", "running", "Explore"},
 		{1, "a", "lens:custom-jaccl", "Lenses", "completed", "Explore"},
 		{2, "c", "synthesize", "Synthesize", "completed", ""},
 	}
