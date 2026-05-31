@@ -660,6 +660,61 @@ func TestBatchIndexRequestsBuildsArtifactMappings(t *testing.T) {
 	}
 }
 
+func TestEmptyClaudeMappingDoesNotAttachUnlinkedRequests(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sess := cass.Session{
+		ID:         "codex-session",
+		Agent:      "codex-cli",
+		Title:      "Codex mapped only by terminal",
+		Workspace:  "/work/codex",
+		SourcePath: "/tmp/codex.jsonl",
+		StartedAt:  time.Unix(100, 0),
+		Metadata:   map[string]any{"iterm_session": "ITERM-1"},
+		Messages:   []cass.Message{{Role: "user", Content: "hello"}},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BatchIndexRequests(ctx, []cass.APIRequest{
+		{
+			ID:          "unlinked",
+			RequestID:   "r-unlinked",
+			Timestamp:   110,
+			SourceHash:  "unlinked",
+			Model:       "claude-sonnet-4-6",
+			ModelFamily: "sonnet",
+		},
+		{
+			ID:           "terminal-linked",
+			RequestID:    "r-terminal",
+			Timestamp:    111,
+			IT2SessionID: "codex-session",
+			SourceHash:   "terminal-linked",
+			Model:        "claude-sonnet-4-6",
+			ModelFamily:  "sonnet",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hit, err := s.Session(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hit.APIRequestCount != 1 {
+		t.Fatalf("APIRequestCount = %d, want only terminal-linked request", hit.APIRequestCount)
+	}
+	reqs, err := s.QueryRequests(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reqs) != 1 || reqs[0].ID != "terminal-linked" {
+		t.Fatalf("QueryRequests = %+v, want only terminal-linked request", reqs)
+	}
+}
+
 func TestSkillsRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

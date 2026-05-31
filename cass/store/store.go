@@ -22,7 +22,7 @@ type DB struct {
 
 const hitStatsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goals_json, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count`
 
-const hitAPIRequestCountCol = `(SELECT count(*) FROM api_requests ar WHERE ar.session_id = s.id OR ar.session_id IN (SELECT m.claude_session FROM session_mapping m WHERE m.cass_session = s.id) OR (ar.session_id = '' AND ar.it2_session_id = s.id))`
+const hitAPIRequestCountCol = `(SELECT count(*) FROM api_requests ar WHERE ar.session_id = s.id OR ar.session_id IN (SELECT m.claude_session FROM session_mapping m WHERE m.cass_session = s.id AND m.claude_session <> '') OR (ar.session_id = '' AND ar.it2_session_id = s.id))`
 
 const skillsJSONPresentExpr = `skills_json <> '' AND skills_json <> '[]'`
 
@@ -2342,7 +2342,7 @@ func (s *DB) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIReq
 			context_breakdown_json
 		FROM api_requests
 		WHERE session_id = ?
-			OR session_id IN (SELECT claude_session FROM session_mapping WHERE cass_session = ?)
+			OR session_id IN (SELECT claude_session FROM session_mapping WHERE cass_session = ? AND claude_session <> '')
 			OR (session_id = '' AND it2_session_id = ?)
 		ORDER BY timestamp
 	`, sessionID, sessionID, sessionID)
