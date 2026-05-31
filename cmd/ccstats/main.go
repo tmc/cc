@@ -18,6 +18,7 @@ import (
 var (
 	sinceFlag                = flag.String("since", "", "Find sessions modified within duration (e.g. 16h, 7d)")
 	formatFlag               = flag.String("format", "text", "Output format: text, json")
+	redactFlag               = flag.Bool("redact", false, "Redact session identifiers and file paths from JSON output")
 	verboseFlag              = flag.Bool("verbose", false, "Include additional usage characteristics")
 	unitFlag                 = flag.String("unit", "cost", "Characteristics weighting unit: cost, tokens, requests")
 	parallelWindowFlag       = flag.Duration("parallel-window", 2*time.Minute, "Parallelism lookback window")
@@ -28,7 +29,7 @@ var (
 // sessionStats holds aggregated statistics for a session.
 type sessionStats struct {
 	SessionID string `json:"session_id,omitempty"`
-	File      string `json:"file"`
+	File      string `json:"file,omitempty"`
 	Slug      string `json:"slug,omitempty"`
 	Model     string `json:"model,omitempty"`
 
@@ -243,6 +244,9 @@ func statsForFile(path string) (sessionStats, error) {
 
 func output(stats []sessionStats) error {
 	if *formatFlag == "json" {
+		if *redactFlag {
+			stats = redactSessionStats(stats)
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(stats)
@@ -316,6 +320,16 @@ func output(stats []sessionStats) error {
 		}
 	}
 	return nil
+}
+
+func redactSessionStats(stats []sessionStats) []sessionStats {
+	out := make([]sessionStats, len(stats))
+	copy(out, stats)
+	for i := range out {
+		out[i].SessionID = ""
+		out[i].File = ""
+	}
+	return out
 }
 
 func fmtTokens(n int) string {

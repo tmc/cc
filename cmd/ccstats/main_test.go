@@ -116,6 +116,44 @@ func TestOutputAggregatesSessionsInTextMode(t *testing.T) {
 	}
 }
 
+func TestOutputRedactsJSON(t *testing.T) {
+	oldFormat, oldRedact := *formatFlag, *redactFlag
+	t.Cleanup(func() {
+		*formatFlag = oldFormat
+		*redactFlag = oldRedact
+	})
+	*formatFlag = "json"
+	*redactFlag = true
+
+	stats := []sessionStats{
+		{
+			SessionID:         "session-123",
+			File:              "/Users/tmc/.claude/projects/x/session.jsonl",
+			Slug:              "visible-slug",
+			InputTokens:       111,
+			OutputTokens:      22,
+			CacheReadTokens:   3,
+			CacheCreateTokens: 7,
+			UserMessages:      1,
+			AsstMessages:      1,
+			TotalTool:         1,
+			Duration:          2 * time.Minute,
+			Compactions:       1,
+			ToolUses:          map[string]int{"Bash": 1},
+		},
+	}
+
+	got := captureStdout(t, func() error {
+		return output(stats)
+	})
+	if strings.Contains(got, "\"session_id\"") || strings.Contains(got, "/Users/tmc/.claude/projects/") {
+		t.Fatalf("redacted JSON leaked identifiers:\n%s", got)
+	}
+	if !strings.Contains(got, "\"slug\": \"visible-slug\"") {
+		t.Fatalf("redacted JSON dropped non-sensitive fields unexpectedly:\n%s", got)
+	}
+}
+
 func TestCharacteristicsUsageMentionsSubcommand(t *testing.T) {
 	oldUsage := flag.Usage
 	t.Cleanup(func() { flag.Usage = oldUsage })
