@@ -1424,10 +1424,21 @@ function entryMatchesQuery(entry, query) {
 // --- Agents Tab ---
 
 function AgentStatusIcon({ status }) {
-  if (status === 'completed') return html`<span class="agent-status completed" title="completed">\u2713</span>`;
-  if (status === 'error') return html`<span class="agent-status error" title="error">\u2717</span>`;
-  if (status === 'starting') return html`<span class="agent-status starting" title="starting">\u2026</span>`;
-  return html`<span class="agent-status running" title="running"><span class="streaming-dot"></span></span>`;
+  const s = normalizedAgentStatus(status);
+  if (s === 'completed') return html`<span class="agent-status completed" title=${status || 'completed'}>\u2713</span>`;
+  if (s === 'error') return html`<span class="agent-status error" title=${status || 'error'}>\u2717</span>`;
+  if (s === 'starting') return html`<span class="agent-status starting" title=${status || 'starting'}>\u2026</span>`;
+  if (s === 'running') return html`<span class="agent-status running" title=${status || 'running'}><span class="streaming-dot"></span></span>`;
+  return html`<span class="agent-status unknown" title=${status || 'unknown'}>?</span>`;
+}
+
+function normalizedAgentStatus(status) {
+  const s = (status || '').toLowerCase();
+  if (s === 'completed' || s === 'complete' || s === 'succeeded' || s === 'success') return 'completed';
+  if (s === 'error' || s === 'failed' || s === 'killed' || s === 'cancelled' || s === 'canceled') return 'error';
+  if (s === 'starting' || s === 'pending' || s === 'queued') return 'starting';
+  if (s === 'running' || s === 'active') return 'running';
+  return 'unknown';
 }
 
 function workflowAgentAliases(workflows) {
@@ -1802,6 +1813,11 @@ function WorkflowAgentTranscript({ sourcePath }) {
       .filter(block => !!block.text);
   }
 
+  function roleClass(role) {
+    if (role === 'user' || role === 'assistant' || role === 'result') return role;
+    return 'tool';
+  }
+
   const renderableEntries = entries
     .map((entry, idx) => ({ entry, idx, blocks: entryBlocks(entry) }))
     .filter(item => item.blocks.length > 0);
@@ -1823,7 +1839,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
         <div class="wf-agent-msg" key=${entryKey(item.entry) || item.idx}>
           ${item.blocks.map((block, bi) => html`
             <div class="wf-agent-block ${block.isError ? 'error' : ''}" key=${bi}>
-              <span class="wf-agent-role ${block.role}">${block.role}</span>
+              <span class="wf-agent-role ${roleClass(block.role)}">${block.role}</span>
               <${AnsiContent} text=${block.text} maxLen=${1200} cls=${''} searchQuery=${''} />
             </div>
           `)}
@@ -1851,6 +1867,7 @@ function workflowToolSummary(block) {
 function workflowAgentName(a, index) {
   if (a.label) return a.label;
   if (a.title && !looksLikePromptTitle(a.title)) return a.title;
+  if (a.agent_type) return a.agent_type + ' ' + String((index || 0) + 1).padStart(2, '0');
   return numberedAgentName(index);
 }
 
@@ -1930,10 +1947,13 @@ function WorkflowsTab({ workflows }) {
                     ` : html`
                       <div class="wf-agent-list">
                         ${group.agents.map((a, ai) => {
+                          const wfAgents = wf.agents || [];
+                          const globalIndex = wfAgents.findIndex(x => x && x.id === a.id);
+                          const agentIndex = globalIndex >= 0 ? globalIndex : ai;
                           const key = ri + ':' + a.id;
                           const isOpen = expanded === key;
                           const isLast = ai === group.agents.length - 1;
-                          const name = workflowAgentName(a, ai);
+                          const name = workflowAgentName(a, agentIndex);
                           const subtitle = workflowAgentSubtitle(a, name);
                           const stats = [
                             a.agent_type,
@@ -1956,6 +1976,9 @@ function WorkflowsTab({ workflows }) {
                               </div>
                               ${isOpen && a.source_path && html`
                                 <${WorkflowAgentTranscript} sourcePath=${a.source_path} />
+                              `}
+                              ${isOpen && !a.source_path && html`
+                                <div class="wf-agent-empty">transcript unavailable</div>
                               `}
                             </div>
                           `;

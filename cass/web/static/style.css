@@ -2126,12 +2126,20 @@ mark.search-hl {
 .agent-status.completed { color: var(--green); }
 .agent-status.error { color: var(--danger); }
 .agent-status.starting { color: var(--faint); }
+.agent-status.unknown { color: var(--faint); }
 .agent-status.running .streaming-dot { width: 6px; height: 6px; }
 .agent-status-text { font-size: 10px; }
 .agent-status-text.completed { color: var(--green); }
-.agent-status-text.error { color: var(--danger); }
+.agent-status-text.error,
+.agent-status-text.failed,
+.agent-status-text.killed,
+.agent-status-text.cancelled,
+.agent-status-text.canceled { color: var(--danger); }
 .agent-status-text.running { color: var(--yellow); }
-.agent-status-text.starting { color: var(--faint); }
+.agent-status-text.starting,
+.agent-status-text.pending,
+.agent-status-text.queued,
+.agent-status-text.unknown { color: var(--faint); }
 
 .agents-lifecycle { color: var(--dim); }
 .agents-team-done { color: var(--green); font-weight: 600; }
@@ -2268,7 +2276,7 @@ mark.search-hl {
 .wf-run-name { font-weight: 600; color: var(--magenta); }
 .wf-run-status { font-size: 10px; text-transform: uppercase; color: var(--dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .wf-run-status.completed { color: var(--green, #2a7); }
-.wf-run-status.failed, .wf-run-status.killed { color: var(--red, #c33); }
+.wf-run-status.failed, .wf-run-status.killed, .wf-run-status.cancelled, .wf-run-status.canceled { color: var(--red, #c33); }
 .wf-run-meta { font-size: 11px; color: var(--dim); margin-left: auto; }
 .wf-run-desc { font-size: 11px; color: var(--dim); margin: 4px 0 6px; }
 .wf-phase-list { display: grid; gap: 8px; margin-top: 8px; }
@@ -2356,7 +2364,7 @@ mark.search-hl {
 .wf-agent-role.user { color: var(--cyan); }
 .wf-agent-role.assistant { color: var(--magenta); }
 .wf-agent-role.result { color: var(--green); }
-.wf-agent-role.Read, .wf-agent-role.Bash, .wf-agent-role.Write, .wf-agent-role.Edit, .wf-agent-role.MultiEdit { color: var(--yellow); }
+.wf-agent-role.tool { color: var(--yellow); }
 .wf-agent-more {
   margin: 6px 0;
   padding: 3px 8px;
