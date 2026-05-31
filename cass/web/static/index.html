@@ -5355,7 +5355,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
           (agg.selected_skills || 0) + ' selected · ' + (agg.loaded_skills || 0) + ' loaded' +
           ((agg.context_skills || 0) ? ' · ' + (agg.context_skills || 0) + ' context' : '') +
           ((agg.skills || 0) > ((agg.selected_skills || 0) + (agg.loaded_skills || 0) + (agg.context_skills || 0))
-            ? ' · ' + ((agg.skills || 0) - ((agg.selected_skills || 0) + (agg.loaded_skills || 0) + (agg.context_skills || 0))) + ' available not shown'
+            ? ' · ' + ((agg.skills || 0) - ((agg.selected_skills || 0) + (agg.loaded_skills || 0) + (agg.context_skills || 0))) + ' available skills not shown'
             : ''))}
         ${card('iTerm2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
           agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
