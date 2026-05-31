@@ -2288,6 +2288,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
   });
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [showAvailableSkills, setShowAvailableSkills] = useState(false);
+  const [showRequests, setShowRequests] = useState(normalizeDetailTab(initialTab) === 'requests');
 
   const bodyRef = useRef(null);
   const searchRef = useRef(null);
@@ -2307,11 +2308,11 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
   const directSubagentSpawns = hit?.subagent_spawns || 0;
   const hasAgentTabHint = directSubagentSpawns > 0;
   const hasAgentTab = hasAgentTabHint || (!hasWorkflowTab && agentData.hasAgents);
-  const showRequestsTab = requestCount > 0 || apiRequests.length > 0;
+  const hasRequests = requestCount > 0 || apiRequests.length > 0;
   let activeTab = activeTabRaw;
   if (activeTab === 'agents' && !hasAgentTab) activeTab = hasWorkflowTab ? 'workflows' : 'conversation';
   if (activeTab === 'workflows' && !hasWorkflowTab) activeTab = 'conversation';
-  if (activeTab === 'requests' && !showRequestsTab) activeTab = 'conversation';
+  if (activeTab === 'requests') activeTab = 'conversation';
   const needsSessionEntries = activeTab === 'conversation';
 
   function setActiveTab(tab) {
@@ -2328,6 +2329,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
   useEffect(() => {
     setShowAvailableSkills(false);
   }, [hit?.session_id]);
+
+  useEffect(() => {
+    setShowRequests(normalizeDetailTab(initialTab) === 'requests');
+  }, [initialTab, hit?.session_id]);
 
   function sessionEntriesPath(offset) {
     if (!hit) return '';
@@ -2466,7 +2471,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
 
   // Fetch API requests when the tab is switched or live data changes.
   useEffect(() => {
-    if (!hit || activeTab !== 'requests') return;
+    if (!hit || !showRequests) return;
     if (apiRequestsState.sessionID === hit.session_id &&
         apiRequestsState.loaded &&
         apiRequestsState.refreshTick === detailRefreshTick) {
@@ -2493,7 +2498,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
         if (!cancelled) setRequestsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [hit?.session_id, activeTab, detailRefreshTick]);
+  }, [hit?.session_id, showRequests, detailRefreshTick]);
 
   // Fetch indexed subagent metadata when the Agents tab is opened. This avoids
   // reading the full parent transcript and every sidechain just to render the
@@ -3114,12 +3119,6 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                 Workflows (${hit.workflows.length})
               </button>
             `}
-            ${showRequestsTab && html`
-              <button class="detail-tab ${activeTab === 'requests' ? 'active' : ''}"
-                      onClick=${() => setActiveTab('requests')}>
-                API Requests${requestCount > 0 ? ' (' + requestCount + ')' : ''}
-              </button>
-            `}
           </div>
         </div>
         ${(hit.team_name || hit.it2_splits > 0) && html`
@@ -3148,6 +3147,20 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
         `}
         <div class="detail-body" ref=${bodyRef}>
           ${renderContextPanel()}
+          ${hasRequests && html`
+            <details class="detail-skill-section detail-requests-section" open=${showRequests}
+                     onToggle=${e => setShowRequests(e.currentTarget.open)}>
+              <summary>
+                <span>API requests</span>
+                <strong>${requestCount || apiRequests.length}</strong>
+              </summary>
+              ${showRequests && html`
+                <div class="detail-requests-body">
+                  ${renderRequestsTab()}
+                </div>
+              `}
+            </details>
+          `}
           ${activeTab === 'conversation' ? html`
             ${detailError && html`<div class="detail-error">${detailError}</div>`}
             ${loading && entries.length === 0 && html`<div class="loading">loading session...</div>`}
@@ -3163,7 +3176,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
               : html`<${AgentsTab} agentData=${agentData} workflows=${hit.workflows} />`}
           ` : activeTab === 'workflows' ? html`
             <${WorkflowsTab} workflows=${hit.workflows} focusAgent=${workflowAgentFocus} onFocusAgentChange=${onWorkflowAgentFocusChange} />
-          ` : renderRequestsTab()}
+          ` : null}
         </div>
       `}
     </div>
