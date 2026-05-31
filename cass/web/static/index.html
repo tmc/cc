@@ -1853,16 +1853,15 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const requestCount = hit?.api_request_count || 0;
   const apiRequests = apiRequestsState.sessionID === hit?.session_id ? apiRequestsState.items : [];
   const agentData = useAgentData(entries, hit?.workflows);
-  const hasAgentTabHint = (hit?.subagent_entries || 0) > 0 || (hit?.subagent_spawns || 0) > 0;
-  const hasAgentTab = agentData.hasAgents || hasAgentTabHint;
   const hasWorkflowTab = (hit?.workflows || []).length > 0;
+  const directSubagentSpawns = hit?.subagent_spawns || 0;
+  const hasAgentTabHint = directSubagentSpawns > 0;
+  const hasAgentTab = hasAgentTabHint || (!hasWorkflowTab && agentData.hasAgents);
   const showRequestsTab = requestCount > 0 || apiRequests.length > 0;
-  const activeTab =
-    (activeTabRaw === 'agents' && !hasAgentTab) ||
-    (activeTabRaw === 'workflows' && !hasWorkflowTab) ||
-    (activeTabRaw === 'requests' && !showRequestsTab)
-      ? 'conversation'
-      : activeTabRaw;
+  let activeTab = activeTabRaw;
+  if (activeTab === 'agents' && !hasAgentTab) activeTab = hasWorkflowTab ? 'workflows' : 'conversation';
+  if (activeTab === 'workflows' && !hasWorkflowTab) activeTab = 'conversation';
+  if (activeTab === 'requests' && !showRequestsTab) activeTab = 'conversation';
   const needsSessionEntries = activeTab === 'conversation' || activeTab === 'agents';
 
   function setActiveTab(tab) {
@@ -2497,7 +2496,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
                       onClick=${() => setActiveTab('agents')}>
                 Agents (${agentData.hasAgents && agentData.runningCount > 0
                   ? agentData.runningCount + '/' + agentData.totalAgents + ' running'
-                  : (agentData.hasAgents ? agentData.totalAgents : (hit.subagent_spawns || hit.subagent_entries || 0))})
+                  : (agentData.hasAgents ? agentData.totalAgents : directSubagentSpawns)})
               </button>
             `}
             ${hasWorkflowTab && html`
