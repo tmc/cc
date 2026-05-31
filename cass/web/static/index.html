@@ -1414,6 +1414,12 @@ function renderTextBadges(values, limit, moreLabel) {
   `;
 }
 
+function joinBadgeTitle(label, values) {
+  const list = (values || []).filter(Boolean);
+  if (list.length === 0) return '';
+  return label + ': ' + list.join(', ');
+}
+
 function resultCountLabel(result, noun = 'result') {
   const n = result?.total_count || 0;
   const suffix = result?.total_count_exact === false ? '+' : '';
@@ -1509,7 +1515,11 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         `}
         ${h.collapsed_children && (h.matched_workflow_ids || []).length > 0 && html`
           <span class="hit-match-badge"
-            title=${'matched workflows: ' + (h.matched_workflow_ids || []).join(', ')}>
+            title=${[
+              joinBadgeTitle('matched workflows', h.matched_workflow_ids),
+              joinBadgeTitle('matched workflow names', h.matched_workflow_names),
+              joinBadgeTitle('matched workflow agents', h.matched_workflow_agent_names),
+            ].filter(Boolean).join(' | ')}>
             matched ${h.workflow_match_count || (h.matched_workflow_ids || []).length} agent${(h.workflow_match_count || 1) === 1 ? '' : 's'}
           </span>
         `}
