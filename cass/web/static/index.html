@@ -1443,13 +1443,13 @@ function skillKindLabel(kind) {
 
 function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onToolClick }) {
   const stats = [];
-  if (h.tool_calls) stats.push(h.tool_calls + ' tools');
-  if (h.turns > 1) stats.push(h.turns + ' turns');
-  if (h.files_edited) stats.push(h.files_edited + ' files');
-  if (h.lines_written) stats.push(h.lines_written + ' lines');
-  if (h.workflow_count) stats.push(h.workflow_count + ' workflow' + (h.workflow_count === 1 ? '' : 's'));
-  if (h.subagent_entries) stats.push('mirrored ' + (h.subagent_mirrored_entries || 0) + '/' + h.subagent_entries);
-  if (h.api_request_count) stats.push(h.api_request_count + ' requests');
+  if (h.tool_calls) stats.push(h.tool_calls + ' Tools');
+  if (h.turns > 1) stats.push(h.turns + ' Turns');
+  if (h.files_edited) stats.push(h.files_edited + ' Files');
+  if (h.lines_written) stats.push(h.lines_written + ' Lines');
+  if (h.workflow_count) stats.push(h.workflow_count + ' Workflow' + (h.workflow_count === 1 ? '' : 's'));
+  if (h.subagent_entries) stats.push('Mirrored ' + (h.subagent_mirrored_entries || 0) + '/' + h.subagent_entries);
+  if (h.api_request_count) stats.push(h.api_request_count + ' Requests');
   if (h.duration_secs) stats.push(fmtDuration(h.duration_secs));
 
   const inTok = h.input_tokens || 0;
