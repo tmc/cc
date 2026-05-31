@@ -73,12 +73,34 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result, err := s.svc.Search(r.Context(), req)
+	summary := q.Get("summary") == "true"
+	var result *cass.SearchResult
+	var err error
+	if summary {
+		result, err = s.svc.SearchSummary(r.Context(), req)
+	} else {
+		result, err = s.svc.Search(r.Context(), req)
+	}
 	if err != nil {
 		writeError(w, err, http.StatusInternalServerError)
 		return
 	}
+	if summary {
+		for i := range result.Hits {
+			trimSearchHit(&result.Hits[i])
+		}
+	}
 	writeJSON(w, result)
+}
+
+func trimSearchHit(h *cass.Hit) {
+	if h == nil {
+		return
+	}
+	h.Goals = nil
+	h.Skills = nil
+	h.Workflows = nil
+	h.SummaryOnly = true
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

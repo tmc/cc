@@ -140,4 +140,8 @@ type Hit struct {
 	MatchedWorkflowIDs      []string `json:"matched_workflow_ids,omitempty"`
 	MatchedWorkflowAgentIDs []string `json:"matched_workflow_agent_ids,omitempty"`
 	CollapsedChildren       bool     `json:"collapsed_children,omitempty"`
+
+	// SummaryOnly marks web search list rows whose nested detail payload was
+	// intentionally omitted. Fetch /api/session/{id}/meta for full detail.
+	SummaryOnly bool `json:"summary_only,omitempty"`
 }

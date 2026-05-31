@@ -980,7 +980,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const effectiveSort = sort || (query ? 'relevance' : 'recent');
 
   const searchPath = useCallback(() => {
-    const params = { q: query, agent, workspace, since, sort: sort || '', team, goal_status: goalStatus, skill, limit: '30' };
+    const params = { q: query, agent, workspace, since, sort: sort || '', team, goal_status: goalStatus, skill, limit: '30', summary: 'true' };
     return 'search?' + qs(params);
   }, [query, agent, workspace, since, sort, team, goalStatus, skill]);
 
@@ -1028,12 +1028,13 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     if (!selected?.session_id || !results?.hits) return;
     const i = results.hits.findIndex(h => h.session_id === selected.session_id);
     if (i < 0) return;
-    if (selected !== results.hits[i]) setSelected(results.hits[i]);
+    const next = results.hits[i];
+    if (selected !== next && (!selected.agent || !next.summary_only)) setSelected(next);
     if (selectedIdx !== i) setSelectedIdx(i);
   }, [results, selected?.session_id]);
 
   useEffect(() => {
-    if (!selected?.session_id || selected.agent) return;
+    if (!selected?.session_id || (selected.agent && !selected.summary_only)) return;
     let cancelled = false;
     api('session/' + selected.session_id + '/meta')
       .then(h => { if (!cancelled) setSelected(h); })
@@ -1051,7 +1052,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
         });
       });
     return () => { cancelled = true; };
-  }, [selected?.session_id, selected?.agent]);
+  }, [selected?.session_id, selected?.agent, selected?.summary_only]);
 
   // Auto-refresh on SSE.
   useEffect(() => {
@@ -3970,7 +3971,7 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
     setTeamSearchLoading(true);
     const id = setTimeout(async () => {
       try {
-        const r = await api('search?' + qs({ q: teamSearch, team: selectedName, limit: '50' }));
+        const r = await api('search?' + qs({ q: teamSearch, team: selectedName, limit: '50', summary: 'true' }));
         setTeamSearchResults(r);
       } catch (e) { console.error('team search:', e); }
       setTeamSearchLoading(false);

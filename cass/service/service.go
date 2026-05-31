@@ -210,12 +210,24 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 
 // Search queries the index.
 func (s *Service) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchResult, error) {
+	return s.search(ctx, req, true)
+}
+
+// SearchSummary queries the index without read-time artifact enrichment.
+// Callers use it for lightweight lists, then fetch Session for detail.
+func (s *Service) SearchSummary(ctx context.Context, req cass.SearchRequest) (*cass.SearchResult, error) {
+	return s.search(ctx, req, false)
+}
+
+func (s *Service) search(ctx context.Context, req cass.SearchRequest, enrich bool) (*cass.SearchResult, error) {
 	result, err := s.store.Search(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	for i := range result.Hits {
-		enrichHitWorkflowMetadata(&result.Hits[i])
+	if enrich {
+		for i := range result.Hits {
+			enrichHitWorkflowMetadata(&result.Hits[i])
+		}
 	}
 	return result, nil
 }

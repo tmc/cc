@@ -96,6 +96,68 @@ func TestSessionMeta(t *testing.T) {
 	}
 }
 
+func TestSearchSummaryOmitsDetailPayload(t *testing.T) {
+	ctx := context.Background()
+	start := time.Unix(100, 0)
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: []cass.Session{{
+			ID:         "search-summary-1",
+			Agent:      "codex-cli",
+			Title:      "Summary search",
+			Workspace:  "/work/summary",
+			SourcePath: "/tmp/search-summary.jsonl",
+			StartedAt:  start,
+			EndedAt:    start.Add(time.Minute),
+			Messages:   []cass.Message{{Role: "user", Content: "summary search payload"}},
+			Goals:      []cass.Goal{{Objective: "trim payload", Status: "active"}},
+			Skills:     []cass.SkillUse{{Name: "imagegen", Kind: "available", Count: 1}},
+			Stats: cass.SessionStats{
+				WorkflowRuns:      1,
+				WorkflowAgentRuns: 1,
+			},
+			Workflows: []cass.WorkflowRun{{
+				RunID:      "wf_summary",
+				Name:       "summary-flow",
+				AgentCount: 1,
+				Agents:     []cass.WorkflowAgent{{ID: "a1", Title: "agent"}},
+			}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v; want 1, nil", n, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/search?q=summary&summary=true", nil)
+	rr := httptest.NewRecorder()
+	New(Config{Service: svc}).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
+	var result cass.SearchResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(result.Hits))
+	}
+	hit := result.Hits[0]
+	if !hit.SummaryOnly {
+		t.Fatalf("SummaryOnly = false, want true")
+	}
+	if len(hit.Goals) != 0 || len(hit.Skills) != 0 || len(hit.Workflows) != 0 {
+		t.Fatalf("summary hit carried detail payload: goals=%d skills=%d workflows=%d",
+			len(hit.Goals), len(hit.Skills), len(hit.Workflows))
+	}
+	if hit.GoalCount != 1 || hit.SkillCount != 1 || hit.WorkflowCount != 1 || hit.WorkflowAgentCount != 1 {
+		t.Fatalf("summary counts lost: %#v", hit)
+	}
+}
+
 func TestSessionEntriesPagination(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
