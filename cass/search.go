@@ -55,6 +55,10 @@ type SearchRequest struct {
 	// SummaryOnly omits nested detail payloads from hits. Use for search result
 	// lists that fetch full session metadata only after a row is opened.
 	SummaryOnly bool
+
+	// SkipCount avoids the exact total-count query. SearchResult.TotalCount is
+	// then the visible lower bound unless TotalCountExact is true.
+	SkipCount bool
 }
 
 // Filters constrains search results.
@@ -71,8 +75,9 @@ type Filters struct {
 
 // SearchResult holds search results.
 type SearchResult struct {
-	Hits       []Hit `json:"hits"`
-	TotalCount int   `json:"total_count"`
+	Hits            []Hit `json:"hits"`
+	TotalCount      int   `json:"total_count"`
+	TotalCountExact bool  `json:"total_count_exact"`
 }
 
 // Hit is a single search result.

@@ -152,6 +152,50 @@ func TestBatchIndexAndSearch(t *testing.T) {
 	}
 }
 
+func TestSearchSkipCountReportsLowerBound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	var sessions []cass.Session
+	for i := 0; i < 3; i++ {
+		sessions = append(sessions, cass.Session{
+			ID:        fmt.Sprintf("skip-count-%d", i),
+			Agent:     "codex-cli",
+			Title:     "Skip count search",
+			Workspace: "/tmp/project",
+			StartedAt: now.Add(time.Duration(i) * time.Minute),
+			EndedAt:   now.Add(time.Duration(i) * time.Minute),
+			Messages:  []cass.Message{{Role: "user", Content: "needle"}},
+		})
+	}
+	if err := s.BatchIndex(ctx, sessions); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.Search(ctx, cass.SearchRequest{Query: "needle", Limit: 2, SkipCount: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 2 {
+		t.Fatalf("hits = %d, want 2", len(result.Hits))
+	}
+	if result.TotalCount != 2 || result.TotalCountExact {
+		t.Fatalf("count = %d exact=%v, want lower bound 2", result.TotalCount, result.TotalCountExact)
+	}
+
+	result, err = s.Search(ctx, cass.SearchRequest{Query: "needle", Limit: 4, SkipCount: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 3 {
+		t.Fatalf("hits = %d, want 3", len(result.Hits))
+	}
+	if result.TotalCount != 3 || !result.TotalCountExact {
+		t.Fatalf("count = %d exact=%v, want exact 3", result.TotalCount, result.TotalCountExact)
+	}
+}
+
 func TestStandaloneBackendSearchPunctuation(t *testing.T) {
 	s, err := NewWithConfig(BackendConfig{Kind: BackendSQLite, Path: ":memory:"})
 	if err != nil {

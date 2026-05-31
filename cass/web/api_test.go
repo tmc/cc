@@ -167,6 +167,44 @@ func TestSearchSummaryOmitsDetailPayload(t *testing.T) {
 	}
 }
 
+func TestSearchCountFalseSkipsExactTotal(t *testing.T) {
+	ctx := context.Background()
+	start := time.Unix(100, 0)
+	sessions := []cass.Session{
+		{ID: "count-false-1", Agent: "codex-cli", Title: "Count false", Workspace: "/work/count", StartedAt: start, EndedAt: start, Messages: []cass.Message{{Role: "user", Content: "countable"}}},
+		{ID: "count-false-2", Agent: "codex-cli", Title: "Count false", Workspace: "/work/count", StartedAt: start.Add(time.Second), EndedAt: start.Add(time.Second), Messages: []cass.Message{{Role: "user", Content: "countable"}}},
+		{ID: "count-false-3", Agent: "codex-cli", Title: "Count false", Workspace: "/work/count", StartedAt: start.Add(2 * time.Second), EndedAt: start.Add(2 * time.Second), Messages: []cass.Message{{Role: "user", Content: "countable"}}},
+	}
+	svc, err := service.New(service.Config{
+		DBPath:     filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: sessions}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 3 {
+		t.Fatalf("Index = %d, %v; want 3, nil", n, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/search?q=countable&summary=true&count=false&limit=2", nil)
+	rr := httptest.NewRecorder()
+	New(Config{Service: svc}).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
+	var result cass.SearchResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result.Hits) != 2 {
+		t.Fatalf("hits = %d, want 2", len(result.Hits))
+	}
+	if result.TotalCount != 2 || result.TotalCountExact {
+		t.Fatalf("count = %d exact=%v, want lower bound 2", result.TotalCount, result.TotalCountExact)
+	}
+}
+
 func TestSessionEntriesPagination(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

@@ -766,7 +766,11 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 			LIMIT ? OFFSET ?
 		`, hitAPIRequestCountCol, statsCols, whereClause, orderClause)
 	}
-	args = append(args, req.Limit, req.Offset)
+	queryLimit := req.Limit
+	if req.SkipCount {
+		queryLimit++
+	}
+	args = append(args, queryLimit, req.Offset)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -792,22 +796,33 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		return nil, fmt.Errorf("rows: %w", err)
 	}
 
-	// Count total matches.
-	var countQuery string
-	countArgs := args[:len(args)-2] // strip LIMIT/OFFSET
-	if req.Query != "" {
-		countQuery = fmt.Sprintf(`
-			SELECT count(*) FROM session_fts
-			JOIN sessions s ON s.rowid = session_fts.rowid
-			%s
-		`, whereClause)
-	} else {
-		countQuery = fmt.Sprintf(`SELECT count(*) FROM sessions s %s`, whereClause)
+	hasMore := false
+	if req.SkipCount && len(hits) > req.Limit {
+		hits = hits[:req.Limit]
+		hasMore = true
 	}
 
-	var total int
-	if err := s.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
-		total = len(hits)
+	total := req.Offset + len(hits)
+	totalExact := !hasMore
+	if !req.SkipCount {
+		// Count total matches.
+		var countQuery string
+		countArgs := args[:len(args)-2] // strip LIMIT/OFFSET
+		if req.Query != "" {
+			countQuery = fmt.Sprintf(`
+				SELECT count(*) FROM session_fts
+				JOIN sessions s ON s.rowid = session_fts.rowid
+				%s
+			`, whereClause)
+		} else {
+			countQuery = fmt.Sprintf(`SELECT count(*) FROM sessions s %s`, whereClause)
+		}
+		if err := s.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+			total = req.Offset + len(hits)
+			totalExact = false
+		} else {
+			totalExact = true
+		}
 	}
 
 	if req.SummaryOnly {
@@ -821,8 +836,9 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 	}
 
 	return &cass.SearchResult{
-		Hits:       hits,
-		TotalCount: total,
+		Hits:            hits,
+		TotalCount:      total,
+		TotalCountExact: totalExact,
 	}, nil
 }
 

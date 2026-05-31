@@ -46,6 +46,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			req.Offset = n
 		}
 	}
+	if q.Get("count") == "false" {
+		req.SkipCount = true
+	}
 	if v := q.Get("sort"); v != "" {
 		req.Sort = cass.SortMode(v)
 	}

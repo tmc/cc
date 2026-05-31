@@ -980,7 +980,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const effectiveSort = sort || (query ? 'relevance' : 'recent');
 
   const searchPath = useCallback(() => {
-    const params = { q: query, agent, workspace, since, sort: sort || '', team, goal_status: goalStatus, skill, limit: '30', summary: 'true' };
+    const params = { q: query, agent, workspace, since, sort: sort || '', team, goal_status: goalStatus, skill, limit: '30', summary: 'true', count: 'false' };
     return 'search?' + qs(params);
   }, [query, agent, workspace, since, sort, team, goalStatus, skill]);
 
@@ -1133,7 +1133,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
       </div>
 
       ${loading && !results && html`<div class="loading">searching...</div>`}
-      ${results && html`<div class="result-count" style="text-align:right;padding:0 0 8px">${results.total_count || 0} results</div>`}
+      ${results && html`<div class="result-count" style="text-align:right;padding:0 0 8px">${resultCountLabel(results)}</div>`}
       ${results && results.hits && results.hits.length > 0 && html`
         <ul class="results">
           ${results.hits.map((h, i) => html`
@@ -1190,6 +1190,13 @@ function cleanSessionTitle(title) {
 
 function displaySessionTitle(hit) {
   return cleanSessionTitle(hit?.title) || hit?.title || 'Untitled';
+}
+
+function resultCountLabel(result, noun = 'result') {
+  const n = result?.total_count || 0;
+  const suffix = result?.total_count_exact === false ? '+' : '';
+  const plural = n === 1 && suffix === '' ? '' : 's';
+  return n + suffix + ' ' + noun + plural;
 }
 
 function importantSkills(skills) {
@@ -3973,7 +3980,7 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
     setTeamSearchLoading(true);
     const id = setTimeout(async () => {
       try {
-        const r = await api('search?' + qs({ q: teamSearch, team: selectedName, limit: '50', summary: 'true' }));
+        const r = await api('search?' + qs({ q: teamSearch, team: selectedName, limit: '50', summary: 'true', count: 'false' }));
         setTeamSearchResults(r);
       } catch (e) { console.error('team search:', e); }
       setTeamSearchLoading(false);
@@ -4024,9 +4031,9 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
                   value=${teamSearch}
                   onInput=${e => setTeamSearch(e.target.value)}
                   onKeyDown=${e => { if (e.key === 'Escape') { setTeamSearch(''); e.target.blur(); } }} />
-                ${teamSearch && html`<span class="detail-search-count">${teamSearchLoading ? '...' : sessionCount + ' hits'}</span>`}
+                ${teamSearch && html`<span class="detail-search-count">${teamSearchLoading ? '...' : resultCountLabel(teamSearchResults, 'hit')}</span>`}
               </div>
-              <div class="stat-label">${sessionCount} session${sessionCount !== 1 ? 's' : ''}</div>
+              <div class="stat-label">${teamSearch && teamSearchResults ? resultCountLabel(teamSearchResults, 'session') : sessionCount + ' session' + (sessionCount !== 1 ? 's' : '')}</div>
               ${displaySessions.map(s => html`
                 <div class="team-session-item" key=${s.session_id}>
                   <div style="font-weight:600">${s.title ? s.title.slice(0, 60) : 'Untitled'}</div>
