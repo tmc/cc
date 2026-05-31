@@ -2384,7 +2384,28 @@ mark.search-hl {
 .wf-run-status.starting { color: var(--yellow); }
 .wf-run-status.error { color: var(--danger); }
 .wf-run-meta { font-size: 11px; color: var(--dim); margin-left: auto; }
+.wf-run-summary {
+  margin: 4px 0 2px;
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.45;
+}
 .wf-run-desc { font-size: 11px; color: var(--dim); margin: 4px 0 6px; }
+.wf-run-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 2px 0 6px;
+  color: var(--faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.wf-run-extra span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
 .wf-phase-list { display: grid; gap: 8px; margin-top: 8px; }
 .wf-phase {
   border-top: 1px solid var(--border);

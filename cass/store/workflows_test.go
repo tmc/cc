@@ -26,6 +26,7 @@ func sessionWithWorkflows() cass.Session {
 				TaskID:      "task_aaa",
 				Name:        "cc-go-team-review",
 				Description: "review the branch",
+				Summary:     "independent multi-lens review and adversarial stress-test",
 				Status:      "completed",
 				Phases: []cass.WorkflowPhase{
 					{Title: "Lenses", Detail: "independent perspectives"},
@@ -35,8 +36,9 @@ func sessionWithWorkflows() cass.Session {
 				JournalEventCount: 12,
 				StartedAt:         start.Add(time.Minute),
 				CompletedAt:       start.Add(30 * time.Minute),
-				SourcePath:        "/p/workflows/wf_aaa.json",
+				ScriptPath:        "/p/scripts/workflows/wf_aaa.js",
 				TranscriptDir:     "/p/subagents/workflows/wf_aaa",
+				SourcePath:        "/p/workflows/wf_aaa.json",
 				Agents: []cass.WorkflowAgent{
 					{
 						ID:        "agent-1",
@@ -87,6 +89,9 @@ func TestWorkflowPersistenceRoundTrip(t *testing.T) {
 	w := got[0]
 	if w.Name != "cc-go-team-review" || w.Status != "completed" || w.AgentCount != 3 || w.JournalEventCount != 12 {
 		t.Errorf("wf_aaa fields wrong: %+v", w)
+	}
+	if w.TaskID != "task_aaa" || w.Summary != "independent multi-lens review and adversarial stress-test" || w.ScriptPath != "/p/scripts/workflows/wf_aaa.js" || w.TranscriptDir != "/p/subagents/workflows/wf_aaa" || w.SourcePath != "/p/workflows/wf_aaa.json" {
+		t.Errorf("wf_aaa path/meta fields wrong: %+v", w)
 	}
 	if w.ParentSessionID != "sess1" {
 		t.Errorf("parent session = %q, want sess1", w.ParentSessionID)

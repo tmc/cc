@@ -2236,7 +2236,16 @@ function WorkflowsTab({ workflows, focusAgent, onFocusAgentChange }) {
               ${wf.status && html`<span class="wf-run-status ${normalizedAgentStatus(wf.status)}">${wf.status}</span>`}
               <span class="wf-run-meta">${(wf.agents || []).length || wf.agent_count || 0} agents${wf.journal_event_count ? ' · ' + wf.journal_event_count + ' events' : ''}</span>
             </div>
+            ${wf.summary && html`<div class="wf-run-summary">${wf.summary}</div>`}
             ${wf.description && html`<div class="wf-run-desc">${wf.description}</div>`}
+            ${(wf.task_id || wf.script_path || wf.transcript_dir || wf.source_path) && html`
+              <div class="wf-run-extra">
+                ${wf.task_id && html`<span>task ${wf.task_id}</span>`}
+                ${wf.script_path && html`<span title=${wf.script_path}>script ${shortPath(wf.script_path)}</span>`}
+                ${wf.transcript_dir && html`<span title=${wf.transcript_dir}>transcript ${shortPath(wf.transcript_dir)}</span>`}
+                ${wf.source_path && html`<span title=${wf.source_path}>source ${shortPath(wf.source_path)}</span>`}
+              </div>
+            `}
             <div class="wf-phase-list">
               ${groups.map((group, gi) => {
                 const total = group.agents.length;
