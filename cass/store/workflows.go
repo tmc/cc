@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -61,11 +63,7 @@ const workflowsSchema = `
 // Workflows returns indexed workflow runs, optionally restricted to one parent
 // session, ordered by start time then run id for deterministic output.
 func (s *DB) Workflows(ctx context.Context, parentSessionID string) ([]WorkflowRow, error) {
-	query := `
-		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
-			script_path, transcript_dir, source_path, agent_count, journal_event_count,
-			started_at, completed_at, phases_json, agents_json
-		FROM workflows`
+	query := workflowsSelect()
 	var args []any
 	if parentSessionID != "" {
 		query += ` WHERE parent_session_id = ?`
@@ -77,29 +75,13 @@ func (s *DB) Workflows(ctx context.Context, parentSessionID string) ([]WorkflowR
 		return nil, fmt.Errorf("query workflows: %w", err)
 	}
 	defer rows.Close()
-	var out []WorkflowRow
-	for rows.Next() {
-		var w WorkflowRow
-		if err := rows.Scan(
-			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
-			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
-			&w.StartedAt, &w.CompletedAt, &w.PhasesJSON, &w.AgentsJSON,
-		); err != nil {
-			return nil, fmt.Errorf("scan workflow: %w", err)
-		}
-		out = append(out, w)
-	}
-	return out, rows.Err()
+	return scanWorkflowRows(rows)
 }
 
 // WorkflowsSince returns indexed workflow runs that started at or after the
 // given time (zero time returns all), ordered by start time then run id.
 func (s *DB) WorkflowsSince(ctx context.Context, since time.Time) ([]WorkflowRow, error) {
-	query := `
-		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
-			script_path, transcript_dir, source_path, agent_count, journal_event_count,
-			started_at, completed_at, phases_json, agents_json
-		FROM workflows`
+	query := workflowsSelect()
 	var args []any
 	if !since.IsZero() {
 		query += ` WHERE started_at >= ?`
@@ -111,6 +93,61 @@ func (s *DB) WorkflowsSince(ctx context.Context, since time.Time) ([]WorkflowRow
 		return nil, fmt.Errorf("query workflows since: %w", err)
 	}
 	defer rows.Close()
+	return scanWorkflowRows(rows)
+}
+
+// WorkflowsByParentIDs returns workflow runs for the given parent sessions,
+// grouped by parent session ID and ordered by workflow start time then run ID.
+func (s *DB) WorkflowsByParentIDs(ctx context.Context, parentSessionIDs []string) (map[string][]WorkflowRow, error) {
+	if len(parentSessionIDs) == 0 {
+		return map[string][]WorkflowRow{}, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(parentSessionIDs)), ",")
+	args := make([]any, len(parentSessionIDs))
+	for i, id := range parentSessionIDs {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
+			script_path, transcript_dir, source_path, agent_count, journal_event_count,
+			started_at, completed_at, phases_json, agents_json
+		FROM workflows WHERE parent_session_id IN (`+placeholders+`)
+		ORDER BY started_at, run_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query workflows by parent ids: %w", err)
+	}
+	defer rows.Close()
+	out := map[string][]WorkflowRow{}
+	for rows.Next() {
+		var w WorkflowRow
+		if err := rows.Scan(
+			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
+			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
+			&w.StartedAt, &w.CompletedAt, &w.PhasesJSON, &w.AgentsJSON,
+		); err != nil {
+			return nil, fmt.Errorf("scan workflow by parent ids: %w", err)
+		}
+		out[w.ParentSessionID] = append(out[w.ParentSessionID], w)
+	}
+	return out, rows.Err()
+}
+
+// WorkflowCount returns the number of indexed workflow runs.
+func (s *DB) WorkflowCount(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM workflows`).Scan(&n)
+	return n, err
+}
+
+func workflowsSelect() string {
+	return `
+		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
+			script_path, transcript_dir, source_path, agent_count, journal_event_count,
+			started_at, completed_at, phases_json, agents_json
+		FROM workflows`
+}
+
+func scanWorkflowRows(rows *sql.Rows) ([]WorkflowRow, error) {
 	var out []WorkflowRow
 	for rows.Next() {
 		var w WorkflowRow
@@ -124,11 +161,4 @@ func (s *DB) WorkflowsSince(ctx context.Context, since time.Time) ([]WorkflowRow
 		out = append(out, w)
 	}
 	return out, rows.Err()
-}
-
-// WorkflowCount returns the number of indexed workflow runs.
-func (s *DB) WorkflowCount(ctx context.Context) (int, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM workflows`).Scan(&n)
-	return n, err
 }

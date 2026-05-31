@@ -270,12 +270,22 @@ func retitleWorkflowCommandHit(hit *cass.Hit) {
 }
 
 func (s *Service) retitleWorkflowCommandHits(ctx context.Context, hits []cass.Hit) {
+	need := make([]string, 0, len(hits))
+	needByID := map[string]int{}
 	for i := range hits {
 		if !workflowCommandTitle(hits[i].Title) {
 			continue
 		}
-		rows, err := s.store.Workflows(ctx, hits[i].SessionID)
-		if err != nil || len(rows) == 0 {
+		needByID[hits[i].SessionID] = i
+		need = append(need, hits[i].SessionID)
+	}
+	rowsByParent, err := s.store.WorkflowsByParentIDs(ctx, need)
+	if err != nil {
+		return
+	}
+	for parentID, i := range needByID {
+		rows := rowsByParent[parentID]
+		if len(rows) == 0 {
 			continue
 		}
 		workflows := make([]cass.WorkflowRun, 0, len(rows))

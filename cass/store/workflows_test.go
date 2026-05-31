@@ -123,6 +123,47 @@ func TestWorkflowPersistenceRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWorkflowsByParentIDs(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	second := sessionWithWorkflows()
+	second.ID = "sess2"
+	second.Title = "Second"
+	second.StartedAt = second.StartedAt.Add(2 * time.Hour)
+	second.EndedAt = second.EndedAt.Add(2 * time.Hour)
+	second.Workflows = []cass.WorkflowRun{{
+		RunID:       "wf_ccc",
+		Name:        "review-flow",
+		Status:      "completed",
+		StartedAt:   second.StartedAt.Add(time.Minute),
+		CompletedAt: second.StartedAt.Add(2 * time.Minute),
+	}}
+	if err := s.BatchIndex(ctx, []cass.Session{sessionWithWorkflows(), second}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.WorkflowsByParentIDs(ctx, []string{"sess2", "sess1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got["sess1"]) != 2 || len(got["sess2"]) != 1 {
+		t.Fatalf("grouped workflows = %#v", got)
+	}
+	if got["sess1"][0].RunID != "wf_aaa" || got["sess1"][1].RunID != "wf_bbb" {
+		t.Fatalf("sess1 workflows = %#v", got["sess1"])
+	}
+	if got["sess2"][0].RunID != "wf_ccc" {
+		t.Fatalf("sess2 workflows = %#v", got["sess2"])
+	}
+	empty, err := s.WorkflowsByParentIDs(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty batch = %#v, want empty map", empty)
+	}
+}
+
 func TestWorkflowReindexReplaces(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
