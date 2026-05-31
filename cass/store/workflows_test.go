@@ -573,6 +573,56 @@ func TestSearchSummarySkipsWorkflowPayload(t *testing.T) {
 	}
 }
 
+func TestSearchSummaryFoldsWorkflowMatch(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	start := time.Unix(1_700_000_000, 0).UTC()
+	sess := cass.Session{
+		ID:        "wf-parent",
+		Agent:     "claude-code",
+		Title:     "ordinary title",
+		Workspace: "tmc/cc",
+		StartedAt: start,
+		EndedAt:   start.Add(time.Hour),
+		Messages:  []cass.Message{{Role: "user", Content: "do some unrelated work"}},
+		Stats: cass.SessionStats{
+			WorkflowRuns:      1,
+			WorkflowAgentRuns: 5,
+		},
+		Workflows: []cass.WorkflowRun{{
+			RunID:      "wf_zzz",
+			Name:       "ccmagicreview",
+			Status:     "completed",
+			AgentCount: 5,
+			StartedAt:  start.Add(time.Minute),
+		}},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.Search(ctx, cass.SearchRequest{Query: "ccmagicreview", Limit: 10, SummaryOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("got %d hits, want 1", len(res.Hits))
+	}
+	h := res.Hits[0]
+	if len(h.Workflows) != 0 {
+		t.Fatalf("attached workflows = %+v, want none", h.Workflows)
+	}
+	if !h.CollapsedChildren {
+		t.Fatal("expected CollapsedChildren=true when a workflow matched")
+	}
+	if len(h.MatchedWorkflowIDs) != 1 || h.MatchedWorkflowIDs[0] != "wf_zzz" {
+		t.Fatalf("matched workflow ids = %v, want [wf_zzz]", h.MatchedWorkflowIDs)
+	}
+	if h.WorkflowMatchCount != 5 {
+		t.Fatalf("workflow_match_count = %d, want 5", h.WorkflowMatchCount)
+	}
+}
+
 func TestDeleteCascadesWorkflows(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

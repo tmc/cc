@@ -810,7 +810,11 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		total = len(hits)
 	}
 
-	if !req.SummaryOnly {
+	if req.SummaryOnly {
+		if err := s.foldWorkflowMatches(ctx, hits, req.Query); err != nil {
+			return nil, err
+		}
+	} else {
 		if err := s.foldWorkflows(ctx, hits, req.Query); err != nil {
 			return nil, err
 		}
@@ -820,6 +824,74 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		Hits:       hits,
 		TotalCount: total,
 	}, nil
+}
+
+// foldWorkflowMatches records workflow match badges for summary hits without
+// attaching full workflow detail payloads.
+func (s *DB) foldWorkflowMatches(ctx context.Context, hits []cass.Hit, query string) error {
+	if len(hits) == 0 || strings.TrimSpace(query) == "" {
+		return nil
+	}
+	terms := queryTerms(query)
+	if len(terms) == 0 {
+		return nil
+	}
+	byID := map[string]*cass.Hit{}
+	for i := range hits {
+		byID[hits[i].SessionID] = &hits[i]
+	}
+	ids := make([]string, 0, len(hits))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT parent_session_id, run_id, name, description, agent_count, agents_json
+		FROM workflows WHERE parent_session_id IN (`+placeholders+`)
+		ORDER BY started_at, run_id`, args...)
+	if err != nil {
+		return fmt.Errorf("fold workflow matches: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var parentID, runID, name, desc, agentsJSON string
+		var agentCount int
+		if err := rows.Scan(&parentID, &runID, &name, &desc, &agentCount, &agentsJSON); err != nil {
+			return fmt.Errorf("scan folded workflow match: %w", err)
+		}
+		h := byID[parentID]
+		if h == nil {
+			continue
+		}
+		var agents []cass.WorkflowAgent
+		if agentsJSON != "" && agentsJSON != "[]" {
+			_ = json.Unmarshal([]byte(agentsJSON), &agents)
+		}
+		var matchedAgents int
+		for _, a := range agents {
+			if termsMatch(strings.ToLower(a.Title+" "+a.Label+" "+a.Phase+" "+a.AgentType), terms) {
+				h.MatchedWorkflowAgentIDs = append(h.MatchedWorkflowAgentIDs, a.ID)
+				matchedAgents++
+			}
+		}
+		runMatched := termsMatch(strings.ToLower(runID+" "+name+" "+desc), terms)
+		if runMatched || matchedAgents > 0 {
+			h.MatchedWorkflowIDs = append(h.MatchedWorkflowIDs, runID)
+			h.CollapsedChildren = true
+			if matchedAgents > 0 {
+				h.WorkflowMatchCount += matchedAgents
+			} else {
+				h.WorkflowMatchCount += agentCount
+			}
+		}
+	}
+	return rows.Err()
 }
 
 // foldWorkflows attaches each hit's workflow runs and, when a query is present,
