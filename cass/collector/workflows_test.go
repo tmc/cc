@@ -86,10 +86,10 @@ const LENSES = [
 ]
 phase('Lenses')
 agent(l.prompt, { label: ` + "`" + `lens:${l.key}` + "`" + `, phase: 'Lenses', schema: LENS_SCHEMA, agentType: 'Explore' })
-agent('stress', { label: ` + "`" + `stress-strong:${l.key}` + "`" + `, phase: 'Stress', schema: VERDICT_SCHEMA, agentType: 'Explore' })
-agent('stress', { label: ` + "`" + `stress-weak:${l.key}` + "`" + `, phase: 'Stress', schema: VERDICT_SCHEMA, agentType: 'Explore' })
+agent('stress', { phase: 'Stress', schema: VERDICT_SCHEMA, agentType: 'Explore', label: ` + "`" + `stress-strong:${l.key}` + "`" + ` })
+agent('stress', { phase: 'Stress', label: ` + "`" + `stress-weak:${l.key}` + "`" + `, schema: VERDICT_SCHEMA, agentType: 'Explore' })
 phase('Synthesize')
-agent('synth', { label: 'synthesize', phase: 'Synthesize' })
+agent('synth', { phase: 'Synthesize', label: 'synthesize' })
 `
 	info := workflowScriptInfoFromScript(script)
 	if len(info.Phases) != 3 {

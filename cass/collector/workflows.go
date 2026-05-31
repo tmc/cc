@@ -20,7 +20,9 @@ var (
 	workflowPhaseRE        = regexp.MustCompile(`(?s)\{\s*title\s*:\s*['"]([^'"]+)['"]\s*,\s*detail\s*:\s*['"]([^'"]*)['"]\s*\}`)
 	workflowLensKeyRE      = regexp.MustCompile(`\bkey\s*:\s*['"]([^'"]+)['"]`)
 	workflowLabelKeyRE     = regexp.MustCompile("label\\s*:\\s*`([^`]*\\$\\{l\\.key\\}[^`]*)`\\s*,\\s*phase\\s*:\\s*['\"]([^'\"]+)['\"]([^}]*)")
+	workflowPhaseKeyRE     = regexp.MustCompile("phase\\s*:\\s*['\"]([^'\"]+)['\"][^}]*label\\s*:\\s*`([^`]*\\$\\{l\\.key\\}[^`]*)`([^}]*)")
 	workflowLabelLiteralRE = regexp.MustCompile(`label\s*:\s*['"]([^'"]+)['"]\s*,\s*phase\s*:\s*['"]([^'"]+)['"]([^}]*)`)
+	workflowPhaseLiteralRE = regexp.MustCompile(`phase\s*:\s*['"]([^'"]+)['"][^}]*label\s*:\s*['"]([^'"]+)['"]([^}]*)`)
 	workflowAgentTypeRE    = regexp.MustCompile(`agentType\s*:\s*['"]([^'"]+)['"]`)
 	workflowStressLensRE   = regexp.MustCompile(`reviewer using the "([^"]+)" lens`)
 	workflowLensTitleRE    = regexp.MustCompile(`(?m)^LENS:\s*([^\n.]+)`)
@@ -292,19 +294,37 @@ func workflowScriptInfoFromScript(script string) workflowScriptInfo {
 		info.LensKeys = append(info.LensKeys, key)
 	}
 	for _, m := range workflowLabelKeyRE.FindAllStringSubmatch(script, -1) {
-		format := strings.ReplaceAll(m[1], "${l.key}", "%s")
+		addWorkflowAgentSpecs(&info, m[1], m[2], m[0])
+	}
+	for _, m := range workflowPhaseKeyRE.FindAllStringSubmatch(script, -1) {
+		addWorkflowAgentSpecs(&info, m[2], m[1], m[0])
+	}
+	for _, m := range workflowLabelLiteralRE.FindAllStringSubmatch(script, -1) {
+		addWorkflowAgentSpecs(&info, m[1], m[2], m[0])
+	}
+	for _, m := range workflowPhaseLiteralRE.FindAllStringSubmatch(script, -1) {
+		addWorkflowAgentSpecs(&info, m[2], m[1], m[0])
+	}
+	return info
+}
+
+func addWorkflowAgentSpecs(info *workflowScriptInfo, label, phase, options string) {
+	if info == nil || label == "" || phase == "" {
+		return
+	}
+	agentType := workflowAgentType(options)
+	if strings.Contains(label, "${l.key}") {
+		format := strings.ReplaceAll(label, "${l.key}", "%s")
 		for _, key := range info.LensKeys {
 			info.AgentSpecs = append(info.AgentSpecs, workflowAgentSpec{
 				Label:     strings.ReplaceAll(format, "%s", key),
-				Phase:     m[2],
-				AgentType: workflowAgentType(m[3]),
+				Phase:     phase,
+				AgentType: agentType,
 			})
 		}
+		return
 	}
-	for _, m := range workflowLabelLiteralRE.FindAllStringSubmatch(script, -1) {
-		info.AgentSpecs = append(info.AgentSpecs, workflowAgentSpec{Label: m[1], Phase: m[2], AgentType: workflowAgentType(m[3])})
-	}
-	return info
+	info.AgentSpecs = append(info.AgentSpecs, workflowAgentSpec{Label: label, Phase: phase, AgentType: agentType})
 }
 
 func workflowAgentType(optionsTail string) string {
