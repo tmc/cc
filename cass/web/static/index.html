@@ -1366,6 +1366,34 @@ function displaySessionTitle(hit) {
   return cleanSessionTitle(hit?.title) || hit?.title || 'Untitled';
 }
 
+function workflowRunLabel(wf) {
+  return wf?.name || wf?.run_id || 'workflow';
+}
+
+function workflowRunTitle(wf) {
+  return wf?.summary || wf?.description || wf?.run_id || '';
+}
+
+function renderWorkflowBadges(workflows, limit) {
+  const items = (workflows || []).slice(0, typeof limit === 'number' ? limit : 3);
+  if (items.length === 0) return null;
+  const more = (workflows || []).length - items.length;
+  return html`
+    <span class="workflow-badge-list">
+      ${items.map((wf, i) => html`
+        <span class="hit-workflow-name" key=${wf.run_id || i} title=${workflowRunTitle(wf)}>
+          ${workflowRunLabel(wf)}
+        </span>
+      `)}
+      ${more > 0 && html`
+        <span class="hit-workflow-name hit-workflow-more" title=${more + ' more workflow run' + (more === 1 ? '' : 's')}>
+          +${more}
+        </span>
+      `}
+    </span>
+  `;
+}
+
 function resultCountLabel(result, noun = 'result') {
   const n = result?.total_count || 0;
   const suffix = result?.total_count_exact === false ? '+' : '';
@@ -1485,11 +1513,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         ${h.goal_count > 0 && html`<span class="hit-goals">${h.active_goal_count || 0} active / ${h.completed_goal_count || 0} complete</span>`}
         ${shownSkillCount > 0 && html`<span class="hit-skills">${h.selected_skill_count || 0} selected / ${h.loaded_skill_count || 0} loaded</span>`}
         ${h.workflow_count > 0 && html`<span class="hit-workflows">${h.workflow_count} workflow${h.workflow_count === 1 ? '' : 's'} · ${h.workflow_agent_count || 0} agents${h.workflow_task_op_count ? ' · ' + h.workflow_task_op_count + ' task ops' : ''}</span>`}
-        ${(h.workflows || []).length > 0 && html`
-          <span class="hit-workflow-name" title=${h.workflows[0].summary || h.workflows[0].description || h.workflows[0].run_id || ''}>
-            ${h.workflows[0].name || h.workflows[0].run_id || 'workflow'}
-          </span>
-        `}
+        ${renderWorkflowBadges(h.workflows, 3)}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
       </div>
       <${ToolMicroBar} breakdown=${h.tool_breakdown} onToolClick=${onToolClick} />
@@ -2237,7 +2261,7 @@ function WorkflowsTab({ workflows, focusAgent, onFocusAgentChange }) {
         return html`
           <div class="wf-run" key=${wf.run_id || ri}>
             <div class="wf-run-head">
-              <span class="wf-run-name">${wf.name || wf.run_id || 'workflow'}</span>
+              <span class="wf-run-name">${workflowRunLabel(wf)}</span>
               ${wf.status && html`<span class="wf-run-status ${normalizedAgentStatus(wf.status)}">${wf.status}</span>`}
               <span class="wf-run-meta">${(wf.agents || []).length || wf.agent_count || 0} agents${wf.journal_event_count ? ' · ' + wf.journal_event_count + ' events' : ''}</span>
             </div>
@@ -3191,6 +3215,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
             ${hit.workflow_count > 0 && html`<span class="hit-workflows">${hit.workflow_count} workflow${hit.workflow_count === 1 ? '' : 's'} / ${hit.workflow_agent_count || 0} agents / ${hit.workflow_task_op_count || 0} task ops</span>`}
             ${hit.subagent_entries > 0 && html`<span>${hit.subagent_mirrored_entries || 0}/${hit.subagent_entries} mirrored</span>`}
           </div>
+          ${renderWorkflowBadges(hit.workflows, 4)}
           <div class="detail-session-id">
             <div class="detail-session-line">
               <span class="detail-session-label">session</span>

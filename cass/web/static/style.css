@@ -325,6 +325,15 @@ input::placeholder { color: var(--faint); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.workflow-badge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.hit-workflow-more {
+  color: var(--dim);
+  border-style: dashed;
+}
 .hit-goal-badge {
   font-size: 10px;
   color: var(--orange);
