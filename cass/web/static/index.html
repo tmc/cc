@@ -841,6 +841,9 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
   const [toolFilter, setToolFilter] = useState(urlParams.detail_filter || '');
   const [detailTab, setDetailTabRaw] = useState(normalizeDetailTab(urlParams.detail_tab));
   const [selectedIdx, setSelectedIdx] = useState(-1);
+  const searchAbortRef = useRef(null);
+  const searchSeqRef = useRef(0);
+  const searchTimerRef = useRef(null);
 
   function setQuery(v) { setQueryRaw(v); }
   function setAgent(v) { setAgentRaw(v); }
@@ -895,23 +898,50 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
 
   const effectiveSort = sort || (query ? 'relevance' : 'recent');
 
-  const doSearch = useCallback(async () => {
-    setLoading(true);
+  const searchPath = useCallback(() => {
+    const params = { q: query, agent, workspace, since, sort: sort || '', team, goal_status: goalStatus, skill, limit: '30' };
+    return 'search?' + qs(params);
+  }, [query, agent, workspace, since, sort, team, goalStatus, skill]);
+
+  const doSearch = useCallback(async (opts = {}) => {
+    const seq = ++searchSeqRef.current;
+    if (searchAbortRef.current) searchAbortRef.current.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    if (!opts.silent) setLoading(true);
     try {
-      const params = { q: query, agent, workspace, since, sort: sort || '', team, goal_status: goalStatus, skill, limit: '30' };
-      const r = await api('search?' + qs(params));
+      const r = await fetchJSON(searchPath(), { signal: controller.signal });
+      if (seq !== searchSeqRef.current) return;
       setResults(r);
     } catch (e) {
+      if (e && e.name === 'AbortError') return;
       console.error('search:', e);
+    } finally {
+      if (seq === searchSeqRef.current) {
+        if (searchAbortRef.current === controller) searchAbortRef.current = null;
+        setLoading(false);
+      }
     }
-    setLoading(false);
-  }, [query, agent, workspace, since, sort, team, goalStatus, skill]);
+  }, [searchPath]);
+
+  const scheduleSearch = useCallback((delay, opts) => {
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => doSearch(opts), delay);
+  }, [doSearch]);
 
   // Debounced live search.
   useEffect(() => {
-    const id = setTimeout(doSearch, 250);
-    return () => clearTimeout(id);
-  }, [query, agent, workspace, since, sort, team, goalStatus, skill]);
+    scheduleSearch(250);
+    return () => clearTimeout(searchTimerRef.current);
+  }, [scheduleSearch]);
+
+  useEffect(() => {
+    return () => {
+      searchSeqRef.current++;
+      clearTimeout(searchTimerRef.current);
+      if (searchAbortRef.current) searchAbortRef.current.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (!selected?.session_id || !results?.hits) return;
@@ -944,10 +974,10 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
 
   // Auto-refresh on SSE.
   useEffect(() => {
-    const handler = () => doSearch();
+    const handler = () => scheduleSearch(250, { silent: true });
     window.addEventListener('cass:refresh', handler);
     return () => window.removeEventListener('cass:refresh', handler);
-  }, [doSearch]);
+  }, [scheduleSearch]);
 
   // j/k keyboard navigation.
   useEffect(() => {
