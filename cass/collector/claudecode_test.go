@@ -158,6 +158,22 @@ func TestTitleFromSummary(t *testing.T) {
 			want: "efforts",
 		},
 		{
+			name: "multiline command markup",
+			summary: cc.SessionSummary{
+				FirstPrompt: "<command-name>\nefforts\n</command-name> <command-message>\nreview branch\n</command-message>",
+				File:        "/path/to/session.jsonl",
+			},
+			want: "review branch",
+		},
+		{
+			name: "goal context objective",
+			summary: cc.SessionSummary{
+				FirstPrompt: "<goal_context>\n<objective>\nflesh this tool out to be complete\n</objective>\n</goal_context>",
+				File:        "/path/to/session.jsonl",
+			},
+			want: "goal: flesh this tool out to be complete",
+		},
+		{
 			name: "goal context markup",
 			summary: cc.SessionSummary{
 				FirstPrompt: "<goal_context> Continue working toward the active thread. </goal_context>",

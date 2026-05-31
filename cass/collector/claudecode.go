@@ -295,8 +295,9 @@ func titleFromSummary(s cc.SessionSummary) string {
 }
 
 var (
-	commandNameTitleRE    = regexp.MustCompile(`(?i)<command-name>([^<]+)</command-name>`)
-	commandMessageTitleRE = regexp.MustCompile(`(?i)<command-message>([^<]+)</command-message>`)
+	commandNameTitleRE    = regexp.MustCompile(`(?is)<command-name>(.*?)</command-name>`)
+	commandMessageTitleRE = regexp.MustCompile(`(?is)<command-message>(.*?)</command-message>`)
+	goalObjectiveTitleRE  = regexp.MustCompile(`(?is)<goal_context>.*?<objective>(.*?)</objective>.*?</goal_context>`)
 	goalContextTitleRE    = regexp.MustCompile(`(?i)</?goal_context>`)
 	imageTagTitleRE       = regexp.MustCompile(`(?i)<image[^>]*>`)
 	imagePayloadTitleRE   = regexp.MustCompile(`(?i)\binput_image\s+data:image/\S+`)
@@ -308,11 +309,14 @@ func cleanGeneratedTitle(title string) string {
 	if title == "" {
 		return ""
 	}
-	if m := commandMessageTitleRE.FindStringSubmatch(title); len(m) == 2 && strings.TrimSpace(m[1]) != "" {
-		return strings.TrimSpace(m[1])
+	if m := commandMessageTitleRE.FindStringSubmatch(title); len(m) == 2 && compactTitleText(m[1]) != "" {
+		return compactTitleText(m[1])
 	}
-	if m := commandNameTitleRE.FindStringSubmatch(title); len(m) == 2 && strings.TrimSpace(m[1]) != "" {
-		return strings.TrimSpace(m[1])
+	if m := commandNameTitleRE.FindStringSubmatch(title); len(m) == 2 && compactTitleText(m[1]) != "" {
+		return compactTitleText(m[1])
+	}
+	if m := goalObjectiveTitleRE.FindStringSubmatch(title); len(m) == 2 && compactTitleText(m[1]) != "" {
+		return "goal: " + compactTitleText(m[1])
 	}
 
 	hadImage := imageTagTitleRE.MatchString(title) || imagePayloadTitleRE.MatchString(title)
@@ -325,6 +329,10 @@ func cleanGeneratedTitle(title string) string {
 		return "image input"
 	}
 	return title
+}
+
+func compactTitleText(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 func truncateTitle(title string) string {
