@@ -1885,6 +1885,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const [expanded, setExpanded] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [detailError, setDetailError] = useState('');
+  const [detailRefreshTick, setDetailRefreshTick] = useState(0);
 
   // Raw requested tab from URL/UI. activeTab falls back to conversation when
   // the selected session does not expose that tab.
@@ -1999,6 +2000,39 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
     return () => { cancelled = true; };
   }, [hit?.session_id, activeTab]);
+
+  useEffect(() => {
+    function refresh() {
+      setDetailRefreshTick(t => t + 1);
+    }
+    window.addEventListener('cass:refresh', refresh);
+    return () => window.removeEventListener('cass:refresh', refresh);
+  }, []);
+
+  useEffect(() => {
+    if (detailRefreshTick === 0 || !hit || !needsSessionEntries || hit.meta_error) return;
+    let cancelled = false;
+    api(sessionEntriesPath(0))
+      .then(e => {
+        if (cancelled) return;
+        const page = Array.isArray(e) ? e : [];
+        if (activeTab === 'conversation') {
+          const keepOlder = entries.length > page.length ? entries.slice(page.length) : [];
+          const next = page.concat(keepOlder);
+          setEntries(next);
+          setEntryCount(next.length);
+          setHasEarlierEntries(page.length === sessionEntryPageSize || (keepOlder.length > 0 && hasEarlierEntries));
+          return;
+        }
+        setEntries(page);
+        setEntryCount(page.length);
+        setHasEarlierEntries(false);
+      })
+      .catch(e => {
+        if (!cancelled) setDetailError(errorMessage(e, 'session unavailable'));
+      });
+    return () => { cancelled = true; };
+  }, [detailRefreshTick, hit?.session_id, activeTab]);
 
   // Apply initialFilter from tool click on search hit.
   useEffect(() => {
