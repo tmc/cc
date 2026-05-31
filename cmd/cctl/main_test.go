@@ -62,3 +62,31 @@ func TestRunSubcommandDispatchesCassRequests(t *testing.T) {
 		t.Fatalf("executed args = %q, want requests and --help", text)
 	}
 }
+
+func TestRunHelpDispatchesCassRequests(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper script is Unix-specific")
+	}
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "cass")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TMPDIR/cctl-help-args.txt\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath)
+	t.Setenv("TMPDIR", dir)
+
+	if code := runHelp([]string{"requests"}); code != 0 {
+		t.Fatalf("runHelp exit code = %d, want 0", code)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "cctl-help-args.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := strings.TrimSpace(string(got)); text != "requests\n--help" && text != "requests --help" {
+		t.Fatalf("help dispatch args = %q, want requests and --help", text)
+	}
+}

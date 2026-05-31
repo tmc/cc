@@ -76,17 +76,7 @@ func main() {
 
 	switch cmd {
 	case "help", "--help", "-h":
-		if len(args) > 0 {
-			spec, ok := resolveSubcommand(args[0])
-			if !ok {
-				fmt.Fprintf(os.Stderr, "cctl: unknown command %q\n", args[0])
-				fmt.Fprintf(os.Stderr, "Run 'cctl help' for usage.\n")
-				os.Exit(2)
-			}
-			runSubcommand(spec.binary, append(spec.args, "--help"))
-		} else {
-			usage()
-		}
+		os.Exit(runHelp(args))
 		return
 
 	case "version", "--version", "-v":
@@ -140,6 +130,20 @@ func runSubcommand(binary string, args []string) int {
 	}
 
 	return 0
+}
+
+func runHelp(args []string) int {
+	if len(args) == 0 {
+		usage()
+		return 0
+	}
+	spec, ok := resolveSubcommand(args[0])
+	if !ok {
+		fmt.Fprintf(os.Stderr, "cctl: unknown command %q\n", args[0])
+		fmt.Fprintf(os.Stderr, "Run 'cctl help' for usage.\n")
+		return 2
+	}
+	return runSubcommand(spec.binary, append(spec.args, "--help"))
 }
 
 func usage() {
