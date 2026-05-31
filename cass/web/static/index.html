@@ -2267,6 +2267,7 @@ function WorkflowsTab({ workflows, focusAgent, onFocusAgentChange }) {
                           const subtitle = workflowAgentSubtitle(a, name);
                           const focused = workflowAgentFocusMatch(focusAgent, wf, ri, a, agentIndex, key);
                           const stats = [
+                            a.phase && a.phase !== name ? a.phase : '',
                             a.agent_type,
                             a.tool_calls ? a.tool_calls + ' tools' : '',
                             a.tokens ? fmtNum(a.tokens) + ' tok' : '',
