@@ -3254,12 +3254,12 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
           <div class="detail-session-id">
             <div class="detail-session-line">
               <span class="detail-session-label">session</span>
-              <button class="detail-session-copy" onClick=${() => copyText(hit.session_id)} title="copy session id">${hit.session_id}</button>
+              <button class="detail-session-copy" onClick=${() => copyText(hit.session_id)} title="Copy session ID">${hit.session_id}</button>
             </div>
             ${resumeCmd && html`
               <div class="detail-resume-command">
                 <code>${resumeCmd}</code>
-                <button class="detail-copy-button" onClick=${() => copyText(resumeCmd)}>copy</button>
+                <button class="detail-copy-button" onClick=${() => copyText(resumeCmd)}>Copy</button>
               </div>
             `}
             ${hit.sparkline && html`<span class="hit-sparkline" style="margin-left:8px">${hit.sparkline}</span>`}
@@ -3434,7 +3434,7 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
               ].filter(Boolean).join(' · ')}
             </div>
             ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
-            <div class="graph-tooltip-hint">click to ${isExpanded(n.full_id || n.id) ? 'collapse' : 'expand'} agents</div>
+            <div class="graph-tooltip-hint">Click to ${isExpanded(n.full_id || n.id) ? 'collapse' : 'expand'} agents</div>
           </div>
         `;
       }
@@ -3444,8 +3444,8 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
           <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
             <div class="graph-tooltip-title">${workflowGraphAgentLabel(n, tooltip.id)}</div>
             ${subtitle && html`<div class="graph-tooltip-stat" style="white-space:normal;max-width:240px">${subtitle}</div>`}
-            <div class="graph-tooltip-stat">${[workflowGraphAgentInfo(n) || 'agent', n.workflow_run_id || ''].filter(Boolean).join(' · ')}</div>
-            <div class="graph-tooltip-hint">click to open parent session</div>
+            <div class="graph-tooltip-stat">${[workflowGraphAgentInfo(n) || 'Agent', n.workflow_run_id || ''].filter(Boolean).join(' · ')}</div>
+            <div class="graph-tooltip-hint">Click to open parent session</div>
           </div>
         `;
       }
@@ -3455,10 +3455,10 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
           <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
             <div class="graph-tooltip-title">${n.title || n.name || tooltip.id}</div>
             <div class="graph-tooltip-stat">
-              ${[n.name || 'subagent', n.status, tok >= 1000 && fmtNum(tok) + ' tokens'].filter(Boolean).join(' · ')}
+              ${[n.name || 'Subagent', n.status, tok >= 1000 && fmtNum(tok) + ' tokens'].filter(Boolean).join(' · ')}
             </div>
             ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
-            <div class="graph-tooltip-hint">click to open spawned session</div>
+            <div class="graph-tooltip-hint">Click to open spawned session</div>
           </div>
         `;
       }
