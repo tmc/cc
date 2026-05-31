@@ -4960,7 +4960,8 @@ function RateLimitGauges({ latestLimits }) {
   if (!latestLimits || latestLimits.length === 0) {
     return html`
       <div class="rl-no-data">
-        No rate-limit data — run <code>cass index --har-dir &lt;api-request-export-dir&gt;</code>
+        No rate-limit data — run <code>cass index --api-request-dir &lt;api-request-export-dir&gt;</code>
+        or <code>cass index --har-dir &lt;api-request-export-dir&gt;</code>
         or ensure proxyman artifact files exist at <code>~/.it2/sessions/*/proxy-traffic.*.jsonl</code>
       </div>
     `;
