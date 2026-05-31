@@ -2834,9 +2834,15 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
       </div>
     `;
 
+    const sortedRequests = [...apiRequests].sort((a, b) => {
+      const ta = a.timestamp || 0;
+      const tb = b.timestamp || 0;
+      return tb - ta || String(b.id || '').localeCompare(String(a.id || ''));
+    });
+
     return html`
       <div class="requests-list">
-        ${apiRequests.map((req, i) => {
+        ${sortedRequests.map((req, i) => {
           const bd = req.breakdown;
           const hasBd = bd && Object.keys(bd).length > 0 && req.total_request_bytes > 0;
           const toolEntries = bd ? topEntriesByBytes(bd.tool_bytes, 3) : [];
