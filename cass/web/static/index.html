@@ -1836,7 +1836,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const [searchQuery, setSearchQuery] = useState('');
   const [detailError, setDetailError] = useState('');
 
-  // Tab state: 'conversation' or 'requests'
+  // Raw requested tab from URL/UI. activeTab falls back to conversation when
+  // the selected session does not expose that tab.
   const [activeTabRaw, setActiveTabRaw] = useState(normalizeDetailTab(initialTab));
   const [apiRequestsState, setApiRequestsState] = useState({ sessionID: '', items: [] });
   const [requestsLoading, setRequestsLoading] = useState(false);
@@ -1851,8 +1852,17 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const detailSkillCount = (hit?.selected_skill_count || 0) + (hit?.loaded_skill_count || 0);
   const requestCount = hit?.api_request_count || 0;
   const apiRequests = apiRequestsState.sessionID === hit?.session_id ? apiRequestsState.items : [];
+  const agentData = useAgentData(entries, hit?.workflows);
+  const hasAgentTabHint = (hit?.subagent_entries || 0) > 0 || (hit?.subagent_spawns || 0) > 0;
+  const hasAgentTab = agentData.hasAgents || hasAgentTabHint;
+  const hasWorkflowTab = (hit?.workflows || []).length > 0;
   const showRequestsTab = requestCount > 0 || apiRequests.length > 0;
-  const activeTab = activeTabRaw === 'requests' && !showRequestsTab ? 'conversation' : activeTabRaw;
+  const activeTab =
+    (activeTabRaw === 'agents' && !hasAgentTab) ||
+    (activeTabRaw === 'workflows' && !hasWorkflowTab) ||
+    (activeTabRaw === 'requests' && !showRequestsTab)
+      ? 'conversation'
+      : activeTabRaw;
   const needsSessionEntries = activeTab === 'conversation' || activeTab === 'agents';
 
   function setActiveTab(tab) {
@@ -2021,9 +2031,6 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     });
     return { visibleEntries: all, matchIndices: matches };
   }, [entries, searchQuery]);
-
-  const agentData = useAgentData(entries, hit?.workflows);
-  const hasAgentTab = agentData.hasAgents || (hit?.subagent_entries || 0) > 0 || (hit?.subagent_spawns || 0) > 0;
 
   const matchCount = matchIndices.length;
   const matchSet = useMemo(() => new Set(matchIndices), [matchIndices]);
@@ -2493,7 +2500,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
                   : (agentData.hasAgents ? agentData.totalAgents : (hit.subagent_spawns || hit.subagent_entries || 0))})
               </button>
             `}
-            ${(hit.workflows || []).length > 0 && html`
+            ${hasWorkflowTab && html`
               <button class="detail-tab ${activeTab === 'workflows' ? 'active' : ''}"
                       onClick=${() => setActiveTab('workflows')}>
                 Workflows (${hit.workflows.length})
