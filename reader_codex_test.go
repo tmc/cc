@@ -243,6 +243,35 @@ func TestReadFileCodexTokenCountUsage(t *testing.T) {
 	}
 }
 
+func TestReaderCodexTokenCountUsage(t *testing.T) {
+	const jsonl = `{"timestamp":"2026-02-25T10:00:00Z","type":"session_meta","payload":{"id":"sid-usage-123","cwd":"/tmp/myproj","originator":"codex_cli_rs","source":"cli"}}
+{"timestamp":"2026-02-25T10:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"working"}]}}
+{"timestamp":"2026-02-25T10:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":17,"cached_input_tokens":9,"output_tokens":5,"reasoning_output_tokens":2,"total_tokens":31}}}}
+{"timestamp":"2026-02-25T10:00:03Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}}
+`
+	r := NewReader(context.Background(), strings.NewReader(jsonl))
+
+	var entries []Entry
+	for r.Next() {
+		entries = append(entries, r.Entry())
+	}
+	if err := r.Err(); err != nil {
+		t.Fatalf("Reader err: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("len(entries) = %d, want 3", len(entries))
+	}
+	if entries[1].Message == nil || entries[1].Message.Usage == nil {
+		t.Fatalf("assistant usage missing: %#v", entries[1].Message)
+	}
+	if entries[1].Message.Usage.InputTokens != 17 || entries[1].Message.Usage.OutputTokens != 5 || entries[1].Message.Usage.CacheReadInputTokens != 9 {
+		t.Fatalf("assistant usage = %+v, want input=17 output=5 cache_read=9", entries[1].Message.Usage)
+	}
+	if entries[2].SessionID != "sid-usage-123" {
+		t.Fatalf("user sessionID = %q, want sid-usage-123", entries[2].SessionID)
+	}
+}
+
 func TestReadFileCodexTurnContextCWD(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "session.jsonl")

@@ -32,6 +32,12 @@ type Reader struct {
 	err     error
 	entry   Entry
 	n       int
+
+	currentSessionID string
+	pending          Entry
+	hasPending       bool
+	buffered         Entry
+	hasBuffered      bool
 }
 
 // NewReader creates a Reader from an io.Reader. The context is checked
@@ -45,6 +51,16 @@ func NewReader(ctx context.Context, r io.Reader) *Reader {
 // Next advances to the next entry. Returns false at EOF, on error, or when
 // the reader's context is canceled.
 func (r *Reader) Next() bool {
+	if r.hasBuffered {
+		r.entry = r.buffered
+		r.hasBuffered = false
+		return true
+	}
+	if r.hasPending {
+		r.entry = r.pending
+		r.hasPending = false
+		return true
+	}
 	for r.scanner.Scan() {
 		r.n++
 		if r.n%256 == 0 {
@@ -61,7 +77,37 @@ func (r *Reader) Next() bool {
 		if !ok {
 			continue
 		}
+		if entry.SessionID != "" {
+			r.currentSessionID = entry.SessionID
+		} else if r.currentSessionID != "" {
+			entry.SessionID = r.currentSessionID
+		}
+		if entry.Type == "system" && entry.Subtype == "token_count" && entry.Usage != nil {
+			if r.hasPending && r.pending.Message != nil && r.pending.Message.Role == "assistant" && r.pending.Message.Usage == nil {
+				r.pending.Message.Usage = entry.Usage
+			}
+			continue
+		}
+		if r.hasPending {
+			r.buffered = entry
+			r.hasBuffered = true
+			r.entry = r.pending
+			r.pending = Entry{}
+			r.hasPending = false
+			return true
+		}
+		if entry.Message != nil && entry.Message.Role == "assistant" {
+			r.pending = entry
+			r.hasPending = true
+			continue
+		}
 		r.entry = entry
+		return true
+	}
+	if r.hasPending {
+		r.entry = r.pending
+		r.pending = Entry{}
+		r.hasPending = false
 		return true
 	}
 	r.err = r.scanner.Err()
