@@ -2160,7 +2160,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
   function onDetailWheel(e) {
     e.stopPropagation();
-    const scrollTarget = e.target?.closest?.('.detail-body, .detail-header, .detail-skills-scroll, .conv-content');
+    const scrollTarget = e.target?.closest?.('.detail-body, .detail-header, .detail-skills, .detail-skills-scroll, .conv-content');
     if (canScroll(scrollTarget, e.deltaY)) {
       return;
     }
