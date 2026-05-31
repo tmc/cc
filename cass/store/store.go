@@ -740,8 +740,10 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 
 	// Build query with BM25 ranking when doing FTS.
 	statsCols := ", s." + strings.ReplaceAll(hitStatsCols, ", ", ", s.")
+	apiRequestCountCol := hitAPIRequestCountCol
 	if req.SummaryOnly {
 		statsCols = ", s." + strings.ReplaceAll(hitSummaryCols, ", ", ", s.")
+		apiRequestCountCol = "0"
 	}
 	var query string
 	if req.Query != "" {
@@ -754,7 +756,7 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 			%s
 			%s
 			LIMIT ? OFFSET ?
-		`, hitAPIRequestCountCol, statsCols, whereClause, orderClause)
+		`, apiRequestCountCol, statsCols, whereClause, orderClause)
 	} else {
 		query = fmt.Sprintf(`
 			SELECT s.id, s.agent, s.title, substr(s.content, 1, 200) as snip,
@@ -764,7 +766,7 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 			%s
 			%s
 			LIMIT ? OFFSET ?
-		`, hitAPIRequestCountCol, statsCols, whereClause, orderClause)
+		`, apiRequestCountCol, statsCols, whereClause, orderClause)
 	}
 	queryLimit := req.Limit
 	if req.SkipCount {

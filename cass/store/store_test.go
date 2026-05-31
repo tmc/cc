@@ -560,6 +560,14 @@ func TestSessionReturnsIndexedMetadata(t *testing.T) {
 	if len(result.Hits) != 1 || result.Hits[0].APIRequestCount != 2 {
 		t.Fatalf("search request count hit = %#v", result.Hits)
 	}
+
+	summary, err := s.Search(ctx, cass.SearchRequest{Query: "metadata", Limit: 10, SummaryOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.Hits) != 1 || summary.Hits[0].APIRequestCount != 0 {
+		t.Fatalf("summary search request count hit = %#v, want omitted count", summary.Hits)
+	}
 }
 
 func TestSessionMappingUsesClaudeSessionID(t *testing.T) {
