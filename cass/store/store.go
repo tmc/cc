@@ -67,6 +67,9 @@ func New(dbPath string, opts ...Option) (*DB, error) {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	if dbPath == ":memory:" {
+		cfg.maxOpenConns = 1
+	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)

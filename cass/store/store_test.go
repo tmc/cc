@@ -19,6 +19,17 @@ func newTestStore(t *testing.T) *DB {
 	return s
 }
 
+func TestMemoryStoreUsesSingleConnection(t *testing.T) {
+	s, err := New(":memory:", WithMaxOpenConns(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if got := s.db.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("MaxOpenConnections = %d, want 1 for :memory:", got)
+	}
+}
+
 func TestBatchIndexAndSearch(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
