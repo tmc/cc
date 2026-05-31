@@ -95,13 +95,13 @@ func runCharacteristics(files []string) error {
 	if err != nil {
 		return err
 	}
+	if len(report.UnknownModels) > 0 {
+		fmt.Fprintf(os.Stderr, "warning: unknown models: %s\n", strings.Join(report.UnknownModels, ", "))
+	}
 	if *formatFlag == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(report)
-	}
-	if len(report.UnknownModels) > 0 {
-		fmt.Fprintf(os.Stderr, "warning: unknown models: %s\n", strings.Join(report.UnknownModels, ", "))
 	}
 	renderCharacteristicsReport(report)
 	return nil
@@ -203,30 +203,12 @@ func analyzeCharacteristics(files []string) (*characteristicsReport, error) {
 		return requests[i].Timestamp.Before(requests[j].Timestamp)
 	})
 
-	active := make([]requestRecord, 0, len(requests))
-	sessionCounts := make(map[string]int)
-	for i := 0; i < len(requests); {
-		ts := requests[i].Timestamp
-		cutoff := ts.Add(-*parallelWindowFlag)
-		for len(active) > 0 && active[0].Timestamp.Before(cutoff) {
-			front := active[0]
-			active = active[1:]
-			sessionCounts[front.SessionID]--
-			if sessionCounts[front.SessionID] <= 0 {
-				delete(sessionCounts, front.SessionID)
-			}
-		}
-		j := i
-		for j < len(requests) && requests[j].Timestamp.Equal(ts) {
-			active = append(active, requests[j])
-			sessionCounts[requests[j].SessionID]++
-			j++
-		}
-		activeCount := len(sessionCounts)
-		for k := i; k < j; k++ {
-			requests[k].ParallelActive = activeCount
-		}
-		i = j
+	var parallel ParallelIndex
+	for _, req := range requests {
+		parallel.Add(req.SessionID, req.Timestamp, *parallelWindowFlag)
+	}
+	for i := range requests {
+		requests[i].ParallelActive = parallel.ActiveAt(requests[i].Timestamp)
 	}
 
 	carriers := make(map[string]float64)

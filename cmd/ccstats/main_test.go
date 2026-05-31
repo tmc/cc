@@ -13,6 +13,8 @@ import (
 	ccpkg "github.com/tmc/cc"
 )
 
+var updateGoldenFlag = flag.Bool("update", false, "update golden files")
+
 func TestStatsForFileCountsMessagesToolsTokensAndCompactions(t *testing.T) {
 	path := writeStatsFixture(t)
 
@@ -145,6 +147,33 @@ func TestDefaultUsageMentionsCharacteristicsSubcommand(t *testing.T) {
 	})
 	if !strings.Contains(got, "ccstats characteristics -since 24h") {
 		t.Fatalf("default usage missing characteristics example:\n%s", got)
+	}
+}
+
+func TestParallelIndexCountsActiveSessions(t *testing.T) {
+	base := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	var idx ParallelIndex
+	idx.Add("a", base, 2*time.Minute)
+	idx.Add("b", base.Add(1*time.Minute), 2*time.Minute)
+	idx.Add("c", base.Add(90*time.Second), 2*time.Minute)
+	idx.Build()
+
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+	}{
+		{name: "first request", at: base},
+		{name: "two active", at: base.Add(90 * time.Second)},
+		{name: "after window", at: base.Add(3 * time.Minute)},
+	} {
+		want := naiveParallelActiveAt([]parallelWindow{
+			{session: "a", start: base, end: base.Add(2 * time.Minute)},
+			{session: "b", start: base.Add(1 * time.Minute), end: base.Add(3 * time.Minute)},
+			{session: "c", start: base.Add(90 * time.Second), end: base.Add(3*time.Minute + 30*time.Second)},
+		}, tc.at)
+		if got := idx.ActiveAt(tc.at); got != want {
+			t.Fatalf("%s: ActiveAt(%s) = %d, want %d", tc.name, tc.at.Format(time.RFC3339), got, want)
+		}
 	}
 }
 
@@ -342,6 +371,44 @@ func TestRunCharacteristicsWarnsOnUnknownModel(t *testing.T) {
 	}
 	if !strings.Contains(out, "mystery-model-1") {
 		t.Fatalf("stdout missing model-derived report:\n%s", out)
+	}
+}
+
+func TestRunCharacteristicsWarnsOnUnknownModelInJSON(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+	})
+	*unitFlag = "cost"
+	*verboseFlag = true
+	*formatFlag = "json"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+
+	dir := t.TempDir()
+	path := writeCharacteristicsSession(t, dir, "unknown.jsonl", []ccpkg.Entry{
+		assistantEntry("session-u", "session-u", "", time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC), false, "mystery-model-1", 50, 10, 0, 0, toolBlocks("", 0)),
+	})
+
+	out, errText := captureRunOutput(t, func() error {
+		return runCharacteristics([]string{path})
+	})
+	if !strings.Contains(errText, "unknown models: mystery-model-1") {
+		t.Fatalf("stderr missing unknown-model warning:\n%s", errText)
+	}
+	var report characteristicsReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode JSON report: %v\n%s", err, out)
+	}
+	if report.Unit != "cost" {
+		t.Fatalf("unit = %q, want cost", report.Unit)
 	}
 }
 
@@ -582,7 +649,7 @@ func captureCharacteristicsOutputs(t *testing.T, files []string) (string, string
 func assertGolden(t *testing.T, path, got string) {
 	t.Helper()
 
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
+	if *updateGoldenFlag {
 		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -594,4 +661,20 @@ func assertGolden(t *testing.T, path, got string) {
 	if got != string(want) {
 		t.Fatalf("golden mismatch for %s\n--- want ---\n%s\n--- got ---\n%s", path, want, got)
 	}
+}
+
+type parallelWindow struct {
+	session string
+	start   time.Time
+	end     time.Time
+}
+
+func naiveParallelActiveAt(windows []parallelWindow, at time.Time) int {
+	active := make(map[string]struct{})
+	for _, w := range windows {
+		if (w.start.Equal(at) || w.start.Before(at)) && at.Before(w.end) {
+			active[w.session] = struct{}{}
+		}
+	}
+	return len(active)
 }
