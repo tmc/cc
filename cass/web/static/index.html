@@ -2853,6 +2853,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                   <span class="label">Tokens (in/out/cr/cw)</span>
                   <span class="val">${req.input_tokens} / ${req.output_tokens} / ${req.cache_read_tokens || 0} / ${req.cache_creation_tokens || 0}</span>
                 </div>
+                <div class="req-metric">
+                  <span class="label">Request size</span>
+                  <span class="val">${(req.total_request_bytes / 1024).toFixed(1)}k bytes</span>
+                </div>
                 ${bd && html`
                   <div class="req-metric">
                     <span class="label">Blocks (sys/tools/msgs)</span>
