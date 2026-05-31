@@ -2842,6 +2842,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                 ${requestMetaItem('hash', shortSessionID(req.source_hash), req.source_hash)}
                 ${requestMetaItem('it2', shortSessionID(req.it2_session_id), req.it2_session_id)}
                 ${requestMetaItem('pid', req.client_pid ? String(req.client_pid) : '', req.client_pid ? String(req.client_pid) : '')}
+                ${requestMetaItem('user', shortSessionID(req.user_hash), req.user_hash)}
                 ${requestMetaItem('acct', shortSessionID(req.account_uuid), req.account_uuid)}
                 ${requestMetaItem('org', shortSessionID(req.org_id), req.org_id)}
                 ${rateLimitItems && html`
