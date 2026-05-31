@@ -22,6 +22,8 @@ type DB struct {
 
 const hitStatsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goals_json, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count`
 
+const hitSummaryCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goal_count, active_goal_count, completed_goal_count, skill_count, selected_skill_count, loaded_skill_count, workflow_runs, workflow_agent_runs, workflow_task_ops`
+
 const hitAPIRequestCountCol = `(SELECT count(*) FROM api_requests ar WHERE ar.session_id = s.id OR ar.session_id IN (SELECT m.claude_session FROM session_mapping m WHERE m.cass_session = s.id AND m.claude_session <> '') OR (ar.session_id = '' AND ar.it2_session_id = s.id))`
 
 const skillsJSONPresentExpr = `skills_json <> '' AND skills_json <> '[]'`
@@ -738,6 +740,9 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 
 	// Build query with BM25 ranking when doing FTS.
 	statsCols := ", s." + strings.ReplaceAll(hitStatsCols, ", ", ", s.")
+	if req.SummaryOnly {
+		statsCols = ", s." + strings.ReplaceAll(hitSummaryCols, ", ", ", s.")
+	}
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
@@ -771,7 +776,13 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 
 	var hits []cass.Hit
 	for rows.Next() {
-		h, err := scanHit(rows)
+		var h cass.Hit
+		var err error
+		if req.SummaryOnly {
+			h, err = scanSummaryHit(rows)
+		} else {
+			h, err = scanHit(rows)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
@@ -799,8 +810,10 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		total = len(hits)
 	}
 
-	if err := s.foldWorkflows(ctx, hits, req.Query); err != nil {
-		return nil, err
+	if !req.SummaryOnly {
+		if err := s.foldWorkflows(ctx, hits, req.Query); err != nil {
+			return nil, err
+		}
 	}
 
 	return &cass.SearchResult{
@@ -1085,6 +1098,38 @@ func scanHit(row hitScanner) (cass.Hit, error) {
 	if statsJSON != "" {
 		applyHitStats(&h, statsJSON)
 	}
+	return h, nil
+}
+
+func scanSummaryHit(row hitScanner) (cass.Hit, error) {
+	var h cass.Hit
+	var startedUnix, endedUnix int64
+	var statsJSON string
+	var isTeamLead int
+	var workflowRuns, workflowAgents, workflowTaskOps int
+	if err := row.Scan(
+		&h.SessionID, &h.Agent, &h.Title, &h.Snippet, &h.Score, &h.Workspace, &h.SourcePath, &startedUnix,
+		&h.APIRequestCount, &endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
+		&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
+		&h.GitCommonDir, &h.Branch, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount,
+		&h.SkillCount, &h.SelectedSkillCount, &h.LoadedSkillCount, &workflowRuns, &workflowAgents, &workflowTaskOps,
+	); err != nil {
+		return cass.Hit{}, err
+	}
+	if startedUnix > 0 {
+		h.StartedAt = time.Unix(startedUnix, 0).Format(time.RFC3339)
+	}
+	if endedUnix > 0 {
+		h.EndedAt = time.Unix(endedUnix, 0).Format(time.RFC3339)
+	}
+	h.IsTeamLead = isTeamLead != 0
+	if statsJSON != "" {
+		applyHitStats(&h, statsJSON)
+	}
+	h.WorkflowCount = workflowRuns
+	h.WorkflowAgentCount = workflowAgents
+	h.WorkflowTaskOpCount = workflowTaskOps
+	h.SummaryOnly = true
 	return h, nil
 }
 

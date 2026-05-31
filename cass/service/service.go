@@ -216,6 +216,7 @@ func (s *Service) Search(ctx context.Context, req cass.SearchRequest) (*cass.Sea
 // SearchSummary queries the index without read-time artifact enrichment.
 // Callers use it for lightweight lists, then fetch Session for detail.
 func (s *Service) SearchSummary(ctx context.Context, req cass.SearchRequest) (*cass.SearchResult, error) {
+	req.SummaryOnly = true
 	return s.search(ctx, req, false)
 }
 

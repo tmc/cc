@@ -544,6 +544,35 @@ func TestSearchAttachesWorkflowsWithoutMatch(t *testing.T) {
 	}
 }
 
+func TestSearchSummarySkipsWorkflowPayload(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess := sessionWithWorkflows()
+	sess.Stats.WorkflowRuns = 2
+	sess.Stats.WorkflowAgentRuns = 3
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.Search(ctx, cass.SearchRequest{Limit: 10, SummaryOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("got %d hits, want 1", len(res.Hits))
+	}
+	h := res.Hits[0]
+	if !h.SummaryOnly {
+		t.Fatalf("SummaryOnly = false, want true")
+	}
+	if len(h.Workflows) != 0 {
+		t.Fatalf("attached workflows = %+v, want none", h.Workflows)
+	}
+	if h.WorkflowCount != 2 || h.WorkflowAgentCount != 3 {
+		t.Fatalf("workflow counts = %d/%d, want 2/3", h.WorkflowCount, h.WorkflowAgentCount)
+	}
+}
+
 func TestDeleteCascadesWorkflows(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

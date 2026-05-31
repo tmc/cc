@@ -51,6 +51,10 @@ type SearchRequest struct {
 	Children ChildMode // child-agent display mode; empty means collapsed.
 	Limit    int
 	Offset   int
+
+	// SummaryOnly omits nested detail payloads from hits. Use for search result
+	// lists that fetch full session metadata only after a row is opened.
+	SummaryOnly bool
 }
 
 // Filters constrains search results.
