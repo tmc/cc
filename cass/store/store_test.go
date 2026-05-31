@@ -696,6 +696,15 @@ func TestSkillsRoundTrip(t *testing.T) {
 			{
 				Name:      "imagegen",
 				Source:    "codex-cli",
+				Kind:      "expanded",
+				Count:     1,
+				FirstSeen: now.Add(-15 * time.Minute),
+				LastSeen:  now.Add(-15 * time.Minute),
+				Evidence:  []string{"skill-expanded prompt context"},
+			},
+			{
+				Name:      "imagegen",
+				Source:    "codex-cli",
 				Kind:      "available",
 				Count:     1,
 				FirstSeen: now.Add(-10 * time.Minute),
@@ -720,11 +729,11 @@ func TestSkillsRoundTrip(t *testing.T) {
 		t.Fatalf("TotalCount = %d, want 1", result.TotalCount)
 	}
 	h := result.Hits[0]
-	if h.SkillCount != 3 || h.SelectedSkillCount != 1 || h.LoadedSkillCount != 1 {
-		t.Fatalf("skill counts = %d/%d/%d, want 3/1/1", h.SkillCount, h.SelectedSkillCount, h.LoadedSkillCount)
+	if h.SkillCount != 4 || h.SelectedSkillCount != 1 || h.LoadedSkillCount != 1 {
+		t.Fatalf("skill counts = %d/%d/%d, want 4/1/1", h.SkillCount, h.SelectedSkillCount, h.LoadedSkillCount)
 	}
-	if len(h.Skills) != 3 {
-		t.Fatalf("len(hit.Skills) = %d, want 3", len(h.Skills))
+	if len(h.Skills) != 4 {
+		t.Fatalf("len(hit.Skills) = %d, want 4", len(h.Skills))
 	}
 
 	skills, err := s.Skills(ctx, "nlm", "selected", 10)
@@ -739,7 +748,8 @@ func TestSkillsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agg["skills"].(int) != 3 || agg["selected_skills"].(int) != 1 || agg["loaded_skills"].(int) != 1 {
+	if agg["skills"].(int) != 4 || agg["selected_skills"].(int) != 1 ||
+		agg["loaded_skills"].(int) != 1 || agg["context_skills"].(int) != 1 {
 		t.Fatalf("aggregate skill counts = %#v", agg)
 	}
 	top := agg["top_skills"].(map[string]int)
@@ -747,7 +757,7 @@ func TestSkillsRoundTrip(t *testing.T) {
 		t.Fatalf("top skills = %#v", top)
 	}
 	if top["imagegen"] != 0 {
-		t.Fatalf("top skills include available-only imagegen: %#v", top)
+		t.Fatalf("top skills include context-only imagegen: %#v", top)
 	}
 }
 

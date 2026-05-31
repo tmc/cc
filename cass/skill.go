@@ -5,6 +5,7 @@ import "time"
 // SkillUse is one skill signal observed in a session.
 //
 // Kind classifies the signal: available, selected, loaded, expanded, or tool.
+// Expanded means prompt context was present; it is not counted as skill use.
 // Evidence is short text explaining why the skill was recorded.
 type SkillUse struct {
 	Name      string    `json:"name"`

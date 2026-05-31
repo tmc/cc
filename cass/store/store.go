@@ -1227,6 +1227,10 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 	}
 	defer skillRows.Close()
 	topSkills := map[string]int{}
+	contextSkillCount := 0
+	skillCount = 0
+	selectedSkillCount = 0
+	loadedSkillCount = 0
 	for skillRows.Next() {
 		var skillsJSON string
 		if err := skillRows.Scan(&skillsJSON); err != nil {
@@ -1239,6 +1243,15 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 		for _, sk := range skills {
 			if sk.Name == "" {
 				continue
+			}
+			skillCount++
+			switch sk.Kind {
+			case "selected", "tool":
+				selectedSkillCount++
+			case "loaded":
+				loadedSkillCount++
+			case "expanded":
+				contextSkillCount++
 			}
 			if !skillCountsAsUse(sk.Kind) {
 				continue
@@ -1306,6 +1319,7 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 		"skills":            skillCount,
 		"selected_skills":   selectedSkillCount,
 		"loaded_skills":     loadedSkillCount,
+		"context_skills":    contextSkillCount,
 		"workflows":         workflowRuns,
 		"workflow_agents":   workflowAgents,
 		"workflow_task_ops": workflowTaskOps,
@@ -2695,9 +2709,9 @@ func skillCounts(skills []cass.SkillUse) (total, selected, loaded int) {
 	total = len(skills)
 	for _, s := range skills {
 		switch s.Kind {
-		case "selected":
+		case "selected", "tool":
 			selected++
-		case "loaded", "expanded":
+		case "loaded":
 			loaded++
 		}
 	}
@@ -2705,5 +2719,10 @@ func skillCounts(skills []cass.SkillUse) (total, selected, loaded int) {
 }
 
 func skillCountsAsUse(kind string) bool {
-	return kind != "available"
+	switch kind {
+	case "selected", "tool", "loaded":
+		return true
+	default:
+		return false
+	}
 }
