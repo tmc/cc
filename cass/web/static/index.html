@@ -1193,7 +1193,9 @@ function displaySessionTitle(hit) {
 }
 
 function importantSkills(skills) {
-  return (skills || []).filter(s => s.kind === 'selected' || s.kind === 'tool');
+  const used = skills || [];
+  const selected = used.filter(s => s.kind === 'selected' || s.kind === 'tool');
+  return selected.length ? selected : used.filter(s => s.kind === 'loaded');
 }
 
 function skillKindLabel(kind) {

@@ -822,6 +822,78 @@ func TestSkillsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSearchSummaryKeepsUsedSkillBadges(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	sess := cass.Session{
+		ID:        "summary-skill-session",
+		Agent:     "codex-cli",
+		Title:     "Use image generation",
+		Workspace: "/tmp/project",
+		StartedAt: now.Add(-time.Hour),
+		EndedAt:   now,
+		Messages:  []cass.Message{{Role: "user", Content: "make an image"}},
+		Skills: []cass.SkillUse{
+			{
+				Name:     "imagegen",
+				Kind:     "available",
+				Count:    1,
+				Path:     "/Users/tmc/.codex/skills/.system/imagegen/SKILL.md",
+				Evidence: []string{"available skills list"},
+			},
+			{
+				Name:     "imagegen",
+				Kind:     "loaded",
+				Count:    1,
+				Path:     "/Users/tmc/.codex/skills/.system/imagegen/SKILL.md",
+				Evidence: []string{"skill-expanded prompt context"},
+			},
+			{
+				Name:     "go-team-history-audit",
+				Kind:     "selected",
+				Count:    1,
+				Path:     "/Users/tmc/.codex/skills/go-team-history-audit/SKILL.md",
+				Evidence: []string{"Skill tool invocation"},
+			},
+		},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.Search(ctx, cass.SearchRequest{Query: "image", Limit: 10, SummaryOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(result.Hits))
+	}
+	h := result.Hits[0]
+	if !h.SummaryOnly {
+		t.Fatalf("SummaryOnly = false, want true")
+	}
+	if h.SkillCount != 3 || h.SelectedSkillCount != 1 || h.LoadedSkillCount != 1 {
+		t.Fatalf("skill counts = %d/%d/%d, want 3/1/1", h.SkillCount, h.SelectedSkillCount, h.LoadedSkillCount)
+	}
+	if len(h.Skills) != 2 {
+		t.Fatalf("len(hit.Skills) = %d, want 2: %#v", len(h.Skills), h.Skills)
+	}
+	for _, skill := range h.Skills {
+		if skill.Path != "" || len(skill.Evidence) != 0 || !skill.FirstSeen.IsZero() || !skill.LastSeen.IsZero() {
+			t.Fatalf("summary skill carried detail payload: %#v", skill)
+		}
+	}
+	got := map[string]string{}
+	for _, skill := range h.Skills {
+		got[skill.Name] = skill.Kind
+	}
+	if got["imagegen"] != "loaded" || got["go-team-history-audit"] != "selected" {
+		t.Fatalf("summary skills = %#v, want loaded imagegen and selected audit", h.Skills)
+	}
+}
+
 // TestBatchIndexSubagentRuns verifies that SubagentRun records persist
 // alongside their parent session, and that re-indexing the same session
 // with a different set of runs replaces them rather than duplicating.

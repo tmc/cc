@@ -98,9 +98,35 @@ func trimSearchHit(h *cass.Hit) {
 		return
 	}
 	h.Goals = nil
-	h.Skills = nil
+	h.Skills = trimSearchSkills(h.Skills)
 	h.Workflows = nil
 	h.SummaryOnly = true
+}
+
+func trimSearchSkills(skills []cass.SkillUse) []cass.SkillUse {
+	var out []cass.SkillUse
+	seen := map[string]bool{}
+	for _, skill := range skills {
+		switch skill.Kind {
+		case "selected", "tool", "loaded":
+		default:
+			continue
+		}
+		if skill.Name == "" {
+			continue
+		}
+		key := skill.Kind + "\x00" + skill.Name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, cass.SkillUse{
+			Name:  skill.Name,
+			Kind:  skill.Kind,
+			Count: skill.Count,
+		})
+	}
+	return out
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

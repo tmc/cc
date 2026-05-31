@@ -22,7 +22,7 @@ type DB struct {
 
 const hitStatsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goals_json, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count`
 
-const hitSummaryCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goal_count, active_goal_count, completed_goal_count, skill_count, selected_skill_count, loaded_skill_count, workflow_runs, workflow_agent_runs, workflow_task_ops`
+const hitSummaryCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count, workflow_runs, workflow_agent_runs, workflow_task_ops`
 
 const hitAPIRequestCountCol = `(SELECT count(*) FROM api_requests ar WHERE ar.session_id = s.id OR ar.session_id IN (SELECT m.claude_session FROM session_mapping m WHERE m.cass_session = s.id AND m.claude_session <> '') OR (ar.session_id = '' AND ar.it2_session_id = s.id))`
 
@@ -1176,7 +1176,7 @@ func scanHit(row hitScanner) (cass.Hit, error) {
 func scanSummaryHit(row hitScanner) (cass.Hit, error) {
 	var h cass.Hit
 	var startedUnix, endedUnix int64
-	var statsJSON string
+	var statsJSON, skillsJSON string
 	var isTeamLead int
 	var workflowRuns, workflowAgents, workflowTaskOps int
 	if err := row.Scan(
@@ -1184,7 +1184,7 @@ func scanSummaryHit(row hitScanner) (cass.Hit, error) {
 		&h.APIRequestCount, &endedUnix, &h.ToolCalls, &h.Turns, &h.InputTokens, &h.OutputTokens, &h.FilesEdited, &h.LinesWritten, &h.DurationSecs,
 		&h.Sparkline, &h.SubagentSpawns, &h.IT2Sends, &h.IT2Screens, &h.IT2Splits, &statsJSON, &h.TeamName, &h.AgentName, &isTeamLead,
 		&h.GitCommonDir, &h.Branch, &h.GoalCount, &h.ActiveGoalCount, &h.CompletedGoalCount,
-		&h.SkillCount, &h.SelectedSkillCount, &h.LoadedSkillCount, &workflowRuns, &workflowAgents, &workflowTaskOps,
+		&skillsJSON, &h.SkillCount, &h.SelectedSkillCount, &h.LoadedSkillCount, &workflowRuns, &workflowAgents, &workflowTaskOps,
 	); err != nil {
 		return cass.Hit{}, err
 	}
@@ -1197,6 +1197,9 @@ func scanSummaryHit(row hitScanner) (cass.Hit, error) {
 	h.IsTeamLead = isTeamLead != 0
 	if statsJSON != "" {
 		applyHitStats(&h, statsJSON)
+	}
+	if h.SelectedSkillCount+h.LoadedSkillCount > 0 {
+		applyHitSummarySkills(&h, skillsJSON)
 	}
 	h.WorkflowCount = workflowRuns
 	h.WorkflowAgentCount = workflowAgents
@@ -1213,6 +1216,38 @@ func applyHitSkills(h *cass.Hit, skillsJSON string) {
 		return
 	}
 	h.SkillCount, h.SelectedSkillCount, h.LoadedSkillCount = skillCounts(h.Skills)
+}
+
+func applyHitSummarySkills(h *cass.Hit, skillsJSON string) {
+	if h == nil || skillsJSON == "" {
+		return
+	}
+	var skills []cass.SkillUse
+	if json.Unmarshal([]byte(skillsJSON), &skills) != nil {
+		return
+	}
+	h.Skills = summarySkillUses(skills)
+}
+
+func summarySkillUses(skills []cass.SkillUse) []cass.SkillUse {
+	var out []cass.SkillUse
+	seen := map[string]bool{}
+	for _, skill := range skills {
+		if skill.Name == "" || !skillCountsAsUse(skill.Kind) {
+			continue
+		}
+		key := skill.Kind + "\x00" + skill.Name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, cass.SkillUse{
+			Name:  skill.Name,
+			Kind:  skill.Kind,
+			Count: skill.Count,
+		})
+	}
+	return out
 }
 
 func applyHitStats(h *cass.Hit, statsJSON string) {

@@ -111,7 +111,10 @@ func TestSearchSummaryOmitsDetailPayload(t *testing.T) {
 			EndedAt:    start.Add(time.Minute),
 			Messages:   []cass.Message{{Role: "user", Content: "summary search payload"}},
 			Goals:      []cass.Goal{{Objective: "trim payload", Status: "active"}},
-			Skills:     []cass.SkillUse{{Name: "imagegen", Kind: "available", Count: 1}},
+			Skills: []cass.SkillUse{
+				{Name: "imagegen", Kind: "available", Count: 1, Path: "/tmp/imagegen/SKILL.md"},
+				{Name: "go-team-history-audit", Kind: "selected", Count: 1, Path: "/tmp/audit/SKILL.md", Evidence: []string{"Skill tool invocation"}},
+			},
 			Stats: cass.SessionStats{
 				WorkflowRuns:      1,
 				WorkflowAgentRuns: 1,
@@ -149,11 +152,17 @@ func TestSearchSummaryOmitsDetailPayload(t *testing.T) {
 	if !hit.SummaryOnly {
 		t.Fatalf("SummaryOnly = false, want true")
 	}
-	if len(hit.Goals) != 0 || len(hit.Skills) != 0 || len(hit.Workflows) != 0 {
-		t.Fatalf("summary hit carried detail payload: goals=%d skills=%d workflows=%d",
-			len(hit.Goals), len(hit.Skills), len(hit.Workflows))
+	if len(hit.Goals) != 0 || len(hit.Workflows) != 0 {
+		t.Fatalf("summary hit carried detail payload: goals=%d workflows=%d",
+			len(hit.Goals), len(hit.Workflows))
 	}
-	if hit.GoalCount != 1 || hit.SkillCount != 1 || hit.WorkflowCount != 1 || hit.WorkflowAgentCount != 1 {
+	if len(hit.Skills) != 1 || hit.Skills[0].Name != "go-team-history-audit" || hit.Skills[0].Kind != "selected" {
+		t.Fatalf("summary skills = %#v, want selected skill badge", hit.Skills)
+	}
+	if hit.Skills[0].Path != "" || len(hit.Skills[0].Evidence) != 0 {
+		t.Fatalf("summary skill carried detail payload: %#v", hit.Skills[0])
+	}
+	if hit.GoalCount != 1 || hit.SkillCount != 2 || hit.SelectedSkillCount != 1 || hit.WorkflowCount != 1 || hit.WorkflowAgentCount != 1 {
 		t.Fatalf("summary counts lost: %#v", hit)
 	}
 }
