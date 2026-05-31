@@ -695,6 +695,64 @@ func TestSearchSummaryFoldsWorkflowMatch(t *testing.T) {
 	}
 }
 
+func TestSearchSummaryFoldsWorkflowAgentMatchNames(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	start := time.Unix(1_700_000_000, 0).UTC()
+	sess := cass.Session{
+		ID:        "wf-agent-parent",
+		Agent:     "claude-code",
+		Title:     "ordinary title",
+		Workspace: "tmc/cc",
+		StartedAt: start,
+		EndedAt:   start.Add(time.Hour),
+		Messages:  []cass.Message{{Role: "user", Content: "design"}},
+		Stats: cass.SessionStats{
+			WorkflowRuns:      1,
+			WorkflowAgentRuns: 1,
+		},
+		Workflows: []cass.WorkflowRun{{
+			RunID:      "wf_agent_match",
+			Name:       "workflow-name",
+			Status:     "completed",
+			AgentCount: 1,
+			Agents: []cass.WorkflowAgent{{
+				ID:        "agent-1",
+				Label:     "design",
+				Phase:     "Design",
+				Title:     "You are reviewing this workflow transcript.",
+				AgentType: "review",
+				Status:    "completed",
+			}},
+			StartedAt: start.Add(time.Minute),
+		}},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.Search(ctx, cass.SearchRequest{Query: "design", Limit: 10, SummaryOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("got %d hits, want 1", len(res.Hits))
+	}
+	h := res.Hits[0]
+	if got, want := h.MatchedWorkflowNames, []string{"workflow-name"}; !slices.Equal(got, want) {
+		t.Fatalf("matched workflow names = %#v, want %#v", got, want)
+	}
+	if got, want := h.MatchedWorkflowAgentNames, []string{"design"}; !slices.Equal(got, want) {
+		t.Fatalf("matched workflow agent names = %#v, want %#v", got, want)
+	}
+	if got, want := h.MatchedWorkflowAgentIDs, []string{"agent-1"}; !slices.Equal(got, want) {
+		t.Fatalf("matched workflow agent ids = %#v, want %#v", got, want)
+	}
+	if !h.CollapsedChildren || h.WorkflowMatchCount != 1 {
+		t.Fatalf("collapsed=%v match_count=%d, want true/1", h.CollapsedChildren, h.WorkflowMatchCount)
+	}
+}
+
 func TestDeleteCascadesWorkflows(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

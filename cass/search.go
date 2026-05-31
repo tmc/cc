@@ -145,11 +145,12 @@ type Hit struct {
 	// Folded child-workflow matches. When a query matches one or more workflow
 	// runs (or, in future, their child agents) the match is bubbled to this
 	// parent row rather than shown as separate child rows.
-	WorkflowMatchCount      int      `json:"workflow_match_count,omitempty"`
-	MatchedWorkflowIDs      []string `json:"matched_workflow_ids,omitempty"`
-	MatchedWorkflowNames    []string `json:"matched_workflow_names,omitempty"`
-	MatchedWorkflowAgentIDs []string `json:"matched_workflow_agent_ids,omitempty"`
-	CollapsedChildren       bool     `json:"collapsed_children,omitempty"`
+	WorkflowMatchCount        int      `json:"workflow_match_count,omitempty"`
+	MatchedWorkflowIDs        []string `json:"matched_workflow_ids,omitempty"`
+	MatchedWorkflowNames      []string `json:"matched_workflow_names,omitempty"`
+	MatchedWorkflowAgentIDs   []string `json:"matched_workflow_agent_ids,omitempty"`
+	MatchedWorkflowAgentNames []string `json:"matched_workflow_agent_names,omitempty"`
+	CollapsedChildren         bool     `json:"collapsed_children,omitempty"`
 
 	// SummaryOnly marks web search list rows whose nested detail payload was
 	// intentionally omitted. Fetch /api/session/{id}/meta for full detail.

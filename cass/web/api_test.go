@@ -227,6 +227,71 @@ func TestSearchSummaryIncludesMatchedWorkflowNames(t *testing.T) {
 	}
 }
 
+func TestSearchSummaryIncludesMatchedWorkflowAgentNames(t *testing.T) {
+	ctx := context.Background()
+	start := time.Unix(100, 0)
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: []cass.Session{{
+			ID:         "search-agent-match-1",
+			Agent:      "codex-cli",
+			Title:      "Workflow agent match",
+			Workspace:  "/work/match",
+			SourcePath: "/tmp/search-agent-match.jsonl",
+			StartedAt:  start,
+			EndedAt:    start.Add(time.Minute),
+			Messages:   []cass.Message{{Role: "user", Content: "design"}},
+			Stats: cass.SessionStats{
+				WorkflowRuns:      1,
+				WorkflowAgentRuns: 1,
+			},
+			Workflows: []cass.WorkflowRun{{
+				RunID:      "wf_agent_match",
+				Name:       "workflow-name",
+				Status:     "completed",
+				AgentCount: 1,
+				Agents: []cass.WorkflowAgent{{
+					ID:        "agent-1",
+					Label:     "design",
+					Phase:     "Design",
+					Title:     "You are reviewing this workflow transcript.",
+					AgentType: "review",
+					Status:    "completed",
+				}},
+				StartedAt: start.Add(10 * time.Second),
+			}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v; want 1, nil", n, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/search?q=design&summary=true", nil)
+	rr := httptest.NewRecorder()
+	New(Config{Service: svc}).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
+	var result cass.SearchResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(result.Hits))
+	}
+	hit := result.Hits[0]
+	if got, want := hit.MatchedWorkflowAgentNames, []string{"design"}; !slices.Equal(got, want) {
+		t.Fatalf("matched workflow agent names = %#v, want %#v", got, want)
+	}
+	if got, want := hit.MatchedWorkflowAgentIDs, []string{"agent-1"}; !slices.Equal(got, want) {
+		t.Fatalf("matched workflow agent ids = %#v, want %#v", got, want)
+	}
+}
+
 func TestSearchCountFalseSkipsExactTotal(t *testing.T) {
 	ctx := context.Background()
 	start := time.Unix(100, 0)

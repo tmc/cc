@@ -905,9 +905,10 @@ func (s *DB) foldWorkflowMatches(ctx context.Context, hits []cass.Hit, query str
 			_ = json.Unmarshal([]byte(agentsJSON), &agents)
 		}
 		var matchedAgents int
-		for _, a := range agents {
+		for i, a := range agents {
 			if termsMatch(strings.ToLower(a.Title+" "+a.Label+" "+a.Phase+" "+a.AgentType), terms) {
 				h.MatchedWorkflowAgentIDs = append(h.MatchedWorkflowAgentIDs, a.ID)
+				h.MatchedWorkflowAgentNames = append(h.MatchedWorkflowAgentNames, workflowAgentGraphTitle(a, i))
 				matchedAgents++
 			}
 		}
@@ -1006,9 +1007,10 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 		// the parent (the parent already matched via FTS on folded agent text);
 		// this drives the "matched in N workflow agents" badge.
 		var matchedAgents int
-		for _, a := range agents {
+		for i, a := range agents {
 			if termsMatch(strings.ToLower(a.Title+" "+a.Label+" "+a.Phase+" "+a.AgentType), terms) {
 				h.MatchedWorkflowAgentIDs = append(h.MatchedWorkflowAgentIDs, a.ID)
+				h.MatchedWorkflowAgentNames = append(h.MatchedWorkflowAgentNames, workflowAgentGraphTitle(a, i))
 				matchedAgents++
 			}
 		}
