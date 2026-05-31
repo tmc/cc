@@ -298,6 +298,7 @@ var (
 	commandNameTitleRE    = regexp.MustCompile(`(?is)<command-name>(.*?)</command-name>`)
 	commandMessageTitleRE = regexp.MustCompile(`(?is)<command-message>(.*?)</command-message>`)
 	goalObjectiveTitleRE  = regexp.MustCompile(`(?is)<goal_context>.*?<objective>(.*?)</objective>.*?</goal_context>`)
+	untrustedObjectiveRE  = regexp.MustCompile(`(?is)<untrusted_objective>\s*(.*?)\s*</untrusted_objective>`)
 	goalContextTitleRE    = regexp.MustCompile(`(?i)</?goal_context>`)
 	imageTagTitleRE       = regexp.MustCompile(`(?i)<image[^>]*>`)
 	imagePayloadTitleRE   = regexp.MustCompile(`(?i)\binput_image\s+data:image/\S+`)
@@ -316,6 +317,9 @@ func cleanGeneratedTitle(title string) string {
 		return compactTitleText(m[1])
 	}
 	if m := goalObjectiveTitleRE.FindStringSubmatch(title); len(m) == 2 && compactTitleText(m[1]) != "" {
+		return "goal: " + compactTitleText(m[1])
+	}
+	if m := untrustedObjectiveRE.FindStringSubmatch(title); len(m) == 2 && compactTitleText(m[1]) != "" {
 		return "goal: " + compactTitleText(m[1])
 	}
 

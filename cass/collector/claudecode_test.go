@@ -174,6 +174,14 @@ func TestTitleFromSummary(t *testing.T) {
 			want: "goal: flesh this tool out to be complete",
 		},
 		{
+			name: "codex untrusted objective",
+			summary: cc.SessionSummary{
+				FirstPrompt: "Continue working toward the active thread goal.\n\n<untrusted_objective>\nship goal support\n</untrusted_objective>\n\nBudget:\n- Tokens used: 34",
+				File:        "/path/to/session.jsonl",
+			},
+			want: "goal: ship goal support",
+		},
+		{
 			name: "goal context markup",
 			summary: cc.SessionSummary{
 				FirstPrompt: "<goal_context> Continue working toward the active thread. </goal_context>",

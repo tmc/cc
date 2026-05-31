@@ -1127,6 +1127,8 @@ function cleanSessionTitle(title) {
   if (commandName && commandName[1].trim()) return commandName[1].replace(/\s+/g, ' ').trim();
   const goalObjective = t.match(/<goal_context>[\s\S]*?<objective>([\s\S]*?)<\/objective>[\s\S]*?<\/goal_context>/i);
   if (goalObjective && goalObjective[1].trim()) return 'goal: ' + goalObjective[1].replace(/\s+/g, ' ').trim();
+  const untrustedObjective = t.match(/<untrusted_objective>\s*([\s\S]*?)\s*<\/untrusted_objective>/i);
+  if (untrustedObjective && untrustedObjective[1].trim()) return 'goal: ' + untrustedObjective[1].replace(/\s+/g, ' ').trim();
   const hadImage = /<image[^>]*>/i.test(t) || /\binput_image\s+data:image\//i.test(t);
   t = t
     .replace(/<image[^>]*>/gi, ' ')
