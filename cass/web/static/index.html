@@ -3293,7 +3293,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
               <button class="detail-tab ${activeTab === 'agents' ? 'active' : ''}"
                       onClick=${() => setActiveTab('agents')}>
                 Agents (${agentData.hasAgents && agentData.runningCount > 0
-                  ? agentData.runningCount + '/' + agentData.totalAgents + ' running'
+                  ? agentData.runningCount + '/' + agentData.totalAgents + ' Running'
                   : (agentData.hasAgents ? agentData.totalAgents : directSubagentSpawns)})
               </button>
             `}
@@ -5213,26 +5213,26 @@ function UsagePanel({ urlParams, updateParams, navVersion }) {
       ${data && html`
         <div class="usage-section">
           <div class="stats-grid" style="margin-bottom:0">
-            ${card('api requests', fmtNum(data.api_request_count))}
-            ${card('input tokens', fmtTokens(totalInput), 'selected window')}
-            ${card('output tokens ⚠', fmtTokens(totalOutput), 'undercounted from JSONL')}
-            ${card('cache creation', fmtTokens(totalCacheCreate), '1.25× cost')}
-            ${card('cache read', fmtTokens(totalCacheRead), '~0.1× cost')}
+            ${card('API requests', fmtNum(data.api_request_count))}
+            ${card('Input tokens', fmtTokens(totalInput), 'Selected window')}
+            ${card('Output tokens ⚠', fmtTokens(totalOutput), 'Undercounted from JSONL')}
+            ${card('Cache creation', fmtTokens(totalCacheCreate), '1.25× cost')}
+            ${card('Cache read', fmtTokens(totalCacheRead), '~0.1× cost')}
           </div>
         </div>
 
         <div class="usage-section">
-          <div class="usage-section-title">rate limit utilization</div>
+          <div class="usage-section-title">Rate limit utilization</div>
           <${RateLimitGauges} latestLimits=${data.latest_limits} />
         </div>
 
         <div class="usage-section">
-          <div class="usage-section-title">token usage over time</div>
+          <div class="usage-section-title">Token usage over time</div>
           <${TokenTimeline} daily=${daily} />
         </div>
 
         <div class="usage-section">
-          <div class="usage-section-title">context composition (aggregate)</div>
+          <div class="usage-section-title">Context composition (aggregate)</div>
           <${ContextCompositionBar} daily=${daily} />
         </div>
       `}
