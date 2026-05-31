@@ -4057,7 +4057,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     if (n && n.node_type === 'workflow_agent') {
       const subtitle = workflowGraphAgentSubtitle(n);
       const textLen = Math.max(label.length, subtitle.length);
-      return Math.max(92, Math.min(180, textLen * 6.5 + 20));
+      return Math.max(104, Math.min(220, textLen * 6.5 + 24));
     }
     if (n && n.node_type === 'subagent') return Math.max(80, label.length * 6.5 + 16);
     const min = n && n.node_type === 'workflow' ? 150 : 70;
@@ -4067,7 +4067,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   }
   function nodeHeight(id) {
     const n = nodeData[id];
-    if (n && n.node_type === 'workflow_agent') return workflowGraphAgentSubtitle(n) ? 42 : 30;
+    if (n && n.node_type === 'workflow_agent') return workflowGraphAgentSubtitle(n) ? 48 : 30;
     const info = nodeInfo(id);
     return info ? 36 : 24;
   }
