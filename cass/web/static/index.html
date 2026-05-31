@@ -4959,7 +4959,7 @@ function RateLimitGauges({ latestLimits }) {
   if (!latestLimits || latestLimits.length === 0) {
     return html`
       <div class="rl-no-data">
-        No rate-limit data — run <code>cass index --har-dir &lt;proxyman-har-export-dir&gt;</code>
+        No rate-limit data — run <code>cass index --har-dir &lt;api-request-export-dir&gt;</code>
         or ensure proxyman artifact files exist at <code>~/.it2/sessions/*/proxy-traffic.*.jsonl</code>
       </div>
     `;
@@ -4997,7 +4997,7 @@ function TokenTimeline({ daily }) {
   if (!daily || daily.length === 0) {
     return html`
       <div class="rl-no-data">
-        No token usage data — index HAR files or proxyman artifacts to populate
+        No token usage data — index API request exports or proxyman artifacts to populate
       </div>
     `;
   }
@@ -5080,7 +5080,7 @@ function TokenTimeline({ daily }) {
       </div>
       <div class="undercount-note">
         ⚠ output tokens from session JSONL files are undercounted (streaming-start snapshot);
-        accurate values require HAR proxy data.
+        accurate values require API request capture data.
       </div>
       ${tooltip && html`
         <div class="token-chart-tooltip" style="left:${tooltip.x + 12}px;top:${tooltip.y - 20}px">
@@ -5100,7 +5100,7 @@ function ContextCompositionBar({ daily }) {
   // Aggregate context bytes across all days.
   if (!daily || daily.length === 0) return html`
     <div class="rl-no-data">
-      No context breakdown data — requires HAR proxy capture with request bodies
+      No context breakdown data — requires API request capture with request bodies
     </div>
   `;
 
@@ -5113,7 +5113,7 @@ function ContextCompositionBar({ daily }) {
 
   if (totalBytes === 0) return html`
     <div class="rl-no-data">
-      No context breakdown — requires HAR files with request body capture
+      No context breakdown — requires API request captures with request bodies
     </div>
   `;
 
