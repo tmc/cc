@@ -807,6 +807,55 @@ func TestQueryRequestsEmptySessionReturnsAll(t *testing.T) {
 	}
 }
 
+func TestQueryRequestsFiltered(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.BatchIndexRequests(ctx, []cass.APIRequest{
+		{
+			ID:          "old-sonnet",
+			SessionID:   "session-a",
+			RequestID:   "r-old",
+			Timestamp:   100,
+			ModelFamily: "sonnet",
+			Purpose:     "response",
+			SourceHash:  "old-sonnet",
+		},
+		{
+			ID:          "new-sonnet",
+			SessionID:   "session-a",
+			RequestID:   "r-new",
+			Timestamp:   200,
+			ModelFamily: "sonnet",
+			Purpose:     "compact",
+			SourceHash:  "new-sonnet",
+		},
+		{
+			ID:          "new-haiku",
+			SessionID:   "session-b",
+			RequestID:   "r-haiku",
+			Timestamp:   300,
+			ModelFamily: "haiku",
+			Purpose:     "response",
+			SourceHash:  "new-haiku",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reqs, err := s.QueryRequestsFiltered(ctx, cass.APIRequestFilter{
+		Since:       150,
+		ModelFamily: "sonnet",
+		Purpose:     "compact",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reqs) != 1 || reqs[0].ID != "new-sonnet" {
+		t.Fatalf("filtered requests = %+v, want only new-sonnet", reqs)
+	}
+}
+
 func TestSkillsRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

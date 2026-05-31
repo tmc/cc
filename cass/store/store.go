@@ -2499,6 +2499,11 @@ func (s *DB) SaveRateLimitSnapshots(ctx context.Context, snapshots []cass.RateLi
 // QueryRequests returns API requests ordered by timestamp. When sessionID is
 // non-empty, it returns requests linked to that session.
 func (s *DB) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIRequest, error) {
+	return s.QueryRequestsFiltered(ctx, cass.APIRequestFilter{SessionID: sessionID})
+}
+
+// QueryRequestsFiltered returns API requests matching f, ordered by timestamp.
+func (s *DB) QueryRequestsFiltered(ctx context.Context, f cass.APIRequestFilter) ([]cass.APIRequest, error) {
 	query := `
 		SELECT id, session_id, request_id, timestamp,
 			model, model_family, purpose,
@@ -2513,14 +2518,28 @@ func (s *DB) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIReq
 			context_breakdown_json
 		FROM api_requests
 	`
+	var where []string
 	var args []any
-	if sessionID != "" {
-		query += `
-			WHERE session_id = ?
-				OR session_id IN (SELECT claude_session FROM session_mapping WHERE cass_session = ? AND claude_session <> '')
-				OR (session_id = '' AND it2_session_id = ?)
-		`
-		args = append(args, sessionID, sessionID, sessionID)
+	if f.SessionID != "" {
+		where = append(where, `(session_id = ?
+			OR session_id IN (SELECT claude_session FROM session_mapping WHERE cass_session = ? AND claude_session <> '')
+			OR (session_id = '' AND it2_session_id = ?))`)
+		args = append(args, f.SessionID, f.SessionID, f.SessionID)
+	}
+	if f.Since > 0 {
+		where = append(where, "timestamp >= ?")
+		args = append(args, f.Since)
+	}
+	if f.ModelFamily != "" {
+		where = append(where, "model_family = ?")
+		args = append(args, f.ModelFamily)
+	}
+	if f.Purpose != "" {
+		where = append(where, "purpose = ?")
+		args = append(args, f.Purpose)
+	}
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
 	}
 	query += ` ORDER BY timestamp`
 	rows, err := s.db.QueryContext(ctx, query, args...)

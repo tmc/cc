@@ -1195,30 +1195,18 @@ func runRequests(ctx context.Context, svc *service.Service, args []string, jsonO
 		sessionID = fs.Arg(0)
 	}
 
-	requests, err := svc.QueryRequests(ctx, sessionID)
+	filter := cass.APIRequestFilter{
+		SessionID:   sessionID,
+		ModelFamily: *model,
+		Purpose:     *purpose,
+	}
+	if *since > 0 {
+		filter.Since = time.Now().Add(-*since).Unix()
+	}
+	requests, err := svc.QueryRequestsFiltered(ctx, filter)
 	if err != nil {
 		return err
 	}
-
-	// Apply client-side filters.
-	var cutoff time.Time
-	if *since > 0 {
-		cutoff = time.Now().Add(-*since)
-	}
-	filtered := requests[:0]
-	for _, r := range requests {
-		if !cutoff.IsZero() && r.Timestamp < cutoff.Unix() {
-			continue
-		}
-		if *model != "" && r.ModelFamily != *model {
-			continue
-		}
-		if *purpose != "" && r.Purpose != *purpose {
-			continue
-		}
-		filtered = append(filtered, r)
-	}
-	requests = filtered
 
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(requests)

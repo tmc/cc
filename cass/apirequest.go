@@ -59,6 +59,14 @@ type APIRequest struct {
 	Breakdown *ContextBreakdown `json:"breakdown,omitempty"`
 }
 
+// APIRequestFilter constrains API request listings.
+type APIRequestFilter struct {
+	SessionID   string
+	Since       int64
+	ModelFamily string
+	Purpose     string
+}
+
 // RateLimitSnapshot captures rate-limit utilization at a point in time,
 // extracted from anthropic-ratelimit-unified-* response headers.
 type RateLimitSnapshot struct {

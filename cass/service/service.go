@@ -619,9 +619,15 @@ func (s *Service) IndexHAR(ctx context.Context, dir string) (int, error) {
 	return len(requests), nil
 }
 
-// QueryRequests returns API requests linked to a session.
+// QueryRequests returns API requests. If sessionID is non-empty, it returns
+// requests linked to that session; otherwise it returns all requests.
 func (s *Service) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIRequest, error) {
 	return s.store.QueryRequests(ctx, sessionID)
+}
+
+// QueryRequestsFiltered returns API requests matching f.
+func (s *Service) QueryRequestsFiltered(ctx context.Context, f cass.APIRequestFilter) ([]cass.APIRequest, error) {
+	return s.store.QueryRequestsFiltered(ctx, f)
 }
 
 // RateLimitTrend returns rate-limit utilization over time for a given bucket.
