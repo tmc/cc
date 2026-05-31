@@ -1341,8 +1341,8 @@ mark.search-hl {
 .graph-node.node-subagent rect { fill: var(--node-bg); stroke: var(--yellow); stroke-width: 1; }
 .graph-node.node-status-completed .node-dot { fill: var(--green); }
 .graph-node.node-status-running .node-dot { fill: var(--cyan); }
-.graph-node.node-status-failed .node-dot { fill: var(--danger); }
-.graph-node.node-status-async_launched .node-dot { fill: var(--yellow); }
+.graph-node.node-status-error .node-dot { fill: var(--danger); }
+.graph-node.node-status-starting .node-dot { fill: var(--yellow); }
 .graph-node.node-status-unknown .node-dot { fill: var(--faint); }
 /* Edge opacity hierarchy: primary (workflow/team messages) > secondary
    (split/spawn) > quiet (observations). Set on a per-class base opacity so the
@@ -2316,7 +2316,9 @@ mark.search-hl {
 .wf-run-name { font-weight: 600; color: var(--magenta); }
 .wf-run-status { font-size: 10px; text-transform: uppercase; color: var(--dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .wf-run-status.completed { color: var(--green, #2a7); }
-.wf-run-status.failed, .wf-run-status.killed, .wf-run-status.cancelled, .wf-run-status.canceled { color: var(--red, #c33); }
+.wf-run-status.running { color: var(--cyan); }
+.wf-run-status.starting { color: var(--yellow); }
+.wf-run-status.error { color: var(--danger); }
 .wf-run-meta { font-size: 11px; color: var(--dim); margin-left: auto; }
 .wf-run-desc { font-size: 11px; color: var(--dim); margin: 4px 0 6px; }
 .wf-phase-list { display: grid; gap: 8px; margin-top: 8px; }
