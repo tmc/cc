@@ -1319,7 +1319,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
         </ul>
       `}
       ${results && (!results.hits || results.hits.length === 0) && !loading && html`
-        <div class="empty">no results</div>
+        <div class="empty">No results</div>
       `}
 
       </section>
@@ -1812,7 +1812,7 @@ function AgentsTab({ agentData, workflows }) {
   const aliases = useMemo(() => workflowAgentAliases(workflows), [workflows]);
 
   if (!agentData || !agentData.hasAgents) {
-    return html`<div class="empty" style="margin-top:20px">no child agent data available</div>`;
+    return html`<div class="empty" style="margin-top:20px">No child agent data available</div>`;
   }
 
   const { agents, totalAgents, totalTokens, totalToolUses, finishedCount, runningCount } = agentData;
@@ -2101,7 +2101,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
 
   if (error) return html`<div class="detail-error wf-agent-error">${error}</div>`;
   if (!loaded) return html`<div class="wf-agent-loading">loading transcript...</div>`;
-  if (entries.length === 0) return html`<div class="wf-agent-empty">empty transcript</div>`;
+  if (entries.length === 0) return html`<div class="wf-agent-empty">Empty transcript</div>`;
 
   function blockText(block) {
     if (!block) return '';
@@ -2150,7 +2150,7 @@ function WorkflowAgentTranscript({ sourcePath }) {
   `;
   if (renderableEntries.length === 0) return html`
     <div class="wf-agent-transcript">
-      <div class="wf-agent-empty">empty transcript</div>
+      <div class="wf-agent-empty">Empty transcript</div>
       ${earlierButton}
     </div>
   `;
@@ -2281,7 +2281,7 @@ function WorkflowsTab({ workflows, focusAgent, onFocusAgentChange }) {
   }, [focusAgent, expanded]);
 
   if (!workflows || workflows.length === 0) {
-    return html`<div class="empty" style="margin-top:20px">no workflow runs in this session</div>`;
+    return html`<div class="empty" style="margin-top:20px">No workflow runs in this session</div>`;
   }
 
   function toggleAgent(key) {
@@ -2331,7 +2331,7 @@ function WorkflowsTab({ workflows, focusAgent, onFocusAgentChange }) {
                     </div>
                     ${group.detail && html`<div class="wf-phase-detail">${group.detail}</div>`}
                     ${total === 0 ? html`
-                      <div class="wf-phase-empty">no agents yet</div>
+                      <div class="wf-phase-empty">No agents yet</div>
                     ` : html`
                       <div class="wf-agent-list">
                         ${group.agents.map((a, ai) => {
@@ -2369,7 +2369,7 @@ function WorkflowsTab({ workflows, focusAgent, onFocusAgentChange }) {
                                 <${WorkflowAgentTranscript} sourcePath=${a.source_path} />
                               `}
                               ${isOpen && !a.source_path && html`
-                                <div class="wf-agent-empty">transcript unavailable</div>
+                                <div class="wf-agent-empty">Transcript unavailable</div>
                               `}
                             </div>
                           `;
@@ -2910,7 +2910,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
     if (requestsLoading) return html`<div class="loading">loading api requests...</div>`;
     if (apiRequests.length === 0) return html`
       <div class="empty" style="margin-top:20px;">
-        no API requests found. <br/><br/>
+        No API requests found. <br/><br/>
         Index HAR exports with <code>cass index --har-dir &lt;dir&gt;</code> or
         Proxyman session archives with <code>cass index --session-dir &lt;path&gt;</code>.
       </div>
@@ -3823,7 +3823,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
   if (loading) return html`<div class="loading">loading graph...</div>`;
 
   const allNodeIds = Object.keys(nodeData);
-  if (allNodeIds.length === 0) return html`<div class="empty">no graph data for this range</div>`;
+  if (allNodeIds.length === 0) return html`<div class="empty">No graph data for this range</div>`;
 
   // Group nodes by workspace for clustered layout.
   const wsGroups = useMemo(() => {
@@ -4623,7 +4623,7 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
   }, [teamSearch, selectedName]);
 
   if (loading) return html`<div class="loading">loading teams...</div>`;
-  if (teams.length === 0) return html`<div class="empty">no agent teams found</div>`;
+  if (teams.length === 0) return html`<div class="empty">No agent teams found</div>`;
 
   // Detail view.
   if (selectedName) {
@@ -4632,7 +4632,7 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
     if (!detail) return html`
       <div>
         <button class="team-detail-back" onClick=${() => setSelectedName('')}>back</button>
-        <div class="empty">team not found: ${selectedName}</div>
+        <div class="empty">Team not found: ${selectedName}</div>
       </div>
     `;
 
@@ -4675,7 +4675,7 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
                   ${teamSearch && s.snippet && html`<div class="team-session-snippet">${s.snippet}</div>`}
                 </div>
               `)}
-              ${displaySessions.length === 0 && !teamSearchLoading && html`<div class="empty" style="padding:8px">no matches</div>`}
+              ${displaySessions.length === 0 && !teamSearchLoading && html`<div class="empty" style="padding:8px">No matches</div>`}
             </div>
           </div>
           <${InboxViewer} teamName=${selectedName} inboxes=${detail.inboxes || {}} members=${members} />
@@ -4714,7 +4714,7 @@ function TeamsPanel({ urlParams, updateParams, navVersion }) {
 // --- Topology SVG ---
 
 function TopologySVG({ members, lead }) {
-  if (!members || members.length === 0) return html`<div class="team-topology"><div class="empty">no members</div></div>`;
+  if (!members || members.length === 0) return html`<div class="team-topology"><div class="empty">No members</div></div>`;
 
   const leadName = (lead || '').split('@')[0];
   const leadMember = members.find(m => m.name === leadName);
@@ -4835,7 +4835,7 @@ function InboxViewer({ teamName, inboxes, members }) {
         </select>
       </div>
       <div class="inbox-messages" ref=${msgsRef}>
-        ${messages.length === 0 && html`<div class="empty" style="padding:16px">no messages</div>`}
+        ${messages.length === 0 && html`<div class="empty" style="padding:16px">No messages</div>`}
         ${messages.map(renderMessage)}
       </div>
       <div class="inbox-compose">
@@ -4907,7 +4907,7 @@ function MapPanel({ urlParams, updateParams, navVersion }) {
           onInput=${e => setFilter(e.target.value)} style="width:240px" />
       </div>
       ${loading && html`<div class="loading">loading mappings...</div>`}
-      ${!loading && mappings.length === 0 && html`<div class="empty">no session mappings found</div>`}
+      ${!loading && mappings.length === 0 && html`<div class="empty">No session mappings found</div>`}
       ${sorted.length > 0 && html`
         <table class="map-table">
           <thead>
@@ -4959,7 +4959,7 @@ function RateLimitGauges({ latestLimits }) {
   if (!latestLimits || latestLimits.length === 0) {
     return html`
       <div class="rl-no-data">
-        no rate-limit data — run <code>cass index --har-dir &lt;proxyman-har-export-dir&gt;</code>
+        No rate-limit data — run <code>cass index --har-dir &lt;proxyman-har-export-dir&gt;</code>
         or ensure proxyman artifact files exist at <code>~/.it2/sessions/*/proxy-traffic.*.jsonl</code>
       </div>
     `;
@@ -4997,7 +4997,7 @@ function TokenTimeline({ daily }) {
   if (!daily || daily.length === 0) {
     return html`
       <div class="rl-no-data">
-        no token usage data — index HAR files or proxyman artifacts to populate
+        No token usage data — index HAR files or proxyman artifacts to populate
       </div>
     `;
   }
@@ -5100,7 +5100,7 @@ function ContextCompositionBar({ daily }) {
   // Aggregate context bytes across all days.
   if (!daily || daily.length === 0) return html`
     <div class="rl-no-data">
-      no context breakdown data — requires HAR proxy capture with request bodies
+      No context breakdown data — requires HAR proxy capture with request bodies
     </div>
   `;
 
@@ -5113,7 +5113,7 @@ function ContextCompositionBar({ daily }) {
 
   if (totalBytes === 0) return html`
     <div class="rl-no-data">
-      no context breakdown — requires HAR files with request body capture
+      No context breakdown — requires HAR files with request body capture
     </div>
   `;
 
