@@ -3315,7 +3315,13 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       let sawWorkflow = false;
       nodes.forEach(n => {
         const nid = normID(n.id);
-        nd[nid] = { ...n, id: nid, full_id: n.id, parent_session_id: n.parent_session_id ? normID(n.parent_session_id) : undefined };
+        nd[nid] = {
+          ...n,
+          id: nid,
+          full_id: n.id,
+          parent_session_id: n.parent_session_id ? normID(n.parent_session_id) : undefined,
+          parent_session_full_id: n.parent_session_id || '',
+        };
         if (n.node_type === 'workflow') sawWorkflow = true;
       });
       setHasWorkflows(sawWorkflow);
@@ -3894,7 +3900,10 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       return;
     }
     if (n && n.node_type === 'workflow_agent') {
-      if (onNavigate) onNavigate('search', { q: n.parent_session_id || id });
+      if (onNavigate) {
+        const sessionID = n.parent_session_full_id || n.parent_session_id || id;
+        onNavigate('search', { session_id: sessionID, detail_tab: 'workflows' });
+      }
       return;
     }
     if (n && n.node_type === 'subagent') {
