@@ -4126,7 +4126,6 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     const parts = [];
     if (n.tool_calls) parts.push(n.tool_calls + ' tools');
     if (n.turns) parts.push(n.turns + ' turns');
-    if (n.node_type === 'session' && n.workflow_count) parts.push(n.workflow_count + ' wf');
     if (n.started_at) {
       // started_at may be unix seconds (number) or RFC3339 string.
       const ts = typeof n.started_at === 'number' ? new Date(n.started_at * 1000).toISOString() : n.started_at;
