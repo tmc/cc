@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 type requestRecord struct {
@@ -205,9 +206,10 @@ func analyzeCharacteristics(files []string) (*characteristicsReport, error) {
 		return requests[i].Timestamp.Before(requests[j].Timestamp)
 	})
 
+	parallelWindow := effectiveParallelWindow()
 	var parallel ParallelIndex
 	for _, req := range requests {
-		parallel.Add(req.SessionID, req.Timestamp, *parallelWindowFlag)
+		parallel.Add(req.SessionID, req.Timestamp, parallelWindow)
 	}
 	for i := range requests {
 		requests[i].ParallelActive = parallel.ActiveAt(requests[i].Timestamp)
@@ -355,6 +357,21 @@ func requestWeight(req requestRecord) float64 {
 		r := pricingForModel(req.Model)
 		return float64(req.InputTokens)*r.Input + float64(req.OutputTokens)*r.Output + float64(req.CacheRead)*r.CacheRead + float64(req.CacheCreate)*r.CacheCreate
 	}
+}
+
+func effectiveParallelWindow() time.Duration {
+	window := *parallelWindowFlag
+	if *sinceFlag == "" {
+		return window
+	}
+	since, err := ccpaths.ParseDuration(*sinceFlag)
+	if err != nil || since <= 0 {
+		return window
+	}
+	if since < 2*time.Hour && window < 5*time.Minute {
+		return 5 * time.Minute
+	}
+	return window
 }
 
 type pricing struct {

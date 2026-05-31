@@ -367,6 +367,47 @@ func TestAnalyzeCharacteristicsKeepsNoUsageRequestsInSessionCounts(t *testing.T)
 	}
 }
 
+func TestAnalyzeCharacteristicsWidensParallelWindowForShortSince(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong, oldSince := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag, *sinceFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+		*sinceFlag = oldSince
+	})
+	*unitFlag = "requests"
+	*verboseFlag = false
+	*formatFlag = "text"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+	*sinceFlag = "1h"
+
+	dir := t.TempDir()
+	base := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	path := writeCharacteristicsSession(t, dir, "parallel.jsonl", []ccpkg.Entry{
+		assistantEntry("session-a", "session-a", "", base.Add(0*time.Minute), false, "claude-sonnet-4-6", 10, 1, 0, 0, toolBlocks("", 0)),
+		assistantEntry("session-b", "session-b", "", base.Add(3*time.Minute), false, "claude-sonnet-4-6", 10, 1, 0, 0, toolBlocks("", 0)),
+		assistantEntry("session-c", "session-c", "", base.Add(4*time.Minute), false, "claude-sonnet-4-6", 10, 1, 0, 0, toolBlocks("", 0)),
+		assistantEntry("session-d", "session-d", "", base.Add(4*time.Minute+30*time.Second), false, "claude-sonnet-4-6", 10, 1, 0, 0, toolBlocks("", 0)),
+	})
+
+	report, err := analyzeCharacteristics([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Characteristics["parallel4+"].Weight; got <= 0 {
+		t.Fatalf("parallel4+ weight = %f, want > 0 when short since widens to 5m", got)
+	}
+	if got := effectiveParallelWindow(); got != 5*time.Minute {
+		t.Fatalf("effectiveParallelWindow = %s, want 5m", got)
+	}
+}
+
 func TestRunCharacteristicsVerboseJSON(t *testing.T) {
 	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
 	oldParallel, oldContext, oldLong := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag
