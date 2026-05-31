@@ -250,11 +250,12 @@ function RollingNum({ value, format, label }) {
 
 // --- Agent data extraction ---
 
-function useAgentData(entries) {
+function useAgentData(entries, workflows) {
   return useMemo(() => {
     const spawns = [];     // Task tool_use blocks from parent
     const results = {};    // tool_use_id -> completion data
     const agentMap = {};   // agentId -> stats
+    const workflowAliases = workflowAgentAliases(workflows);
 
     for (const entry of entries) {
       // Pass 1: Collect Task tool_use spawns from parent assistant messages.
@@ -397,15 +398,19 @@ function useAgentData(entries) {
     const agents = orderedAgentIds.map((id, i) => {
       const a = agentMap[id];
       const spawn = spawns[i] || {};
+      const meta = workflowAliases.byID[id] || {};
 
       // Determine completion status.
       // 1. Check tool_result by tool_use_id.
       const resultByToolUse = spawn.toolUseId ? results[spawn.toolUseId] : null;
       // 2. Check pending ToolUseResult by order.
       const pendingResult = pendingResults[i] || null;
+      // 3. Workflow fan-out agents do not have parent Task results; their
+      // journal-derived status is folded into hit.workflows[].agents[].
+      const workflowStatus = meta.status || '';
 
-      const isFinished = !!(resultByToolUse || pendingResult);
-      const isError = resultByToolUse?.isError || (pendingResult && !pendingResult.success) || false;
+      const isFinished = !!(resultByToolUse || pendingResult || workflowStatus === 'completed' || workflowStatus === 'error');
+      const isError = resultByToolUse?.isError || (pendingResult && !pendingResult.success) || workflowStatus === 'error' || false;
 
       // Prefer ToolUseResult metrics if available (more accurate).
       let durationSecs;
@@ -420,6 +425,9 @@ function useAgentData(entries) {
       // Status: running, completed, error.
       let status = 'running';
       if (isFinished) status = isError ? 'error' : 'completed';
+      if (workflowStatus === 'running' || workflowStatus === 'starting' || workflowStatus === 'unknown') {
+        status = workflowStatus;
+      }
 
       return {
         ...a,
@@ -484,7 +492,7 @@ function useAgentData(entries) {
       runningCount,
       spawns,
     };
-  }, [entries]);
+  }, [entries, workflows]);
 }
 
 // --- URL state ---
@@ -1345,6 +1353,7 @@ function workflowAgentAliases(workflows) {
         phase: a.phase || '',
         agentType: a.agent_type || '',
         title: a.title || '',
+        status: a.status || '',
       };
       aliases.byID[a.id] = meta;
       aliases.byIndex.push(meta);
@@ -2013,7 +2022,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     return { visibleEntries: all, matchIndices: matches };
   }, [entries, searchQuery]);
 
-  const agentData = useAgentData(entries);
+  const agentData = useAgentData(entries, hit?.workflows);
   const hasAgentTab = agentData.hasAgents || (hit?.subagent_entries || 0) > 0 || (hit?.subagent_spawns || 0) > 0;
 
   const matchCount = matchIndices.length;
