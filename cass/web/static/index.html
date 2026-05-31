@@ -1121,10 +1121,12 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
 function cleanSessionTitle(title) {
   let t = (title || '').trim();
   if (!t) return '';
-  const commandMessage = t.match(/<command-message>([^<]+)<\/command-message>/i);
-  if (commandMessage && commandMessage[1].trim()) return commandMessage[1].trim();
-  const commandName = t.match(/<command-name>([^<]+)<\/command-name>/i);
-  if (commandName && commandName[1].trim()) return commandName[1].trim();
+  const commandMessage = t.match(/<command-message>([\s\S]*?)<\/command-message>/i);
+  if (commandMessage && commandMessage[1].trim()) return commandMessage[1].replace(/\s+/g, ' ').trim();
+  const commandName = t.match(/<command-name>([\s\S]*?)<\/command-name>/i);
+  if (commandName && commandName[1].trim()) return commandName[1].replace(/\s+/g, ' ').trim();
+  const goalObjective = t.match(/<goal_context>[\s\S]*?<objective>([\s\S]*?)<\/objective>[\s\S]*?<\/goal_context>/i);
+  if (goalObjective && goalObjective[1].trim()) return 'goal: ' + goalObjective[1].replace(/\s+/g, ' ').trim();
   const hadImage = /<image[^>]*>/i.test(t) || /\binput_image\s+data:image\//i.test(t);
   t = t
     .replace(/<image[^>]*>/gi, ' ')
