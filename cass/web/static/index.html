@@ -37,6 +37,7 @@ const workflowAgentPageSize = 40;
 
 const refreshMinInterval = 2500;
 const headerStatsRefreshMinInterval = 30000;
+const statsRefreshMinInterval = 10000;
 let refreshLast = 0;
 let refreshTimer = null;
 let refreshDetail = null;
@@ -4993,6 +4994,8 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
   const [agg, setAgg] = useState(null);
   const [since, setSinceRaw] = useState(urlParams.since || '');
   const [indexing, setIndexing] = useState(false);
+  const loadedAt = useRef(0);
+  const loadingRef = useRef(false);
 
   function setSince(v) { setSinceRaw(v); updateParams({ since: v }); }
 
@@ -5001,26 +5004,35 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
     setSinceRaw(urlParams.since || '');
   }, [navVersion]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (!force && loadedAt.current && now - loadedAt.current < statsRefreshMinInterval) {
+      return;
+    }
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     try {
       const [b, a] = await Promise.all([
         api('stats'),
         api('stats?aggregate=true' + (since ? '&since=' + since : '')),
       ]);
+      loadedAt.current = Date.now();
       setBasic(b);
       setAgg(a);
     } catch (e) { console.error('stats:', e); }
+    finally { loadingRef.current = false; }
   }, [since]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(true); }, [load]);
   useEffect(() => {
-    window.addEventListener('cass:refresh', load);
-    return () => window.removeEventListener('cass:refresh', load);
+    const refresh = () => load(false);
+    window.addEventListener('cass:refresh', refresh);
+    return () => window.removeEventListener('cass:refresh', refresh);
   }, [load]);
 
   async function reindex(force) {
     setIndexing(true);
-    try { await api('index?force=' + force, { method: 'POST' }); load(); }
+    try { await api('index?force=' + force, { method: 'POST' }); load(true); }
     catch (e) { alert('Index error: ' + e.message); }
     setIndexing(false);
   }
