@@ -322,6 +322,26 @@ func TestRunIndexWrapsApiRequestError(t *testing.T) {
 	}
 }
 
+func TestRewriteIndexArgsMapsApiRequestDir(t *testing.T) {
+	got := rewriteIndexArgs([]string{"--api-request-dir", "/tmp/reqs", "--api-request-dir=/tmp/reqs2", "--har-dir", "/tmp/old"})
+	want := []string{"--har-dir", "/tmp/reqs", "--har-dir=/tmp/reqs2", "--har-dir", "/tmp/old"}
+	if !slicesEqual(got, want) {
+		t.Fatalf("rewriteIndexArgs = %#v, want %#v", got, want)
+	}
+}
+
+func slicesEqual[T comparable](a, b []T) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func workflowByRunID(workflows []workflowListEntry, id string) *workflowListEntry {
 	for i := range workflows {
 		if workflows[i].RunID == id {

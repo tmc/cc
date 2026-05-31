@@ -136,10 +136,25 @@ func runDetect(ctx context.Context, jsonOut bool, logger *slog.Logger) error {
 	return nil
 }
 
+func rewriteIndexArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "--api-request-dir" {
+			arg = "--har-dir"
+		} else if strings.HasPrefix(arg, "--api-request-dir=") {
+			arg = "--har-dir=" + strings.TrimPrefix(arg, "--api-request-dir=")
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
 func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
+	args = rewriteIndexArgs(args)
 	fs := flag.NewFlagSet("index", flag.ExitOnError)
 	force := fs.Bool("force", false, "rebuild index from scratch")
 	harDir := fs.String("har-dir", "", "directory of Proxyman HAR export files to ingest")
+	apiRequestDir := fs.String("api-request-dir", "", "directory of API request export files to ingest")
 	sessionDir := fs.String("session-dir", "", "file or directory of .proxymansessionv2/.proxymanlogv2 files to ingest")
 	artifactDirs := fs.Bool("artifact-dirs", true, "scan ~/.it2/sessions/*/proxy-traffic.*.jsonl (default on)")
 	noArtifactDirs := fs.Bool("no-artifact-dirs", false, "disable artifact dir scanning")
@@ -160,8 +175,12 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	}
 
 	harCount := 0
-	if *harDir != "" {
-		harCount, err = svc.IndexHAR(ctx, *harDir)
+	requestDir := *apiRequestDir
+	if requestDir == "" {
+		requestDir = *harDir
+	}
+	if requestDir != "" {
+		harCount, err = svc.IndexHAR(ctx, requestDir)
 		if err != nil {
 			return fmt.Errorf("index api requests: %w", err)
 		}
