@@ -68,7 +68,7 @@ type Filters struct {
 	GitCommonDir string    // Filter by resolved git common dir (stable across worktrees).
 	Team         string    // Filter by agent team name.
 	GoalStatus   string    // Filter by goal status.
-	Skill        string    // Filter by skill name or path substring.
+	Skill        string    // Filter by used skill name or path substring.
 	After        time.Time // Sessions started after this time.
 	Before       time.Time // Sessions started before this time.
 }

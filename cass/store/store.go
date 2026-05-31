@@ -706,8 +706,8 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		args = append(args, `%"effective_status":"`+req.Filters.GoalStatus+`"%`)
 	}
 	if req.Filters.Skill != "" {
-		where = append(where, "s.skills_json LIKE ?")
-		args = append(args, "%"+req.Filters.Skill+"%")
+		where = append(where, skillUseFilter("s.skills_json"))
+		args = append(args, "%"+req.Filters.Skill+"%", "%"+req.Filters.Skill+"%")
 	}
 
 	whereClause := ""
@@ -845,6 +845,14 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		TotalCount:      total,
 		TotalCountExact: totalExact,
 	}, nil
+}
+
+func skillUseFilter(col string) string {
+	return `EXISTS (
+		SELECT 1 FROM json_each(` + col + `) AS sk
+		WHERE json_extract(sk.value, '$.kind') IN ('selected', 'tool', 'loaded')
+		  AND (json_extract(sk.value, '$.name') LIKE ? OR json_extract(sk.value, '$.path') LIKE ?)
+	)`
 }
 
 // foldWorkflowMatches records workflow match badges for summary hits without

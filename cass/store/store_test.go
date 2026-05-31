@@ -949,6 +949,18 @@ func TestSkillsRoundTrip(t *testing.T) {
 		t.Fatalf("len(hit.Skills) = %d, want 4", len(h.Skills))
 	}
 
+	result, err = s.Search(ctx, cass.SearchRequest{
+		Limit:   10,
+		Filters: cass.Filters{Skill: "imagegen"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalCount != 0 || len(result.Hits) != 0 {
+		t.Fatalf("available/context-only skill search = count %d hits %d, want no usage hits",
+			result.TotalCount, len(result.Hits))
+	}
+
 	skills, err := s.Skills(ctx, "nlm", "selected", 10)
 	if err != nil {
 		t.Fatal(err)

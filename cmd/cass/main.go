@@ -233,7 +233,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 	workspace := fs.String("workspace", "", "filter by workspace path or project name")
 	gitCommonDir := fs.String("git-common-dir", "", "filter by resolved git common dir (stable across worktrees)")
 	goalStatus := fs.String("goal-status", "", "filter by goal status")
-	skill := fs.String("skill", "", "filter by skill name or path substring")
+	skill := fs.String("skill", "", "filter by used skill name or path substring")
 	pwd := fs.Bool("pwd", false, "filter to current working directory")
 	since := fs.Duration("since", 0, "sessions within duration (e.g. 12h, 24h, 168h)")
 	after := fs.String("after", "", "sessions after date (RFC3339 or YYYY-MM-DD)")

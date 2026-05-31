@@ -1237,7 +1237,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
           onInput=${e => setWorkspace(e.target.value)} />
         <input class="filter-input" placeholder="team" value=${team}
           onInput=${e => setTeam(e.target.value)} style="width:100px" />
-        <input class="filter-input" placeholder="skill" value=${skill}
+        <input class="filter-input" placeholder="used skill" value=${skill}
           onInput=${e => setSkill(e.target.value)} style="width:110px" />
         <span class="filter-chips">
           <button class="filter-chip ${goalStatus === 'active' ? 'active' : ''}"
