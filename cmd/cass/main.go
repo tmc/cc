@@ -846,8 +846,8 @@ func workflowEntryFromRow(r store.WorkflowRow) workflowListEntry {
 		SourcePath:        r.SourcePath,
 		AgentCount:        r.AgentCount,
 		JournalEventCount: r.JournalEventCount,
-		StartedAt:         r.StartedAt,
-		CompletedAt:       r.CompletedAt,
+		StartedAt:         positiveUnix(r.StartedAt),
+		CompletedAt:       positiveUnix(r.CompletedAt),
 	}
 	if r.PhasesJSON != "" && r.PhasesJSON != "[]" {
 		_ = json.Unmarshal([]byte(r.PhasesJSON), &e.Phases)
@@ -858,9 +858,17 @@ func workflowEntryFromRow(r store.WorkflowRow) workflowListEntry {
 	return e
 }
 
+func positiveUnix(v int64) int64 {
+	if v > 0 {
+		return v
+	}
+	return 0
+}
+
 func runWorkflows(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
 	fs := flag.NewFlagSet("workflows", flag.ExitOnError)
 	sessionID := fs.String("session", "", "filter by parent session id")
+	since := fs.Duration("since", 0, "only workflows started within duration (e.g. 24h, 168h)")
 	status := fs.String("status", "", "filter by workflow status")
 	limit := fs.Int("limit", 50, "max rows to return")
 	if err := fs.Parse(args); err != nil {
@@ -870,7 +878,13 @@ func runWorkflows(ctx context.Context, svc *service.Service, args []string, json
 		*sessionID = fs.Arg(0)
 	}
 
-	rows, err := svc.Workflows(ctx, *sessionID)
+	var rows []store.WorkflowRow
+	var err error
+	if *sessionID == "" && *since > 0 {
+		rows, err = svc.WorkflowsSince(ctx, time.Now().Add(-*since))
+	} else {
+		rows, err = svc.Workflows(ctx, *sessionID)
+	}
 	if err != nil {
 		return err
 	}

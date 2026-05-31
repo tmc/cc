@@ -112,7 +112,7 @@ func TestWorkflowAgentLabelsSkipPromptTitles(t *testing.T) {
 
 func TestRunWorkflowsListsIndexedRuns(t *testing.T) {
 	ctx := context.Background()
-	start := time.Unix(1_700_000_000, 0).UTC()
+	start := time.Now().Add(-30 * time.Minute).UTC().Truncate(time.Second)
 	svc, err := service.New(service.Config{
 		DBPath: filepath.Join(t.TempDir(), "index.db"),
 		Collectors: []cass.Collector{cassTestCollector{sessions: []cass.Session{{
@@ -139,6 +139,11 @@ func TestRunWorkflowsListsIndexedRuns(t *testing.T) {
 					{ID: "agent-a", Label: "lens:api", Phase: "Review", AgentType: "Explore"},
 					{ID: "agent-b", Phase: "Synthesize", AgentType: "Writer"},
 				},
+			}, {
+				RunID:     "wf_old",
+				Name:      "old workflow",
+				Status:    "completed",
+				StartedAt: time.Now().Add(-48 * time.Hour),
 			}},
 		}}}},
 	})
@@ -177,9 +182,36 @@ func TestRunWorkflowsListsIndexedRuns(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("decode JSON output: %v\n%s", err, raw)
 	}
-	if len(got) != 1 || got[0].RunID != "wf_1" || len(got[0].Phases) != 2 || len(got[0].Agents) != 2 {
+	recent := workflowByRunID(got, "wf_1")
+	if len(got) != 2 || recent == nil || len(recent.Phases) != 2 || len(recent.Agents) != 2 {
 		t.Fatalf("workflow JSON output = %+v", got)
 	}
+	if recent.CompletedAt != 0 {
+		t.Fatalf("workflow completed_at = %d, want omitted zero value", recent.CompletedAt)
+	}
+
+	raw, err = captureStdout(t, func() error {
+		return runWorkflows(ctx, svc, []string{"--since", "24h"}, true)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode recent JSON output: %v\n%s", err, raw)
+	}
+	if len(got) != 1 || got[0].RunID != "wf_1" {
+		t.Fatalf("recent workflow JSON output = %+v, want only wf_1", got)
+	}
+}
+
+func workflowByRunID(workflows []workflowListEntry, id string) *workflowListEntry {
+	for i := range workflows {
+		if workflows[i].RunID == id {
+			return &workflows[i]
+		}
+	}
+	return nil
 }
 
 type cassTestCollector struct {
@@ -211,14 +243,25 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	readDone := make(chan struct {
+		b   []byte
+		err error
+	}, 1)
+	go func() {
+		b, err := io.ReadAll(r)
+		readDone <- struct {
+			b   []byte
+			err error
+		}{b: b, err: err}
+	}()
 	os.Stdout = w
 	runErr := fn()
 	w.Close()
 	os.Stdout = old
-	b, readErr := io.ReadAll(r)
+	read := <-readDone
 	r.Close()
 	if runErr != nil {
-		return string(b), runErr
+		return string(read.b), runErr
 	}
-	return string(b), readErr
+	return string(read.b), read.err
 }

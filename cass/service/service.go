@@ -687,6 +687,12 @@ func (s *Service) Workflows(ctx context.Context, parentSessionID string) ([]stor
 	return s.store.Workflows(ctx, parentSessionID)
 }
 
+// WorkflowsSince lists indexed native workflow runs that started at or after
+// since.
+func (s *Service) WorkflowsSince(ctx context.Context, since time.Time) ([]store.WorkflowRow, error) {
+	return s.store.WorkflowsSince(ctx, since)
+}
+
 // IndexJobs scans ~/.claude/jobs/<shortId>/state.json and upserts each job.
 // Pass an empty root to use the default location. Returns the count indexed.
 func (s *Service) IndexJobs(ctx context.Context, root string) (int, error) {
