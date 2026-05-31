@@ -4438,7 +4438,11 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('subagent spawns', fmtNum(agg.subagent_spawns))}
         ${card('workflows', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' agents · ' + (agg.workflow_task_ops || 0) + ' task ops')}
         ${card('goals', fmtNum(agg.goals || 0), (agg.active_goals || 0) + ' active · ' + (agg.completed_goals || 0) + ' complete')}
-        ${card('skills', fmtNum(agg.skills || 0), (agg.selected_skills || 0) + ' selected · ' + (agg.loaded_skills || 0) + ' loaded')}
+        ${card('skill use', fmtNum((agg.selected_skills || 0) + (agg.loaded_skills || 0)),
+          (agg.selected_skills || 0) + ' selected · ' + (agg.loaded_skills || 0) + ' loaded' +
+          ((agg.skills || 0) > ((agg.selected_skills || 0) + (agg.loaded_skills || 0))
+            ? ' · ' + ((agg.skills || 0) - ((agg.selected_skills || 0) + (agg.loaded_skills || 0))) + ' available hidden'
+            : ''))}
         ${card('it2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
           agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
         ${card('team ops', fmtNum(agg.team_inbox_reads + agg.team_inbox_sends + agg.team_task_ops + agg.team_spawns),

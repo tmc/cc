@@ -1240,6 +1240,9 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 			if sk.Name == "" {
 				continue
 			}
+			if !skillCountsAsUse(sk.Kind) {
+				continue
+			}
 			n := sk.Count
 			if n == 0 {
 				n = 1
@@ -2699,4 +2702,8 @@ func skillCounts(skills []cass.SkillUse) (total, selected, loaded int) {
 		}
 	}
 	return total, selected, loaded
+}
+
+func skillCountsAsUse(kind string) bool {
+	return kind != "available"
 }
