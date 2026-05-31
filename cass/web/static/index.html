@@ -1682,9 +1682,11 @@ function agentAliasFor(a, aliases, index) {
 function agentDisplayName(a, aliases, index) {
   const meta = agentAliasFor(a, aliases, index);
   if (meta.label) return meta.label;
+  if (meta.title && !looksLikePromptTitle(meta.title)) return meta.title;
   if (a.agentName) return a.agentName;
-  const candidate = a.description || meta.title || '';
+  const candidate = a.description || '';
   if (candidate && !looksLikePromptTitle(candidate)) return candidate;
+  if (meta.phase && meta.agentType) return meta.agentType + ' ' + String((index || 0) + 1).padStart(2, '0');
   return numberedAgentName(index);
 }
 
