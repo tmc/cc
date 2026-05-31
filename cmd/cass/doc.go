@@ -18,6 +18,7 @@
 //	map        Show iTerm2 <-> Claude session ID mappings.
 //	stats      Show index statistics.
 //	subagents  List Task subagent runs.
+//	workflows  List native workflow runs.
 //	requests   Show HAR-derived API request breakdown.
 //	web        Start the web UI server.
 //

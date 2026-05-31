@@ -681,6 +681,12 @@ func (s *Service) SubagentRunsSummary(ctx context.Context) (store.SubagentRunSum
 	return s.store.SubagentRunsSummary(ctx)
 }
 
+// Workflows lists indexed native workflow runs, optionally restricted to one
+// parent session.
+func (s *Service) Workflows(ctx context.Context, parentSessionID string) ([]store.WorkflowRow, error) {
+	return s.store.Workflows(ctx, parentSessionID)
+}
+
 // IndexJobs scans ~/.claude/jobs/<shortId>/state.json and upserts each job.
 // Pass an empty root to use the default location. Returns the count indexed.
 func (s *Service) IndexJobs(ctx context.Context, root string) (int, error) {

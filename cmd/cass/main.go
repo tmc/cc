@@ -49,6 +49,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "  map        show iTerm2 <-> Claude session ID mappings")
 		fmt.Fprintln(os.Stderr, "  stats      show index statistics")
 		fmt.Fprintln(os.Stderr, "  subagents  list Task subagent runs")
+		fmt.Fprintln(os.Stderr, "  workflows  list native workflow runs")
 		fmt.Fprintln(os.Stderr, "  requests   show HAR-derived API request breakdown")
 		fmt.Fprintln(os.Stderr, "  web        start web UI server")
 		os.Exit(1)
@@ -96,6 +97,8 @@ func run() error {
 		return runStats(ctx, svc, *jsonOutput)
 	case "subagents":
 		return runSubagents(ctx, svc, args[1:], *jsonOutput)
+	case "workflows":
+		return runWorkflows(ctx, svc, args[1:], *jsonOutput)
 	case "requests":
 		return runRequests(ctx, svc, args[1:], *jsonOutput)
 	case "web":
@@ -808,6 +811,173 @@ func statusOrDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+type workflowListEntry struct {
+	ParentSessionID   string               `json:"parent_session_id"`
+	RunID             string               `json:"run_id"`
+	TaskID            string               `json:"task_id,omitempty"`
+	Name              string               `json:"name,omitempty"`
+	Description       string               `json:"description,omitempty"`
+	Status            string               `json:"status,omitempty"`
+	Summary           string               `json:"summary,omitempty"`
+	ScriptPath        string               `json:"script_path,omitempty"`
+	TranscriptDir     string               `json:"transcript_dir,omitempty"`
+	SourcePath        string               `json:"source_path,omitempty"`
+	AgentCount        int                  `json:"agent_count,omitempty"`
+	JournalEventCount int                  `json:"journal_event_count,omitempty"`
+	StartedAt         int64                `json:"started_at,omitempty"`
+	CompletedAt       int64                `json:"completed_at,omitempty"`
+	Phases            []cass.WorkflowPhase `json:"phases,omitempty"`
+	Agents            []cass.WorkflowAgent `json:"agents,omitempty"`
+}
+
+func workflowEntryFromRow(r store.WorkflowRow) workflowListEntry {
+	e := workflowListEntry{
+		ParentSessionID:   r.ParentSessionID,
+		RunID:             r.RunID,
+		TaskID:            r.TaskID,
+		Name:              r.Name,
+		Description:       r.Description,
+		Status:            r.Status,
+		Summary:           r.Summary,
+		ScriptPath:        r.ScriptPath,
+		TranscriptDir:     r.TranscriptDir,
+		SourcePath:        r.SourcePath,
+		AgentCount:        r.AgentCount,
+		JournalEventCount: r.JournalEventCount,
+		StartedAt:         r.StartedAt,
+		CompletedAt:       r.CompletedAt,
+	}
+	if r.PhasesJSON != "" && r.PhasesJSON != "[]" {
+		_ = json.Unmarshal([]byte(r.PhasesJSON), &e.Phases)
+	}
+	if r.AgentsJSON != "" && r.AgentsJSON != "[]" {
+		_ = json.Unmarshal([]byte(r.AgentsJSON), &e.Agents)
+	}
+	return e
+}
+
+func runWorkflows(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
+	fs := flag.NewFlagSet("workflows", flag.ExitOnError)
+	sessionID := fs.String("session", "", "filter by parent session id")
+	status := fs.String("status", "", "filter by workflow status")
+	limit := fs.Int("limit", 50, "max rows to return")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 && *sessionID == "" {
+		*sessionID = fs.Arg(0)
+	}
+
+	rows, err := svc.Workflows(ctx, *sessionID)
+	if err != nil {
+		return err
+	}
+	workflows := []workflowListEntry{}
+	for _, row := range rows {
+		w := workflowEntryFromRow(row)
+		if *status != "" && w.Status != *status {
+			continue
+		}
+		workflows = append(workflows, w)
+		if *limit > 0 && len(workflows) >= *limit {
+			break
+		}
+	}
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(workflows)
+	}
+	if len(workflows) == 0 {
+		fmt.Println("no workflows")
+		return nil
+	}
+	for _, w := range workflows {
+		started := "-"
+		if w.StartedAt > 0 {
+			started = time.Unix(w.StartedAt, 0).Format("2006-01-02 15:04")
+		}
+		name := firstNonEmpty(w.Name, w.RunID, "workflow")
+		agentCount := w.AgentCount
+		if len(w.Agents) > agentCount {
+			agentCount = len(w.Agents)
+		}
+		meta := fmt.Sprintf("%d phases  %d agents", len(w.Phases), agentCount)
+		if w.JournalEventCount > 0 {
+			meta += fmt.Sprintf("  %d events", w.JournalEventCount)
+		}
+		fmt.Printf("%s  %-8s  %-12s  %-28s  %s\n",
+			started, short(w.ParentSessionID), statusOrDash(w.Status), trimText(name, 28), meta)
+		if w.Description != "" {
+			fmt.Printf("                                  %s\n", trimText(strings.Join(strings.Fields(w.Description), " "), 90))
+		}
+		if phases := workflowPhaseTitles(w.Phases); len(phases) > 0 {
+			fmt.Printf("                                  phases: %s\n", strings.Join(phases, " / "))
+		}
+		if agents := workflowAgentLabels(w.Agents); len(agents) > 0 {
+			fmt.Printf("                                  agents: %s\n", strings.Join(agents, ", "))
+		}
+	}
+	return nil
+}
+
+func workflowPhaseTitles(phases []cass.WorkflowPhase) []string {
+	var out []string
+	for _, p := range phases {
+		if p.Title != "" {
+			out = append(out, p.Title)
+		}
+	}
+	return out
+}
+
+func workflowAgentLabels(agents []cass.WorkflowAgent) []string {
+	var out []string
+	for i, a := range agents {
+		name := a.Label
+		if name == "" && a.Title != "" && !looksLikeWorkflowPromptTitle(a.Title) {
+			name = a.Title
+		}
+		name = firstNonEmpty(name, a.AgentType, a.ID)
+		if name == "" {
+			name = numberedAgentName(i)
+		}
+		if len(out) == 5 {
+			out = append(out, fmt.Sprintf("+%d more", len(agents)-i))
+			break
+		}
+		out = append(out, trimText(name, 28))
+	}
+	return out
+}
+
+func looksLikeWorkflowPromptTitle(title string) bool {
+	t := strings.TrimSpace(title)
+	return len(t) > 72 || strings.HasPrefix(strings.ToLower(t), "you are ") ||
+		strings.Contains(t, "READ THESE FILES FIRST")
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func numberedAgentName(i int) string {
+	return "agent " + fmt.Sprintf("%02d", i+1)
+}
+
+func trimText(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	if n <= 3 {
+		return s[:n]
+	}
+	return s[:n-3] + "..."
 }
 
 type agentTypeCount struct {
