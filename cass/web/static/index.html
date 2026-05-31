@@ -991,7 +991,7 @@ function App() {
           <div class="header-stats">
             <span title="${exactNum(headerStats.sessions)} sessions">${fmtNum(headerStats.sessions)} sessions</span>
             <span title="${exactNum(headerStats.turns)} turns">${fmtNum(headerStats.turns)} turns</span>
-            <span title="${exactNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} total tokens (${exactNum(headerStats.input_tokens || 0)} in + ${exactNum(headerStats.output_tokens || 0)} out)">${fmtNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} tokens</span>
+            <span title="${exactNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} total tokens (${exactNum(headerStats.input_tokens || 0)} in + ${exactNum(headerStats.output_tokens || 0)} out)\nOutput tokens are undercounted from JSONL.">${fmtNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} tokens</span>
           </div>
         ` : null}
         ${busy && html`<span class="db-busy-badge">DB busy</span>`}
@@ -1535,7 +1535,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
       <div class="hit-meta">
         ${h.workspace && html`<span class="hit-workspace">${shortProject(h.workspace)}</span>`}
         ${h.started_at && html`<span class="hit-time">${relTime(h.started_at)}${h.ended_at && relTime(h.ended_at) !== relTime(h.started_at) ? ' → ' + relTime(h.ended_at) : ''}</span>`}
-        ${totalTok > 0 && html`<span class="hit-tokens" title=${'in: ' + fmtNum(inTok) + ' | out: ' + fmtNum(outTok) + (cacheTok ? ' | cache: ' + fmtNum(cacheTok) : '')}>
+        ${totalTok > 0 && html`<span class="hit-tokens" title=${'in: ' + fmtNum(inTok) + ' | out: ' + fmtNum(outTok) + (cacheTok ? ' | cache: ' + fmtNum(cacheTok) : '') + '\nOutput tokens are undercounted from JSONL.'}>
           <span class="hit-tokens-total">${fmtNum(totalTok)}</span><span class="hit-tokens-label"> tokens</span>
           <span class="hit-tokens-breakdown">
             <span class="hit-tokens-in" title=${'input: ' + fmtNum(inTok)}>${fmtNum(inTok)}↓</span>
