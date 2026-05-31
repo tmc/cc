@@ -1665,22 +1665,46 @@ function WorkflowAgentTranscript({ sourcePath }) {
   if (!loaded) return html`<div class="wf-agent-loading">loading transcript...</div>`;
   if (entries.length === 0) return html`<div class="wf-agent-empty">empty transcript</div>`;
 
-  const messageEntries = entries.filter(e => {
+  function blockText(block) {
+    if (!block) return '';
+    if (block.type === 'text' || block.text) return block.text || '';
+    if (block.type === 'tool_use') {
+      const summary = workflowToolSummary(block);
+      return summary || block.name || 'tool';
+    }
+    if (block.type === 'tool_result') {
+      const text = typeof block.content === 'string'
+        ? block.content
+        : Array.isArray(block.content) ? block.content.map(c => c.text || '').join('\n')
+        : JSON.stringify(block.content || '');
+      return (block.is_error ? 'error: ' : 'result: ') + text;
+    }
+    return '';
+  }
+
+  function entryBlocks(e) {
     const msg = e.message;
-    if (!msg) return false;
-    const text = typeof msg.content === 'string'
-      ? msg.content
-      : (Array.isArray(msg.content)
-          ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n')
-          : '');
-    return !!text;
-  });
+    if (!msg) return [];
+    if (typeof msg.content === 'string') return [{ role: msg.role || e.type || 'message', text: msg.content }];
+    if (!Array.isArray(msg.content)) return [];
+    return msg.content
+      .map(block => ({
+        role: block.type === 'tool_use' ? (block.name || 'tool') : block.type === 'tool_result' ? 'result' : (msg.role || 'message'),
+        text: blockText(block),
+        isError: !!block.is_error,
+      }))
+      .filter(block => !!block.text);
+  }
+
+  const renderableEntries = entries
+    .map((entry, idx) => ({ entry, idx, blocks: entryBlocks(entry) }))
+    .filter(item => item.blocks.length > 0);
   const earlierButton = hasEarlier && html`
     <button class="wf-agent-more" disabled=${loadingEarlier} onClick=${loadEarlier}>
       ${loadingEarlier ? 'loading...' : 'load earlier messages'}
     </button>
   `;
-  if (messageEntries.length === 0) return html`
+  if (renderableEntries.length === 0) return html`
     <div class="wf-agent-transcript">
       <div class="wf-agent-empty">empty transcript</div>
       ${earlierButton}
@@ -1689,21 +1713,30 @@ function WorkflowAgentTranscript({ sourcePath }) {
 
   return html`
     <div class="wf-agent-transcript">
-      ${messageEntries.map((e, i) => {
-        const msg = e.message;
-        const text = typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
-        return html`
-          <div class="wf-agent-msg" key=${i}>
-            <span class="wf-agent-role ${msg.role}">${msg.role}</span>
-            <${AnsiContent} text=${text} maxLen=${1200} cls=${''} searchQuery=${''} />
-          </div>
-        `;
-      })}
+      ${renderableEntries.map(item => html`
+        <div class="wf-agent-msg" key=${item.idx}>
+          ${item.blocks.map((block, bi) => html`
+            <div class="wf-agent-block ${block.isError ? 'error' : ''}" key=${bi}>
+              <span class="wf-agent-role ${block.role}">${block.role}</span>
+              <${AnsiContent} text=${block.text} maxLen=${1200} cls=${''} searchQuery=${''} />
+            </div>
+          `)}
+        </div>
+      `)}
       ${earlierButton}
     </div>
   `;
+}
+
+function workflowToolSummary(block) {
+  const input = block.input || {};
+  if (block.name === 'Read') return input.file_path || '';
+  if (block.name === 'Write' || block.name === 'Edit' || block.name === 'MultiEdit') return input.file_path || '';
+  if (block.name === 'Bash') return String(input.command || '').split('\n')[0].slice(0, 160);
+  if (block.name === 'Grep') return [input.pattern, input.path].filter(Boolean).join(' ');
+  if (block.name === 'Glob') return [input.pattern, input.path].filter(Boolean).join(' ');
+  if (block.name === 'StructuredOutput') return input.schema ? 'structured output' : '';
+  return toolBlockSummary(block);
 }
 
 // WorkflowsTab renders each workflow run on the parent session as a tree of its

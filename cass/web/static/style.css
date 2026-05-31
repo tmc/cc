@@ -2298,9 +2298,13 @@ mark.search-hl {
 }
 .wf-agent-error { margin: 6px 0 8px 28px; }
 .wf-agent-msg { margin: 6px 0; font-size: 12px; }
+.wf-agent-block { margin: 3px 0; }
+.wf-agent-block.error .conv-content { color: var(--danger); }
 .wf-agent-role { display: inline-block; font-size: 10px; text-transform: uppercase; color: var(--dim); margin-right: 6px; }
 .wf-agent-role.user { color: var(--cyan); }
 .wf-agent-role.assistant { color: var(--magenta); }
+.wf-agent-role.result { color: var(--green); }
+.wf-agent-role.Read, .wf-agent-role.Bash, .wf-agent-role.Write, .wf-agent-role.Edit, .wf-agent-role.MultiEdit { color: var(--yellow); }
 .wf-agent-more {
   margin: 6px 0;
   padding: 3px 8px;
