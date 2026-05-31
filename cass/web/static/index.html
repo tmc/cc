@@ -2580,7 +2580,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     if (apiRequests.length === 0) return html`
       <div class="empty" style="margin-top:20px;">
         no API requests found. <br/><br/>
-        Did you run <code>cass index --session-dir</code> on the proxyman artifacts?
+        Index HAR exports with <code>cass index --har-dir &lt;dir&gt;</code> or
+        Proxyman session archives with <code>cass index --session-dir &lt;path&gt;</code>.
       </div>
     `;
 
