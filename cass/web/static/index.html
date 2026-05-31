@@ -1649,9 +1649,9 @@ function ImageBlockPreview({ block }) {
           <img src=${src} alt=${label || 'image'} loading="lazy" decoding="async" />
         </a>
       ` : href ? html`
-        <a class="conv-image-placeholder" href=${href} target="_blank" rel="noreferrer" title=${label}>image link</a>
+        <a class="conv-image-placeholder" href=${href} target="_blank" rel="noreferrer" title=${label}>Image link</a>
       ` : html`
-        <div class="conv-image-placeholder" title=${label}>image file</div>
+        <div class="conv-image-placeholder" title=${label}>Image file</div>
       `}
       <div class="conv-image-meta">${label}</div>
     </div>
@@ -4314,11 +4314,11 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
             <span style="color:var(--green)">··</span> Split</button>
           <button class="filter-chip ${edgeFilter.team ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, team: !f.team }))}>
-            <span style="color:var(--magenta)">—</span> team message <span style="color:var(--magenta);opacity:0.7">··</span> spawn</button>
+            <span style="color:var(--magenta)">—</span> Team message <span style="color:var(--magenta);opacity:0.7">··</span> Spawn</button>
           ${hasWorkflows && html`
             <button class="filter-chip ${edgeFilter.workflow ? 'active' : ''}"
               onClick=${() => setEdgeFilter(f => ({ ...f, workflow: !f.workflow }))}>
-              <span style="color:var(--accent)">—</span> workflow <span style="color:var(--cyan);opacity:0.8">··</span> spawn</button>
+              <span style="color:var(--accent)">—</span> Workflow <span style="color:var(--cyan);opacity:0.8">··</span> Spawn</button>
           `}
         </div>
         <button class="filter-chip ${activeOnly ? 'active' : ''}"
@@ -4501,7 +4501,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           <button onClick=${() => setZoom(z => Math.min(3, z + 0.2))}>+</button>
           <button onClick=${resetView} title="Reset zoom and pan">1:1</button>
           <button onClick=${() => setZoom(z => Math.max(0.3, z - 0.2))}>-</button>
-          <button onClick=${fitView} title="Fit all nodes" style="margin-left:2px;font-size:10px">fit</button>
+          <button onClick=${fitView} title="Fit all nodes" style="margin-left:2px;font-size:10px">Fit</button>
         </div>
       </div>
       <div class="graph-legend">
