@@ -1421,7 +1421,7 @@ func runRequests(ctx context.Context, svc *service.Service, args []string, jsonO
 		if sessionID != "" {
 			fmt.Printf("no API requests indexed for session %s\n", sessionID)
 		} else {
-			fmt.Println("no API requests indexed (use: cass index --har-dir <path>)")
+			fmt.Println("no API requests indexed (use: cass index --api-request-dir <path> or --har-dir <path>)")
 		}
 		return nil
 	}
