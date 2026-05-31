@@ -25,6 +25,7 @@
 // # Common flags
 //
 //	-db path    Path to the SQLite index (default ~/.cache/cass/index.db).
+//	--api-request-dir  Directory of API request export files to ingest.
 //	-json       Emit machine-readable JSON instead of text.
 //	-v          Verbose logging.
 //
