@@ -1996,11 +1996,11 @@ function AgentsTab({ agentData, workflows }) {
     <div class="agents-panel">
       <div class="agents-summary">
         <${RollingNum} value=${totalAgents} label="agents" /> agent${totalAgents !== 1 ? 's' : ''} spawned
-        · <${RollingNum} value=${totalTokens} label="tokens" /> tokens
-        · <${RollingNum} value=${totalToolUses} label="tool uses" /> tool uses
+        · <${RollingNum} value=${totalTokens} label="Tokens" /> Tokens
+        · <${RollingNum} value=${totalToolUses} label="Tool uses" /> Tool uses
         ${finishedCount > 0 && html`
           <span class="agents-lifecycle">
-            · <${RollingNum} value=${finishedCount} /> finished${runningCount > 0 ? html`, <${RollingNum} value=${runningCount} /> running` : ''}
+            · <${RollingNum} value=${finishedCount} /> Finished${runningCount > 0 ? html`, <${RollingNum} value=${runningCount} /> Running` : ''}
           </span>
         `}
         ${finishedCount === totalAgents && totalAgents > 0 && html`
