@@ -1204,7 +1204,7 @@ func (s *Server) handleSessionRequests(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, requests)
 }
 
-// handleLimits returns rate-limit utilization trend data and HAR request counts.
+// handleLimits returns rate-limit utilization trend data and API request counts.
 // GET /api/limits?since=168h&bucket=5h
 func (s *Server) handleLimits(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()

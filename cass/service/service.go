@@ -652,11 +652,11 @@ func (s *Service) IndexHAR(ctx context.Context, dir string) (int, error) {
 		return 0, nil
 	}
 
-	s.log.Info("har scan", "dir", dir, "requests", len(requests))
+	s.log.Info("api request scan", "dir", dir, "requests", len(requests))
 
 	// Index API requests.
 	if err := s.store.BatchIndexRequests(ctx, requests); err != nil {
-		return 0, fmt.Errorf("index har requests: %w", err)
+		return 0, fmt.Errorf("index api requests: %w", err)
 	}
 
 	// Extract and store rate-limit snapshots.
