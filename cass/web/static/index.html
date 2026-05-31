@@ -36,6 +36,7 @@ const sessionEntryPageSize = 80;
 const workflowAgentPageSize = 40;
 
 const refreshMinInterval = 2500;
+const headerStatsRefreshMinInterval = 30000;
 let refreshLast = 0;
 let refreshTimer = null;
 
@@ -646,6 +647,8 @@ function App() {
   const [busy, setBusy] = useState(false);
   const searchRef = useRef(null);
   const toastId = useRef(0);
+  const headerStatsLoadedAt = useRef(0);
+  const headerStatsLoading = useRef(false);
 
   // Track global DB busy state.
   useEffect(() => {
@@ -684,10 +687,32 @@ function App() {
 
   // Header stats.
   useEffect(() => {
-    const load = () => api('stats?aggregate=true').then(setHeaderStats).catch(() => {});
-    load();
-    window.addEventListener('cass:refresh', load);
-    return () => window.removeEventListener('cass:refresh', load);
+    const load = (force = false) => {
+      const now = Date.now();
+      if (!force && headerStatsLoadedAt.current && now - headerStatsLoadedAt.current < headerStatsRefreshMinInterval) {
+        return;
+      }
+      if (headerStatsLoading.current) return;
+      headerStatsLoading.current = true;
+      api('stats?aggregate=true')
+        .then(stats => {
+          headerStatsLoadedAt.current = Date.now();
+          setHeaderStats(stats);
+        })
+        .catch(() => {})
+        .finally(() => {
+          headerStatsLoading.current = false;
+        });
+    };
+    const refresh = () => load(false);
+    const refreshNow = () => load(true);
+    load(true);
+    window.addEventListener('cass:refresh', refresh);
+    window.addEventListener('cass:index_complete', refreshNow);
+    return () => {
+      window.removeEventListener('cass:refresh', refresh);
+      window.removeEventListener('cass:index_complete', refreshNow);
+    };
   }, []);
 
   // SSE connection.
@@ -702,6 +727,7 @@ function App() {
     es.addEventListener('index_complete', (e) => {
       const data = JSON.parse(e.data);
       showToast('Indexed ' + data.indexed + ' sessions');
+      window.dispatchEvent(new CustomEvent('cass:index_complete', { detail: data }));
       scheduleAppRefresh();
     });
     // Team messages are direct human input, not file-change amplification.
