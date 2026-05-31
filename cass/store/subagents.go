@@ -11,12 +11,14 @@ import (
 
 // SubagentRunFilter constrains a SubagentRuns listing.
 type SubagentRunFilter struct {
-	Workspace    string
-	GitCommonDir string
-	Model        string
-	AgentType    string
-	Limit        int
-	Offset       int
+	ParentSessionID    string
+	Workspace          string
+	GitCommonDir       string
+	Model              string
+	AgentType          string
+	ExcludeCompactions bool
+	Limit              int
+	Offset             int
 }
 
 // SubagentRunListEntry is one row from SubagentRuns: a SubagentRun joined
@@ -38,6 +40,10 @@ func (s *DB) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentR
 
 	var where []string
 	var args []any
+	if f.ParentSessionID != "" {
+		where = append(where, "r.parent_session_id = ?")
+		args = append(args, f.ParentSessionID)
+	}
 	if f.Workspace != "" {
 		where = append(where, "r.workspace LIKE ?")
 		args = append(args, "%"+f.Workspace+"%")
@@ -53,6 +59,9 @@ func (s *DB) SubagentRuns(ctx context.Context, f SubagentRunFilter) ([]SubagentR
 	if f.AgentType != "" {
 		where = append(where, "r.agent_type = ?")
 		args = append(args, f.AgentType)
+	}
+	if f.ExcludeCompactions {
+		where = append(where, "r.is_compaction = 0")
 	}
 	whereClause := ""
 	if len(where) > 0 {

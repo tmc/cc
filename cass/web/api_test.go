@@ -295,6 +295,86 @@ func TestTeamDetailUsesSummarySessions(t *testing.T) {
 	}
 }
 
+func TestSessionAgentsUsesIndexedSubagentRuns(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	start := time.Unix(100, 0)
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(dir, "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: []cass.Session{{
+			ID:         "session-agents-1",
+			Agent:      "claude-code",
+			Title:      "Indexed agents",
+			Workspace:  "/work/agents",
+			SourcePath: filepath.Join(dir, "session-agents-1.jsonl"),
+			StartedAt:  start,
+			EndedAt:    start.Add(time.Minute),
+			Messages:   []cass.Message{{Role: "user", Content: "spawn agents"}},
+			Stats: cass.SessionStats{
+				SubagentSpawns: 2,
+			},
+			Subagents: []cass.SubagentRun{
+				{
+					AgentID:     "agent-a",
+					AgentType:   "reviewer",
+					Description: "review the patch",
+					Model:       "claude-sonnet",
+					StartedAt:   start.Add(10 * time.Second),
+					EndedAt:     start.Add(20 * time.Second),
+					Status:      "completed",
+					TotalTokens: 123,
+					ToolUses:    4,
+					DurationMs:  10_000,
+					EntryCount:  6,
+				},
+				{
+					AgentID:      "agent-acompact",
+					IsCompaction: true,
+					StartedAt:    start.Add(15 * time.Second),
+					EndedAt:      start.Add(16 * time.Second),
+				},
+				{
+					AgentID:     "agent-b",
+					AgentType:   "tester",
+					Description: "run tests",
+					StartedAt:   start.Add(30 * time.Second),
+					EndedAt:     start.Add(35 * time.Second),
+					Status:      "error",
+					TotalTokens: 55,
+					ToolUses:    2,
+				},
+			},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v; want 1, nil", n, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session/session-agents-1/agents", nil)
+	rr := httptest.NewRecorder()
+	New(Config{Service: svc}).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
+	var runs []cass.SubagentRun
+	if err := json.Unmarshal(rr.Body.Bytes(), &runs); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("runs = %d, want 2 non-compaction runs: %#v", len(runs), runs)
+	}
+	if runs[0].AgentID != "agent-b" || runs[0].Status != "error" || runs[0].TotalTokens != 55 {
+		t.Fatalf("first run = %#v, want newest agent-b error", runs[0])
+	}
+	if runs[1].AgentID != "agent-a" || runs[1].AgentType != "reviewer" || runs[1].ToolUses != 4 {
+		t.Fatalf("second run = %#v, want agent-a reviewer", runs[1])
+	}
+}
+
 func TestSessionEntriesPagination(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

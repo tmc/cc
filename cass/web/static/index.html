@@ -543,6 +543,79 @@ function useAgentData(entries, workflows) {
   }, [entries, workflows]);
 }
 
+function agentTimeValue(v) {
+  if (!v || String(v).startsWith('0001-')) return '';
+  return v;
+}
+
+function firstAgentTime(...vals) {
+  for (const v of vals) {
+    const t = agentTimeValue(v);
+    if (t) return t;
+  }
+  return '';
+}
+
+function agentDataFromSubagentRuns(runs) {
+  if (!runs || runs.length === 0) return null;
+  const agents = runs
+    .filter(run => run && !run.is_compaction)
+    .map((run, i) => {
+      const status = run.status || 'unknown';
+      const normalized = normalizedAgentStatus(status);
+      const started = firstAgentTime(run.enqueued_at, run.started_at, run.dequeued_at, run.ended_at);
+      const ended = firstAgentTime(run.ended_at, run.dequeued_at);
+      const tokens = run.total_tokens || 0;
+      return {
+        id: run.agent_id || ('agent-' + i),
+        description: run.description || run.agent_def_description || '',
+        subagentType: run.agent_type || run.agent_def_name || '',
+        model: run.model || '',
+        promptPreview: '',
+        inputTokens: tokens,
+        outputTokens: 0,
+        cacheReads: 0,
+        toolUses: run.tool_uses || 0,
+        toolBreakdown: {},
+        turns: 0,
+        entryCount: run.entry_count || 0,
+        firstSeen: firstAgentTime(run.started_at, started),
+        lastSeen: firstAgentTime(run.ended_at, ended, started),
+        lastActivity: '',
+        durationSecs: Math.round((run.duration_ms || 0) / 1000),
+        status,
+        isFinished: normalized === 'completed' || normalized === 'error',
+        isError: normalized === 'error',
+        spawnedAt: started,
+        finishedAt: normalized === 'completed' || normalized === 'error' ? ended : '',
+        reportedTokens: tokens,
+        reportedToolUses: run.tool_uses || 0,
+        sourcePath: run.source_path || '',
+      };
+    })
+    .sort((a, b) => {
+      const ta = a.spawnedAt || a.firstSeen || '';
+      const tb = b.spawnedAt || b.firstSeen || '';
+      if (ta !== tb) return ta < tb ? -1 : 1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+  if (agents.length === 0) return null;
+  const totalTokens = agents.reduce((s, a) => s + a.inputTokens + a.outputTokens, 0);
+  const totalToolUses = agents.reduce((s, a) => s + a.toolUses, 0);
+  const finishedCount = agents.filter(a => a.isFinished).length;
+  const runningCount = agents.filter(a => a.status === 'running').length;
+  return {
+    agents,
+    hasAgents: true,
+    totalAgents: agents.length,
+    totalTokens,
+    totalToolUses,
+    finishedCount,
+    runningCount,
+    spawns: [],
+  };
+}
+
 // --- URL state ---
 
 const TABS = ['search', 'graph', 'map', 'teams', 'stats', 'usage'];
@@ -2018,6 +2091,13 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     refreshTick: -1,
   });
   const [requestsLoading, setRequestsLoading] = useState(false);
+  const [indexedAgentsState, setIndexedAgentsState] = useState({
+    sessionID: '',
+    items: [],
+    loaded: false,
+    refreshTick: -1,
+  });
+  const [agentsLoading, setAgentsLoading] = useState(false);
 
   const bodyRef = useRef(null);
   const searchRef = useRef(null);
@@ -2029,7 +2109,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   const detailSkillCount = (hit?.selected_skill_count || 0) + (hit?.loaded_skill_count || 0);
   const requestCount = hit?.api_request_count || 0;
   const apiRequests = apiRequestsState.sessionID === hit?.session_id ? apiRequestsState.items : [];
-  const agentData = useAgentData(entries, hit?.workflows);
+  const indexedAgentRuns = indexedAgentsState.sessionID === hit?.session_id ? indexedAgentsState.items : [];
+  const indexedAgentData = useMemo(() => agentDataFromSubagentRuns(indexedAgentRuns), [indexedAgentRuns]);
+  const parsedAgentData = useAgentData(entries, hit?.workflows);
+  const agentData = indexedAgentData || parsedAgentData;
   const hasWorkflowTab = (hit?.workflows || []).length > 0;
   const directSubagentSpawns = hit?.subagent_spawns || 0;
   const hasAgentTabHint = directSubagentSpawns > 0;
@@ -2039,7 +2122,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   if (activeTab === 'agents' && !hasAgentTab) activeTab = hasWorkflowTab ? 'workflows' : 'conversation';
   if (activeTab === 'workflows' && !hasWorkflowTab) activeTab = 'conversation';
   if (activeTab === 'requests' && !showRequestsTab) activeTab = 'conversation';
-  const needsSessionEntries = activeTab === 'conversation' || activeTab === 'agents';
+  const needsSessionEntries = activeTab === 'conversation';
 
   function setActiveTab(tab) {
     const normalized = normalizeDetailTab(tab);
@@ -2081,6 +2164,8 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       setEntries([]); setEntryCount(0); setSearchQuery('');
       setActiveTabRaw('conversation');
       setApiRequestsState({ sessionID: '', items: [], loaded: false, refreshTick: -1 });
+      setIndexedAgentsState({ sessionID: '', items: [], loaded: false, refreshTick: -1 });
+      setAgentsLoading(false);
       setDetailError('');
       setHasEarlierEntries(false); setLoadingEarlierEntries(false);
       return;
@@ -2088,7 +2173,11 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     setApiRequestsState(prev => prev.sessionID === hit.session_id
       ? prev
       : { sessionID: '', items: [], loaded: false, refreshTick: -1 });
+    setIndexedAgentsState(prev => prev.sessionID === hit.session_id
+      ? prev
+      : { sessionID: '', items: [], loaded: false, refreshTick: -1 });
     setRequestsLoading(false);
+    setAgentsLoading(false);
     setHasEarlierEntries(false);
     setLoadingEarlierEntries(false);
     if (!needsSessionEntries) {
@@ -2208,6 +2297,39 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
       })
       .finally(() => {
         if (!cancelled) setRequestsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [hit?.session_id, activeTab, detailRefreshTick]);
+
+  // Fetch indexed subagent metadata when the Agents tab is opened. This avoids
+  // reading the full parent transcript and every sidechain just to render the
+  // agent overview.
+  useEffect(() => {
+    if (!hit || activeTab !== 'agents') return;
+    if (indexedAgentsState.sessionID === hit.session_id &&
+        indexedAgentsState.loaded &&
+        indexedAgentsState.refreshTick === detailRefreshTick) {
+      return;
+    }
+
+    let cancelled = false;
+    setAgentsLoading(true);
+    api('session/' + hit.session_id + '/agents')
+      .then(items => {
+        if (!cancelled) {
+          setIndexedAgentsState({
+            sessionID: hit.session_id,
+            items: items || [],
+            loaded: true,
+            refreshTick: detailRefreshTick,
+          });
+        }
+      })
+      .catch(e => {
+        if (!cancelled) console.error('failed resolving agents', e);
+      })
+      .finally(() => {
+        if (!cancelled) setAgentsLoading(false);
       });
     return () => { cancelled = true; };
   }, [hit?.session_id, activeTab, detailRefreshTick]);
@@ -2835,7 +2957,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
               </button>
             `}
           ` : activeTab === 'agents' ? html`
-            ${loading && entries.length === 0
+            ${agentsLoading && !agentData.hasAgents
               ? html`<div class="loading">loading agents...</div>`
               : html`<${AgentsTab} agentData=${agentData} workflows=${hit.workflows} />`}
           ` : activeTab === 'workflows' ? html`

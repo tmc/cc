@@ -16,6 +16,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/cass/store"
 	"github.com/tmc/cc/ccinboxstore"
 	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/ccteamcfg"
@@ -1145,6 +1146,42 @@ func (s *Server) handleTeamInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, msgs)
+}
+
+// handleSessionAgents returns indexed subagent runs for a session. The detail
+// panel uses this lightweight metadata path for the Agents tab instead of
+// forcing a full merged JSONL read.
+// GET /api/session/{id}/agents
+func (s *Server) handleSessionAgents(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, fmt.Errorf("missing session id"), http.StatusBadRequest)
+		return
+	}
+	if _, err := s.svc.SourcePath(r.Context(), id); err != nil {
+		writeError(w, fmt.Errorf("session not found: %s", id), http.StatusNotFound)
+		return
+	}
+
+	limit := 1000
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	runs, err := s.svc.SubagentRuns(r.Context(), store.SubagentRunFilter{
+		ParentSessionID:    id,
+		ExcludeCompactions: true,
+		Limit:              limit,
+	})
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if runs == nil {
+		runs = []store.SubagentRunListEntry{}
+	}
+	writeJSON(w, runs)
 }
 
 // handleSessionRequests returns HAR-derived API requests for a session.
