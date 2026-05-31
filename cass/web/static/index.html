@@ -1449,7 +1449,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
   if (h.lines_written) stats.push(h.lines_written + ' lines');
   if (h.workflow_count) stats.push(h.workflow_count + ' workflow' + (h.workflow_count === 1 ? '' : 's'));
   if (h.subagent_entries) stats.push('mirrors ' + (h.subagent_mirrored_entries || 0) + '/' + h.subagent_entries);
-  if (h.api_request_count) stats.push(h.api_request_count + ' reqs');
+  if (h.api_request_count) stats.push(h.api_request_count + ' requests');
   if (h.duration_secs) stats.push(fmtDuration(h.duration_secs));
 
   const inTok = h.input_tokens || 0;
@@ -1459,7 +1459,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
 
   const it2 = [];
   if (h.it2_splits) it2.push(h.it2_splits + ' splits');
-  if (h.it2_sends) it2.push(h.it2_sends + ' msgs');
+  if (h.it2_sends) it2.push(h.it2_sends + ' messages');
   if (h.it2_screens) it2.push(h.it2_screens + ' reads');
   const primaryGoal = h.goals && h.goals.length ? h.goals[h.goals.length - 1] : null;
   const primaryGoalGates = goalGateSummary(primaryGoal?.completion_gates);
@@ -2968,7 +2968,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                 </div>
                 ${bd && html`
                   <div class="req-metric">
-                    <span class="label">Blocks (sys/tools/msgs)</span>
+                    <span class="label">Blocks (system/tools/messages)</span>
                     <span class="val">${bd.system_block_count} / ${bd.tool_count} / ${bd.message_count}</span>
                   </div>
                 `}
@@ -5360,7 +5360,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('it2 interactions', fmtNum(agg.it2_splits + agg.it2_sends + agg.it2_screens),
           agg.it2_splits + ' splits · ' + agg.it2_sends + ' sends · ' + agg.it2_screens + ' screens')}
         ${card('team ops', fmtNum(agg.team_inbox_reads + agg.team_inbox_sends + agg.team_task_ops + agg.team_spawns),
-          agg.team_inbox_reads + ' reads · ' + agg.team_inbox_sends + ' msgs · ' + agg.team_task_ops + ' tasks · ' + agg.team_spawns + ' spawns')}
+          agg.team_inbox_reads + ' reads · ' + agg.team_inbox_sends + ' messages · ' + agg.team_task_ops + ' tasks · ' + agg.team_spawns + ' spawns')}
         ${card('last indexed', lastIdx)}
       </div>
 
