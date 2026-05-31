@@ -644,12 +644,11 @@ func TestGraphWorkflowModes(t *testing.T) {
 	g = get("?workflow=expanded")
 	agent = 0
 	var spawn int
+	idxs := []int{}
 	for _, n := range g.Nodes {
 		if n.NodeType == cass.NodeTypeWorkflowAgent {
 			agent++
-			if n.WorkflowAgentIndex >= 2 {
-				t.Fatalf("workflow agent index = %d, want < 2", n.WorkflowAgentIndex)
-			}
+			idxs = append(idxs, n.WorkflowAgentIndex)
 		}
 	}
 	for _, l := range g.Links {
@@ -659,6 +658,9 @@ func TestGraphWorkflowModes(t *testing.T) {
 	}
 	if agent != 2 || spawn != 2 {
 		t.Fatalf("expanded: agents=%d spawn=%d, want 2/2", agent, spawn)
+	}
+	if len(idxs) != 2 || idxs[0] != 0 || idxs[1] != 1 {
+		t.Fatalf("workflow agent indexes = %v, want [0 1]", idxs)
 	}
 }
 
