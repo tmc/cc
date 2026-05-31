@@ -1812,7 +1812,7 @@ function AgentsTab({ agentData, workflows }) {
   const aliases = useMemo(() => workflowAgentAliases(workflows), [workflows]);
 
   if (!agentData || !agentData.hasAgents) {
-    return html`<div class="empty" style="margin-top:20px">no subagent data available</div>`;
+    return html`<div class="empty" style="margin-top:20px">no child agent data available</div>`;
   }
 
   const { agents, totalAgents, totalTokens, totalToolUses, finishedCount, runningCount } = agentData;
