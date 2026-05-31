@@ -2645,6 +2645,51 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     `;
   }
 
+  function renderToolBreakdownPanel() {
+    if (!hit?.tool_breakdown || Object.keys(hit.tool_breakdown).length === 0) return null;
+    return html`
+      <div class="detail-tool-breakdown">
+        <div class="detail-tool-breakdown-head">
+          <span>Tool calls</span>
+          <strong>${detailToolTotal}</strong>
+        </div>
+        ${Object.entries(hit.tool_breakdown).sort((a,b) => b[1] - a[1]).map(([name, count]) => html`
+          <span class="tool-chip" key=${name}
+            style="border-left: 2px solid ${TOOL_COLORS[name]||'var(--faint)'}"
+            title="${TOOL_DESCRIPTIONS[name] || name}: ${count} calls (${detailToolTotal ? (count/detailToolTotal*100).toFixed(0) : 0}%)">
+            <span>${name}</span>
+            <strong>${count}</strong>
+          </span>
+        `)}
+      </div>
+    `;
+  }
+
+  function renderContextPanel() {
+    const hasGoals = !!(hit?.goals && hit.goals.length > 0);
+    const hasSkills = !!(hit?.skills && hit.skills.length > 0);
+    const hasTools = !!(hit?.tool_breakdown && Object.keys(hit.tool_breakdown).length > 0);
+    if (!hasGoals && !hasSkills && !hasTools) return null;
+    const parts = [
+      hit.goal_count > 0 ? hit.goal_count + ' goal' + (hit.goal_count === 1 ? '' : 's') : '',
+      detailSkillCount > 0 ? detailSkillCount + ' used skill' + (detailSkillCount === 1 ? '' : 's') : '',
+      detailToolTotal > 0 ? detailToolTotal + ' tool calls' : '',
+    ].filter(Boolean).join(' / ');
+    return html`
+      <details class="detail-context-panel">
+        <summary>
+          <span>Session context</span>
+          ${parts && html`<strong>${parts}</strong>`}
+        </summary>
+        <div class="detail-context-content">
+          ${renderGoalPanel()}
+          ${renderSkillPanel()}
+          ${renderToolBreakdownPanel()}
+        </div>
+      </details>
+    `;
+  }
+
   return html`
     <div class="detail-panel ${hit ? 'open' : ''}" role="complementary" aria-label="Session detail" onWheel=${onDetailWheel}>
       ${hit && html`
@@ -2671,24 +2716,6 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
             ${hit.workflow_count > 0 && html`<span class="hit-workflows">${hit.workflow_count} workflow${hit.workflow_count === 1 ? '' : 's'} / ${hit.workflow_agent_count || 0} agents / ${hit.workflow_task_op_count || 0} task ops</span>`}
             ${hit.subagent_entries > 0 && html`<span>${hit.subagent_mirrored_entries || 0}/${hit.subagent_entries} mirrored</span>`}
           </div>
-          ${renderGoalPanel()}
-          ${renderSkillPanel()}
-          ${hit.tool_breakdown && Object.keys(hit.tool_breakdown).length > 0 && html`
-            <div class="detail-tool-breakdown">
-              <div class="detail-tool-breakdown-head">
-                <span>Tool calls</span>
-                <strong>${detailToolTotal}</strong>
-              </div>
-              ${Object.entries(hit.tool_breakdown).sort((a,b) => b[1] - a[1]).map(([name, count]) => html`
-                <span class="tool-chip" key=${name}
-                  style="border-left: 2px solid ${TOOL_COLORS[name]||'var(--faint)'}"
-                  title="${TOOL_DESCRIPTIONS[name] || name}: ${count} calls (${detailToolTotal ? (count/detailToolTotal*100).toFixed(0) : 0}%)">
-                  <span>${name}</span>
-                  <strong>${count}</strong>
-                </span>
-              `)}
-            </div>
-          `}
           <div class="detail-session-id">
             <div class="detail-session-line">
               <span class="detail-session-label">session</span>
@@ -2774,6 +2801,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
           </div>
         `}
         <div class="detail-body" ref=${bodyRef}>
+          ${renderContextPanel()}
           ${activeTab === 'conversation' ? html`
             ${detailError && html`<div class="detail-error">${detailError}</div>`}
             ${loading && entries.length === 0 && html`<div class="loading">loading session...</div>`}

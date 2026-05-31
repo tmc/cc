@@ -585,9 +585,6 @@ input::placeholder { color: var(--faint); }
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  max-height: min(58vh, 560px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 .detail-header-top {
   display: flex;
@@ -790,6 +787,43 @@ mark.search-hl {
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 4px;
+}
+
+.detail-context-panel {
+  border: 1px solid var(--border);
+  margin-bottom: 10px;
+  background: color-mix(in srgb, var(--hover) 45%, transparent);
+}
+.detail-context-panel > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 11px;
+  list-style-position: inside;
+}
+.detail-context-panel > summary span {
+  color: var(--fg);
+  font-weight: 600;
+}
+.detail-context-panel > summary strong {
+  color: var(--faint);
+  font-weight: 400;
+  text-align: right;
+}
+.detail-context-content {
+  border-top: 1px solid var(--border);
+  padding: 8px;
+}
+.detail-context-content .detail-goals,
+.detail-context-content .detail-skills,
+.detail-context-content .detail-tool-breakdown {
+  margin-top: 0;
+}
+.detail-context-content > * + * {
+  margin-top: 8px;
 }
 
 /* detail: goal cards */
