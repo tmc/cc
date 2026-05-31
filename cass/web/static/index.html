@@ -2838,6 +2838,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
               <div class="req-meta">
                 ${req.request_id && html`<span title=${req.request_id}>req ${shortSessionID(req.request_id)}</span>`}
                 ${req.source_file && html`<span title=${req.source_file}>src ${shortPath(req.source_file)}</span>`}
+                ${requestMetaItem('hash', shortSessionID(req.source_hash), req.source_hash)}
                 ${requestMetaItem('it2', shortSessionID(req.it2_session_id), req.it2_session_id)}
                 ${requestMetaItem('pid', req.client_pid ? String(req.client_pid) : '', req.client_pid ? String(req.client_pid) : '')}
                 ${requestMetaItem('acct', shortSessionID(req.account_uuid), req.account_uuid)}
