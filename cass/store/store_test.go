@@ -767,6 +767,46 @@ func TestEmptyClaudeMappingDoesNotAttachUnlinkedRequests(t *testing.T) {
 	}
 }
 
+func TestQueryRequestsEmptySessionReturnsAll(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if err := s.BatchIndexRequests(ctx, []cass.APIRequest{
+		{
+			ID:           "req-b",
+			SessionID:    "session-b",
+			RequestID:    "r-b",
+			Timestamp:    200,
+			Model:        "claude-sonnet-4-6",
+			ModelFamily:  "sonnet",
+			IT2SessionID: "ITERM-B",
+			SourceHash:   "req-b",
+		},
+		{
+			ID:          "req-a",
+			SessionID:   "session-a",
+			RequestID:   "r-a",
+			Timestamp:   100,
+			Model:       "claude-haiku-4-5",
+			ModelFamily: "haiku",
+			SourceHash:  "req-a",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reqs, err := s.QueryRequests(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reqs) != 2 {
+		t.Fatalf("QueryRequests empty session = %d, want all 2: %+v", len(reqs), reqs)
+	}
+	if reqs[0].ID != "req-a" || reqs[1].ID != "req-b" {
+		t.Fatalf("QueryRequests empty session order = %+v, want timestamp order req-a, req-b", reqs)
+	}
+}
+
 func TestSkillsRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

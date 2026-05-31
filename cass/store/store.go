@@ -2496,9 +2496,10 @@ func (s *DB) SaveRateLimitSnapshots(ctx context.Context, snapshots []cass.RateLi
 	return tx.Commit()
 }
 
-// QueryRequests returns API requests for a session, ordered by timestamp.
+// QueryRequests returns API requests ordered by timestamp. When sessionID is
+// non-empty, it returns requests linked to that session.
 func (s *DB) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIRequest, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 		SELECT id, session_id, request_id, timestamp,
 			model, model_family, purpose,
 			input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
@@ -2511,11 +2512,18 @@ func (s *DB) QueryRequests(ctx context.Context, sessionID string) ([]cass.APIReq
 			user_hash, account_uuid, org_id,
 			context_breakdown_json
 		FROM api_requests
-		WHERE session_id = ?
-			OR session_id IN (SELECT claude_session FROM session_mapping WHERE cass_session = ? AND claude_session <> '')
-			OR (session_id = '' AND it2_session_id = ?)
-		ORDER BY timestamp
-	`, sessionID, sessionID, sessionID)
+	`
+	var args []any
+	if sessionID != "" {
+		query += `
+			WHERE session_id = ?
+				OR session_id IN (SELECT claude_session FROM session_mapping WHERE cass_session = ? AND claude_session <> '')
+				OR (session_id = '' AND it2_session_id = ?)
+		`
+		args = append(args, sessionID, sessionID, sessionID)
+	}
+	query += ` ORDER BY timestamp`
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query requests: %w", err)
 	}
