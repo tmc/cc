@@ -98,6 +98,9 @@ type GraphNode struct {
 	ParentSessionID   string `json:"parent_session_id,omitempty"`
 	WorkflowRunID     string `json:"workflow_run_id,omitempty"`
 	Name              string `json:"name,omitempty"`
+	Label             string `json:"label,omitempty"`
+	Phase             string `json:"phase,omitempty"`
+	AgentType         string `json:"agent_type,omitempty"`
 	Description       string `json:"description,omitempty"`
 	Status            string `json:"status,omitempty"`
 	AgentCount        int    `json:"agent_count,omitempty"`

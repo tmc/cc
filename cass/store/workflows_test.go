@@ -46,6 +46,13 @@ func sessionWithWorkflows() cass.Session {
 						Title:     "Architecture review",
 						Status:    "completed",
 					},
+					{
+						ID:        "agent-2",
+						Phase:     "Stress",
+						AgentType: "Explore",
+						Title:     "You are reviewing this workflow transcript. READ THESE FILES FIRST before responding.",
+						Status:    "completed",
+					},
 				},
 			},
 			{
@@ -95,14 +102,15 @@ func TestWorkflowPersistenceRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(w.AgentsJSON), &agents); err != nil {
 		t.Fatalf("unmarshal agents: %v", err)
 	}
-	if len(agents) != 1 || agents[0].Label != "lens:architecture" || agents[0].Phase != "Lenses" {
+	if len(agents) != 2 || agents[0].Label != "lens:architecture" || agents[0].Phase != "Lenses" ||
+		agents[1].Phase != "Stress" || agents[1].AgentType != "Explore" {
 		t.Fatalf("agents = %+v", agents)
 	}
 	hit, err := s.Session(ctx, "sess1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hit.Workflows) != 2 || len(hit.Workflows[0].Phases) != 2 || len(hit.Workflows[0].Agents) != 1 {
+	if len(hit.Workflows) != 2 || len(hit.Workflows[0].Phases) != 2 || len(hit.Workflows[0].Agents) != 2 {
 		t.Fatalf("folded workflows = %+v", hit.Workflows)
 	}
 
@@ -204,11 +212,15 @@ func TestGraphExpandedMode(t *testing.T) {
 	}
 
 	var agentNodes, spawn int
+	var promptTitleNode cass.GraphNode
 	for _, n := range g.Nodes {
 		if n.NodeType == cass.NodeTypeWorkflowAgent {
 			agentNodes++
 			if n.WorkflowRunID != "wf_aaa" {
 				t.Errorf("agent node parented to %q, want wf_aaa", n.WorkflowRunID)
+			}
+			if n.ID == "wf_aaa#agent-2" {
+				promptTitleNode = n
 			}
 		}
 	}
@@ -223,6 +235,12 @@ func TestGraphExpandedMode(t *testing.T) {
 	}
 	if spawn != 3 {
 		t.Errorf("workflow_spawn edges = %d, want 3", spawn)
+	}
+	if promptTitleNode.ID == "" {
+		t.Fatalf("missing workflow agent node for agent-2")
+	}
+	if promptTitleNode.Title != "Explore 2" || promptTitleNode.Phase != "Stress" || promptTitleNode.AgentType != "Explore" {
+		t.Errorf("agent-2 graph node = %+v, want prompt title hidden with phase/type metadata", promptTitleNode)
 	}
 }
 

@@ -2062,12 +2062,7 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 					if a.ID != "" {
 						childID = w.RunID + "#" + a.ID
 					}
-					title := fmt.Sprintf("agent %d", i+1)
-					if a.Label != "" {
-						title = a.Label
-					} else if a.Title != "" {
-						title = a.Title
-					}
+					title := workflowAgentGraphTitle(a, i)
 					status := firstNonEmptyStr(a.Status, w.Status)
 					nodes = append(nodes, cass.GraphNode{
 						ID:              childID,
@@ -2076,6 +2071,9 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 						WorkflowRunID:   w.RunID,
 						Workspace:       sm.workspace,
 						Title:           title,
+						Label:           a.Label,
+						Phase:           a.Phase,
+						AgentType:       a.AgentType,
 						Status:          status,
 						ToolCalls:       a.ToolCalls,
 						Tokens:          a.Tokens,
@@ -2131,6 +2129,28 @@ func (s *DB) GraphDataOpts(ctx context.Context, since time.Time, opts cass.Graph
 		tr.Max = time.Unix(maxTS, 0).UTC().Format(time.RFC3339)
 	}
 	return &cass.GraphData{Nodes: nodes, Links: links, TimeRange: tr}, nil
+}
+
+func workflowAgentGraphTitle(a cass.WorkflowAgent, index int) string {
+	if a.Label != "" {
+		return a.Label
+	}
+	if a.Title != "" && !workflowAgentTitleLooksLikePrompt(a.Title) {
+		return a.Title
+	}
+	if a.AgentType != "" {
+		return fmt.Sprintf("%s %d", a.AgentType, index+1)
+	}
+	return fmt.Sprintf("agent %d", index+1)
+}
+
+func workflowAgentTitleLooksLikePrompt(title string) bool {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return false
+	}
+	lower := strings.ToLower(t)
+	return len(t) > 72 || strings.HasPrefix(lower, "you are ") || strings.Contains(t, "READ THESE FILES FIRST")
 }
 
 // filterGraphNodes drops nodes (and links touching them) whose node_type is not

@@ -2694,6 +2694,22 @@ function nodeStartISO(n) {
   return typeof n.started_at === 'number' ? new Date(n.started_at * 1000).toISOString() : n.started_at;
 }
 
+function workflowGraphAgentLabel(n, id) {
+  if (n.label) return n.label;
+  if (n.title && !looksLikePromptTitle(n.title)) return n.title;
+  if (n.agent_type) return n.agent_type + ' agent';
+  if (n.name) return n.name;
+  return id;
+}
+
+function workflowGraphAgentInfo(n) {
+  return [
+    n.phase,
+    n.agent_type,
+    n.status && n.status !== 'unknown' ? n.status : '',
+  ].filter(Boolean).join(' · ');
+}
+
 // GraphTooltip renders the floating node/edge tooltip. Content varies by
 // node_type; edges show the normalized edge_type label.
 function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, isActive }) {
@@ -2723,8 +2739,8 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
       if (n.node_type === 'workflow_agent') {
         return html`
           <div class="graph-tooltip visible" style="left:${tooltip.x}px;top:${tooltip.y}px">
-            <div class="graph-tooltip-title">${n.title || tooltip.id}</div>
-            <div class="graph-tooltip-stat">${n.status || 'agent'} · ${n.workflow_run_id || ''}</div>
+            <div class="graph-tooltip-title">${workflowGraphAgentLabel(n, tooltip.id)}</div>
+            <div class="graph-tooltip-stat">${[workflowGraphAgentInfo(n) || 'agent', n.workflow_run_id || ''].filter(Boolean).join(' · ')}</div>
             <div class="graph-tooltip-hint">click to open parent session</div>
           </div>
         `;
@@ -3377,7 +3393,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
     const n = nodeData[id];
     if (!n) return id.slice(0, 8);
     if (n.node_type === 'workflow') return n.name || id;
-    if (n.node_type === 'workflow_agent') return n.title || n.name || id;
+    if (n.node_type === 'workflow_agent') return workflowGraphAgentLabel(n, id);
     if (n.node_type === 'subagent') return n.name || n.title || id.slice(0, 8);
     if (n.workspace) return id.slice(0, 8) + ' ' + shortProject(n.workspace);
     return id.slice(0, 8);
@@ -3394,7 +3410,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       if (n.journal_event_count) parts.push(n.journal_event_count + ' events');
       return parts.join(' · ');
     }
-    if (n.node_type === 'workflow_agent') return n.status || '';
+    if (n.node_type === 'workflow_agent') return workflowGraphAgentInfo(n);
     if (n.node_type === 'subagent') return n.status || 'subagent';
     const parts = [];
     if (n.tool_calls) parts.push(n.tool_calls + ' tools');
