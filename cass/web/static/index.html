@@ -39,15 +39,27 @@ const refreshMinInterval = 2500;
 const headerStatsRefreshMinInterval = 30000;
 let refreshLast = 0;
 let refreshTimer = null;
+let refreshDetail = null;
 
 function dispatchRefresh() {
   refreshLast = Date.now();
   refreshTimer = null;
-  workflowAgentCache.clear();
-  window.dispatchEvent(new CustomEvent('cass:refresh'));
+  const pending = refreshDetail;
+  refreshDetail = null;
+  const detail = pending ? { ...pending, paths: Array.from(pending.paths || []) } : {};
+  const paths = refreshPaths(detail);
+  if (paths.length === 0) {
+    workflowAgentCache.clear();
+  } else {
+    for (const sourcePath of Array.from(workflowAgentCache.keys())) {
+      if (refreshTouchesPath(detail, sourcePath)) workflowAgentCache.delete(sourcePath);
+    }
+  }
+  window.dispatchEvent(new CustomEvent('cass:refresh', { detail }));
 }
 
-function scheduleAppRefresh(delay = 300) {
+function scheduleAppRefresh(delay = 300, detail) {
+  mergeRefreshDetail(detail);
   const now = Date.now();
   const next = Math.max(refreshLast + refreshMinInterval, now + delay);
   const wait = Math.max(0, next - now);
@@ -55,6 +67,38 @@ function scheduleAppRefresh(delay = 300) {
     clearTimeout(refreshTimer);
   }
   refreshTimer = setTimeout(dispatchRefresh, wait);
+}
+
+function mergeRefreshDetail(detail) {
+  if (!detail) return;
+  if (!refreshDetail) refreshDetail = { paths: new Set(), indexed: 0 };
+  for (const p of refreshPaths(detail)) {
+    if (p) refreshDetail.paths.add(p);
+  }
+  if (detail.indexed) refreshDetail.indexed += detail.indexed;
+}
+
+function refreshPaths(detail) {
+  if (!detail) return [];
+  const paths = detail.paths || detail.changed_paths || [];
+  if (paths instanceof Set) return Array.from(paths);
+  return Array.isArray(paths) ? paths : [];
+}
+
+function refreshTouchesPath(detail, sourcePath) {
+  if (!sourcePath) return true;
+  const paths = refreshPaths(detail);
+  if (paths.length === 0) return true;
+  return paths.some(p => p === sourcePath);
+}
+
+function refreshTouchesSession(detail, hit) {
+  if (!hit || !hit.source_path) return true;
+  const paths = refreshPaths(detail);
+  if (paths.length === 0) return true;
+  const sourcePath = hit.source_path;
+  const sessionDir = sourcePath.endsWith('.jsonl') ? sourcePath.slice(0, -'.jsonl'.length) + '/' : '';
+  return paths.some(p => p === sourcePath || (sessionDir && p.startsWith(sessionDir)));
 }
 
 async function fetchJSON(path, opts) {
@@ -842,12 +886,16 @@ function App() {
     // Collapse a burst of file-change events into one refresh: every panel
     // listens for cass:refresh, so an undebounced dispatch fans a single
     // server event out into ~6 fetches and a burst stacks them.
-    es.addEventListener('session_change', () => scheduleAppRefresh());
+    es.addEventListener('session_change', (e) => {
+      let detail = {};
+      try { detail = JSON.parse(e.data); } catch {}
+      scheduleAppRefresh(300, detail);
+    });
     es.addEventListener('index_complete', (e) => {
       const data = JSON.parse(e.data);
       showToast('Indexed ' + data.indexed + ' sessions');
       window.dispatchEvent(new CustomEvent('cass:index_complete', { detail: data }));
-      scheduleAppRefresh();
+      scheduleAppRefresh(300, data);
     });
     // Team messages are direct human input, not file-change amplification.
     es.addEventListener('team_message', (e) => {
@@ -1829,10 +1877,12 @@ function WorkflowAgentTranscript({ sourcePath }) {
   }, [sourcePath, refreshTick]);
 
   useEffect(() => {
-    const refresh = () => setRefreshTick(t => t + 1);
+    const refresh = (e) => {
+      if (refreshTouchesPath(e.detail, sourcePath)) setRefreshTick(t => t + 1);
+    };
     window.addEventListener('cass:refresh', refresh);
     return () => window.removeEventListener('cass:refresh', refresh);
-  }, []);
+  }, [sourcePath]);
 
   useEffect(() => {
     if (loaded) workflowAgentCache.set(sourcePath, { entries, hasEarlier });
@@ -2221,12 +2271,12 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   }, [hit?.session_id, activeTab]);
 
   useEffect(() => {
-    function refresh() {
-      setDetailRefreshTick(t => t + 1);
+    function refresh(e) {
+      if (refreshTouchesSession(e.detail, hit)) setDetailRefreshTick(t => t + 1);
     }
     window.addEventListener('cass:refresh', refresh);
     return () => window.removeEventListener('cass:refresh', refresh);
-  }, []);
+  }, [hit?.session_id, hit?.source_path]);
 
   useEffect(() => {
     if (detailRefreshTick === 0 || !hit || !needsSessionEntries || hit.meta_error) return;
