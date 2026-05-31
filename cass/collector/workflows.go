@@ -18,6 +18,7 @@ import (
 var (
 	workflowMetaRE         = regexp.MustCompile(`(?m)\b(name|description)\s*:\s*['"]([^'"]+)['"]`)
 	workflowPhaseRE        = regexp.MustCompile(`(?s)\{\s*title\s*:\s*['"]([^'"]+)['"]\s*,\s*detail\s*:\s*['"]([^'"]*)['"]\s*\}`)
+	workflowPhaseCallRE    = regexp.MustCompile(`\bphase\(\s*['"]([^'"]+)['"]\s*\)`)
 	workflowLensKeyRE      = regexp.MustCompile(`\bkey\s*:\s*['"]([^'"]+)['"]`)
 	workflowLabelKeyRE     = regexp.MustCompile("label\\s*:\\s*`([^`]*\\$\\{l\\.key\\}[^`]*)`\\s*,\\s*phase\\s*:\\s*['\"]([^'\"]+)['\"]([^}]*)")
 	workflowPhaseKeyRE     = regexp.MustCompile("phase\\s*:\\s*['\"]([^'\"]+)['\"][^}]*label\\s*:\\s*`([^`]*\\$\\{l\\.key\\}[^`]*)`([^}]*)")
@@ -282,7 +283,10 @@ func workflowScriptInfoFromScript(script string) workflowScriptInfo {
 		}
 	}
 	for _, m := range workflowPhaseRE.FindAllStringSubmatch(script, -1) {
-		info.Phases = append(info.Phases, cass.WorkflowPhase{Title: m[1], Detail: m[2]})
+		addWorkflowPhase(&info, cass.WorkflowPhase{Title: m[1], Detail: m[2]})
+	}
+	for _, m := range workflowPhaseCallRE.FindAllStringSubmatch(script, -1) {
+		addWorkflowPhase(&info, cass.WorkflowPhase{Title: m[1]})
 	}
 	seenKeys := map[string]bool{}
 	for _, m := range workflowLensKeyRE.FindAllStringSubmatch(script, -1) {
@@ -306,6 +310,18 @@ func workflowScriptInfoFromScript(script string) workflowScriptInfo {
 		addWorkflowAgentSpecs(&info, m[2], m[1], m[0])
 	}
 	return info
+}
+
+func addWorkflowPhase(info *workflowScriptInfo, phase cass.WorkflowPhase) {
+	if info == nil || phase.Title == "" {
+		return
+	}
+	for _, p := range info.Phases {
+		if p.Title == phase.Title {
+			return
+		}
+	}
+	info.Phases = append(info.Phases, phase)
 }
 
 func addWorkflowAgentSpecs(info *workflowScriptInfo, label, phase, options string) {

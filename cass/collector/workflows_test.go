@@ -60,6 +60,9 @@ func TestExtractWorkflowsFromClaudeSession(t *testing.T) {
 	if w.RunID != "wf_abc" || w.TaskID != "t1" || w.Name != "perf-dive" || w.Status != "completed" {
 		t.Fatalf("workflow = %+v", w)
 	}
+	if len(w.Phases) != 1 || w.Phases[0].Title != "Measure" {
+		t.Fatalf("phases = %+v, want Measure from phase() call", w.Phases)
+	}
 	if w.AgentCount != 2 || w.JournalEventCount != 3 {
 		t.Fatalf("workflow counts = agents %d journal %d", w.AgentCount, w.JournalEventCount)
 	}
