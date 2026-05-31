@@ -1754,6 +1754,14 @@ function workflowAgentSubtitle(a, name) {
   return title;
 }
 
+function workflowAgentTerminal(a) {
+  return ['completed', 'error', 'failed', 'killed', 'cancelled', 'canceled'].includes(a?.status || '');
+}
+
+function workflowAgentErrored(a) {
+  return ['error', 'failed', 'killed'].includes(a?.status || '');
+}
+
 function workflowPhaseGroups(wf) {
   const agents = wf.agents || [];
   const groups = [];
@@ -1799,15 +1807,16 @@ function WorkflowsTab({ workflows }) {
             ${wf.description && html`<div class="wf-run-desc">${wf.description}</div>`}
             <div class="wf-phase-list">
               ${groups.map((group, gi) => {
-                const done = group.agents.filter(a => a.status === 'completed').length;
                 const total = group.agents.length;
-                const phaseState = total === 0 ? 'pending' : done === total ? 'complete' : 'active';
+                const terminal = group.agents.filter(workflowAgentTerminal).length;
+                const failed = group.agents.some(workflowAgentErrored);
+                const phaseState = total === 0 ? 'pending' : terminal === total ? (failed ? 'error' : 'complete') : 'active';
                 return html`
                   <section class="wf-phase ${phaseState}" key=${group.title}>
                     <div class="wf-phase-head">
                       <span class="wf-phase-index">${gi + 1}</span>
                       <span class="wf-phase-title">${group.title}</span>
-                      <span class="wf-phase-count">${total ? done + '/' + total : 'not started'}</span>
+                      <span class="wf-phase-count">${total ? terminal + '/' + total : 'not started'}</span>
                     </div>
                     ${group.detail && html`<div class="wf-phase-detail">${group.detail}</div>`}
                     ${total === 0 ? html`

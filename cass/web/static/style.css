@@ -2259,6 +2259,7 @@ mark.search-hl {
 .wf-phase.complete .wf-phase-count { color: var(--green, #2a7); }
 .wf-phase.active .wf-phase-count { color: var(--cyan); }
 .wf-phase.pending .wf-phase-count { color: var(--faint); }
+.wf-phase.error .wf-phase-count { color: var(--red, #c33); }
 .wf-phase-detail {
   margin: 2px 0 4px 22px;
   color: var(--dim);
