@@ -4305,7 +4305,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
         <div class="filter-chips">
           <button class="filter-chip ${edgeFilter.message ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, message: !f.message }))}>
-            <span style="color:var(--accent)">—</span> iTerm2 msg</button>
+            <span style="color:var(--accent)">—</span> iTerm2 message</button>
           <button class="filter-chip ${edgeFilter.observation ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, observation: !f.observation }))}>
             <span style="color:var(--faint)">--</span> observe</button>
@@ -4519,7 +4519,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
           <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--cyan)"></span>running</span>
           <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--yellow)"></span>async</span>
         ` : html`
-          <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--accent)"></span>iTerm2 msg</span>
+          <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--accent)"></span>iTerm2 message</span>
           <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--faint)"></span>observe</span>
           <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--green)"></span>split</span>
           <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--magenta)"></span>team message</span>
