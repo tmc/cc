@@ -120,6 +120,10 @@ Model selection is determined by `subagent_type` in the Task tool input:
     Bash            → claude-haiku-4-5-20251001
     (custom)        → specified by `model` parameter
 
+Cass records the model from the child assistant entries when present.
+If those entries omit it, cass falls back to the parent Task tool input
+joined through the queue notification's `tool-use-id`.
+
 Compaction variant: `agent-acompact-<id>.jsonl` supplements (does not
 replace) the original subagent file. Cass records these as
 `SubagentRun{IsCompaction:true}` for auditability but excludes them from
@@ -746,12 +750,9 @@ PIDs that become invalid after process exit.
 
 Ranked by value/cost ratio:
 
-1. **Subagent model diversity** — verify model override via Task tool
-   `model` parameter. 10 min. Closes three-way Haiku ambiguity gap.
-
-2. **Progress mirroring coverage** — quantify how often
+1. **Progress mirroring coverage** — quantify how often
    `agent_progress` messages can be linked back to subagent entries.
    Low priority unless UI needs entry-level fan-out replay.
 
-4. **PID→It2 mapping durability** — test E7 persistence across
+2. **PID→It2 mapping durability** — test E7 persistence across
    subprocess exit, compaction, resume. Low priority given team infra.

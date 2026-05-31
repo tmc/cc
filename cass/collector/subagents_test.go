@@ -442,6 +442,101 @@ func TestExtractSubagentRuns_MissingMeta(t *testing.T) {
 	}
 }
 
+func TestExtractSubagentRuns_TaskToolUseMetadata(t *testing.T) {
+	root := t.TempDir()
+	proj := projectRoot(root, "-tmp-fixture")
+	parentID := "45454545-4545-4545-4545-454545454545"
+	parentPath := filepath.Join(proj, parentID+".jsonl")
+
+	t0 := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	agentFallback := "model1"
+	agentObserved := "model2"
+
+	parent := []jsonlEntry{
+		{"type": "user", "uuid": "u1", "sessionId": parentID, "timestamp": t0.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "launch agents"}},
+		{
+			"type":      "assistant",
+			"uuid":      "a1",
+			"sessionId": parentID,
+			"timestamp": t0.Add(1 * time.Second).Format(time.RFC3339Nano),
+			"message": map[string]any{
+				"role": "assistant",
+				"content": []any{
+					map[string]any{
+						"type":  "tool_use",
+						"id":    "toolu_fallback",
+						"name":  "Task",
+						"input": map[string]any{"subagent_type": "reviewer", "model": "claude-opus-4-6"},
+					},
+					map[string]any{
+						"type":  "tool_use",
+						"id":    "toolu_observed",
+						"name":  "Task",
+						"input": map[string]any{"subagent_type": "planner", "model": "claude-opus-4-6"},
+					},
+				},
+			},
+		},
+		{
+			"type":      "queue-operation",
+			"operation": "enqueue",
+			"timestamp": t0.Add(10 * time.Second).Format(time.RFC3339Nano),
+			"sessionId": parentID,
+			"content":   taskNotificationXML(agentFallback, "toolu_fallback", "completed", 10, 1, 100, "", ""),
+		},
+		{
+			"type":      "queue-operation",
+			"operation": "dequeue",
+			"timestamp": t0.Add(11 * time.Second).Format(time.RFC3339Nano),
+			"sessionId": parentID,
+		},
+		{
+			"type":      "queue-operation",
+			"operation": "enqueue",
+			"timestamp": t0.Add(20 * time.Second).Format(time.RFC3339Nano),
+			"sessionId": parentID,
+			"content":   taskNotificationXML(agentObserved, "toolu_observed", "completed", 20, 2, 200, "", ""),
+		},
+		{
+			"type":      "queue-operation",
+			"operation": "remove",
+			"timestamp": t0.Add(21 * time.Second).Format(time.RFC3339Nano),
+			"sessionId": parentID,
+		},
+	}
+	writeJSONL(t, parentPath, parent)
+
+	writeJSONL(t, filepath.Join(proj, parentID, "subagents", "agent-"+agentFallback+".jsonl"), []jsonlEntry{
+		{"type": "user", "uuid": "s1", "sessionId": parentID, "agentId": agentFallback, "isSidechain": true, "timestamp": t0.Add(2 * time.Second).Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "review"}},
+	})
+	writeJSONL(t, filepath.Join(proj, parentID, "subagents", "agent-"+agentObserved+".jsonl"), []jsonlEntry{
+		{"type": "user", "uuid": "s2", "sessionId": parentID, "agentId": agentObserved, "isSidechain": true, "timestamp": t0.Add(12 * time.Second).Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "plan"}},
+		{"type": "assistant", "uuid": "s3", "sessionId": parentID, "agentId": agentObserved, "timestamp": t0.Add(18 * time.Second).Format(time.RFC3339Nano), "message": map[string]any{"role": "assistant", "model": "claude-haiku-4-5", "content": []any{map[string]any{"type": "text", "text": "ok"}}}},
+	})
+
+	sessions := scanCollector(t, root)
+	sess := findSession(t, sessions)
+	if len(sess.Subagents) != 2 {
+		t.Fatalf("want 2 SubagentRun records, got %d", len(sess.Subagents))
+	}
+
+	fallback := findRun(t, sess.Subagents, agentFallback)
+	if fallback.AgentType != "reviewer" {
+		t.Errorf("fallback AgentType = %q, want reviewer", fallback.AgentType)
+	}
+	if fallback.Model != "claude-opus-4-6" {
+		t.Errorf("fallback Model = %q, want claude-opus-4-6", fallback.Model)
+	}
+
+	observed := findRun(t, sess.Subagents, agentObserved)
+	if observed.AgentType != "planner" {
+		t.Errorf("observed AgentType = %q, want planner", observed.AgentType)
+	}
+	if observed.Model != "claude-haiku-4-5" {
+		t.Errorf("observed Model = %q, want child assistant model", observed.Model)
+	}
+}
+
 func TestExtractSubagentRuns_ForkParentSessionIDIsCassID(t *testing.T) {
 	// Critical regression guard: SubagentRun.ParentSessionID must be the
 	// cass session ID (sha256 of the JSONL path), NOT the Claude

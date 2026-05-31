@@ -17,9 +17,9 @@ type SubagentRun struct {
 	ParentClaudeSID string    `json:"parent_claude_sid"` // Claude sessionId.
 	Workspace       string    `json:"workspace,omitempty"`
 	GitCommonDir    string    `json:"git_common_dir,omitempty"`
-	AgentType       string    `json:"agent_type,omitempty"`  // From meta.json (e.g. "general-purpose").
+	AgentType       string    `json:"agent_type,omitempty"`  // From meta.json or Task tool input.
 	Description     string    `json:"description,omitempty"` // From meta.json.
-	Model           string    `json:"model,omitempty"`       // From subagent JSONL assistant entries.
+	Model           string    `json:"model,omitempty"`       // From assistant entries or Task tool input.
 	EnqueuedAt      time.Time `json:"enqueued_at"`           // Notification posted to queue.
 	DequeuedAt      time.Time `json:"dequeued_at"`           // Parent consumed notification.
 	StartedAt       time.Time `json:"started_at"`            // First entry in subagent JSONL.

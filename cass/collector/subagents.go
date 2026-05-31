@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,6 +40,7 @@ func extractSubagentRuns(ctx context.Context, sessionPath string, parentEntries 
 	}
 
 	notes := indexTaskNotifications(parentEntries)
+	taskToolUses := indexTaskToolUses(parentEntries)
 
 	var runs []cass.SubagentRun
 	for _, fi := range infos {
@@ -97,6 +99,9 @@ func extractSubagentRuns(ctx context.Context, sessionPath string, parentEntries 
 			run.DurationMs = note.notification.DurationMs
 			if s := note.notification.Status; s != "" {
 				run.Status = s
+			}
+			if task := taskToolUses[run.ToolUseID]; task.model != "" || task.agentType != "" {
+				applyTaskToolUse(&run, task)
 			}
 		}
 
@@ -209,4 +214,59 @@ func indexTaskNotifications(entries []cc.Entry) map[string]taskNotificationRecor
 		}
 	}
 	return out
+}
+
+// taskToolUseRecord holds the Task tool input fields cass needs when the
+// child JSONL or meta sidecar omits them.
+type taskToolUseRecord struct {
+	agentType string
+	model     string
+}
+
+// indexTaskToolUses returns Task tool_use inputs keyed by their tool_use id.
+// Queue-operation notifications carry that id, making the join authoritative.
+func indexTaskToolUses(entries []cc.Entry) map[string]taskToolUseRecord {
+	out := make(map[string]taskToolUseRecord)
+	for _, e := range entries {
+		if e.Message == nil {
+			continue
+		}
+		for _, b := range e.Message.ToolUses() {
+			if b.Name != "Task" || b.ID == "" || len(b.Input) == 0 {
+				continue
+			}
+			var in struct {
+				SubagentType string `json:"subagent_type"`
+				AgentType    string `json:"agent_type"`
+				Model        string `json:"model"`
+			}
+			if err := json.Unmarshal(b.Input, &in); err != nil {
+				continue
+			}
+			agentType := strings.TrimSpace(in.SubagentType)
+			if agentType == "" {
+				agentType = strings.TrimSpace(in.AgentType)
+			}
+			model := strings.TrimSpace(in.Model)
+			if agentType == "" && model == "" {
+				continue
+			}
+			out[b.ID] = taskToolUseRecord{
+				agentType: agentType,
+				model:     model,
+			}
+		}
+	}
+	return out
+}
+
+// applyTaskToolUse fills only fields not already observed from the subagent
+// JSONL or meta sidecar.
+func applyTaskToolUse(run *cass.SubagentRun, task taskToolUseRecord) {
+	if run.AgentType == "" {
+		run.AgentType = task.agentType
+	}
+	if run.Model == "" {
+		run.Model = task.model
+	}
 }
