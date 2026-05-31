@@ -2507,15 +2507,16 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
   function renderSkillPanel() {
     if (!hit?.skills || hit.skills.length === 0) return null;
-    const active = hit.skills.filter(skill => skill.kind !== 'available');
+    const active = hit.skills.filter(skill =>
+      skill.kind !== 'available' && skill.kind !== 'expanded');
+    const context = hit.skills.filter(skill => skill.kind === 'expanded');
     const available = hit.skills.filter(skill => skill.kind === 'available');
     const selected = hit.skills.filter(skill => skill.kind === 'selected' || skill.kind === 'tool').length;
     const loaded = hit.skills.filter(skill => skill.kind === 'loaded').length;
-    const context = hit.skills.filter(skill => skill.kind === 'expanded').length;
     const counts = [
       selected ? selected + ' selected' : '',
       loaded ? loaded + ' loaded' : '',
-      context ? context + ' context' : '',
+      context.length ? context.length + ' context' : '',
       available.length ? available.length + ' available' : '',
     ].filter(Boolean).join(' / ');
     const renderCard = (skill, i) => html`
@@ -2545,6 +2546,17 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
           <div class="detail-skills-scroll detail-skill-list active">
             ${active.map(renderCard)}
           </div>
+        `}
+        ${context.length > 0 && html`
+          <details class="detail-skill-section">
+            <summary>
+              <span>context skills</span>
+              <strong>${context.length}</strong>
+            </summary>
+            <div class="detail-skills-scroll detail-skill-list context">
+              ${context.map(renderCard)}
+            </div>
+          </details>
         `}
         ${available.length > 0 && html`
           <details class="detail-skill-section">

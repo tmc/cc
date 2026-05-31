@@ -960,6 +960,7 @@ mark.search-hl {
   display: grid;
   gap: 6px;
 }
+.detail-skill-list.context,
 .detail-skill-list.available {
   max-height: 220px;
   overflow-y: auto;
