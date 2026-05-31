@@ -1395,6 +1395,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
   if (h.lines_written) stats.push(h.lines_written + ' lines');
   if (h.workflow_count) stats.push(h.workflow_count + ' workflow' + (h.workflow_count === 1 ? '' : 's'));
   if (h.subagent_entries) stats.push('mirrors ' + (h.subagent_mirrored_entries || 0) + '/' + h.subagent_entries);
+  if (h.api_request_count) stats.push(h.api_request_count + ' reqs');
   if (h.duration_secs) stats.push(fmtDuration(h.duration_secs));
 
   const inTok = h.input_tokens || 0;
