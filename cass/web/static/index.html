@@ -2066,6 +2066,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
   const matchCount = matchIndices.length;
   const matchSet = useMemo(() => new Set(matchIndices), [matchIndices]);
+  const searchHasUnloadedEntries = activeTab === 'conversation' && !!searchQuery && hasEarlierEntries;
   const [matchCursor, setMatchCursor] = useState(-1);
 
   // Reset cursor when query changes.
@@ -2516,6 +2517,11 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
               }} />
             ${searchQuery && html`
               <span class="detail-search-count">${matchCount > 0 ? (matchCursor + 1) + '/' + matchCount : '0'}</span>
+            `}
+            ${searchHasUnloadedEntries && html`
+              <button class="detail-search-earlier" disabled=${loadingEarlierEntries} onClick=${loadEarlierSessionEntries}>
+                ${loadingEarlierEntries ? 'loading...' : 'search earlier'}
+              </button>
             `}
           </div>
 

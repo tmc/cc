@@ -750,6 +750,18 @@ input::placeholder { color: var(--faint); }
   color: var(--faint);
   white-space: nowrap;
 }
+.detail-search-earlier {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--cyan);
+  font: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.detail-search-earlier:hover:not(:disabled) { background: var(--hover); }
+.detail-search-earlier:disabled { color: var(--faint); cursor: default; }
 
 /* search highlights */
 mark.search-hl {
