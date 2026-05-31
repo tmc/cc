@@ -1547,7 +1547,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
         ${h.compactions > 0 && html`<span class="hit-compactions">${h.compactions} compaction${h.compactions > 1 ? 's' : ''}</span>`}
         ${h.goal_count > 0 && html`<span class="hit-goals">${h.active_goal_count || 0} active / ${h.completed_goal_count || 0} complete</span>`}
         ${shownSkillCount > 0 && html`<span class="hit-skills">${h.selected_skill_count || 0} selected / ${h.loaded_skill_count || 0} loaded</span>`}
-        ${h.workflow_count > 0 && html`<span class="hit-workflows">${h.workflow_count} workflow${h.workflow_count === 1 ? '' : 's'} · ${h.workflow_agent_count || 0} agents${h.workflow_task_op_count ? ' · ' + h.workflow_task_op_count + ' task ops' : ''}</span>`}
+        ${h.workflow_count > 0 && html`<span class="hit-workflows">${h.workflow_count} workflow${h.workflow_count === 1 ? '' : 's'} · ${h.workflow_agent_count || 0} agents${h.workflow_task_op_count ? ' · ' + h.workflow_task_op_count + ' task operations' : ''}</span>`}
         ${renderWorkflowBadges(h.workflows, 3)}
         ${it2.length > 0 && html`<span class="hit-it2">it2: ${it2.join(', ')}</span>`}
       </div>
@@ -5349,7 +5349,7 @@ function StatsPanel({ urlParams, updateParams, navVersion }) {
         ${card('lines written', fmtNum(agg.lines_written))}
         ${card('total time', fmtDuration(agg.duration_secs))}
         ${card('subagent spawns', fmtNum(agg.subagent_spawns))}
-        ${card('workflows', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' agents · ' + (agg.workflow_task_ops || 0) + ' task ops')}
+        ${card('workflows', fmtNum(agg.workflows || 0), (agg.workflow_agents || 0) + ' agents · ' + (agg.workflow_task_ops || 0) + ' task operations')}
         ${card('goals', fmtNum(agg.goals || 0), (agg.active_goals || 0) + ' active · ' + (agg.completed_goals || 0) + ' complete')}
         ${card('skill use', fmtNum((agg.selected_skills || 0) + (agg.loaded_skills || 0)),
           (agg.selected_skills || 0) + ' selected · ' + (agg.loaded_skills || 0) + ' loaded' +
