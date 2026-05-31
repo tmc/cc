@@ -2796,6 +2796,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
             <div class="api-request-card" key=${req.id}>
               <div class="req-header">
                 <span class="req-method-badge">POST</span>
+                ${req.purpose && html`<span class="req-purpose-badge">${req.purpose}</span>`}
                 <span class="req-model">${req.model}</span>
                 <span class="req-time">${new Date(req.timestamp * 1000).toLocaleTimeString()}</span>
                 <span class="req-duration">${req.duration_ms}ms</span>

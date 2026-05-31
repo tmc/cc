@@ -2256,6 +2256,14 @@ mark.search-hl {
   font-size: 9px;
   border-radius: 2px;
 }
+.req-purpose-badge {
+  font-weight: 600;
+  color: var(--magenta);
+  border: 1px solid var(--magenta);
+  padding: 1px 4px;
+  font-size: 9px;
+  border-radius: 2px;
+}
 .req-model { font-weight: 600; color: var(--fg); flex: 1; }
 .req-time { color: var(--faint); }
 .req-duration { color: var(--dim); }
