@@ -207,6 +207,12 @@ function shortSessionID(id) {
   return id && id.length > 8 ? id.slice(0, 8) : (id || '');
 }
 
+function shortPath(p) {
+  if (!p) return '';
+  const parts = String(p).split('/').filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : String(p);
+}
+
 function normalizeDetailTab(tab) {
   return tab === 'agents' || tab === 'requests' || tab === 'workflows' ? tab : 'conversation';
 }
@@ -2801,6 +2807,10 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
                 <span class="req-time">${new Date(req.timestamp * 1000).toLocaleTimeString()}</span>
                 <span class="req-duration">${req.duration_ms}ms</span>
                 <span class="req-status ${req.status_code >= 400 ? 'error' : 'success'}">${req.status_code}</span>
+              </div>
+              <div class="req-meta">
+                ${req.request_id && html`<span title=${req.request_id}>req ${shortSessionID(req.request_id)}</span>`}
+                ${req.source_file && html`<span title=${req.source_file}>src ${shortPath(req.source_file)}</span>`}
               </div>
 
               <div class="req-metrics">

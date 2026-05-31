@@ -2270,6 +2270,21 @@ mark.search-hl {
 .req-status { font-weight: 600; }
 .req-status.success { color: var(--green); }
 .req-status.error { color: var(--danger); }
+.req-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -2px 0 8px;
+  font-size: 10px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.req-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
 
 .req-metrics {
   display: grid;
