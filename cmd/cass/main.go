@@ -163,7 +163,7 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	if *harDir != "" {
 		harCount, err = svc.IndexHAR(ctx, *harDir)
 		if err != nil {
-			return fmt.Errorf("index har: %w", err)
+			return fmt.Errorf("index api requests: %w", err)
 		}
 	}
 

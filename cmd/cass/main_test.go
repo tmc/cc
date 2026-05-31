@@ -293,6 +293,35 @@ func TestRunIndexJSONUsesApiRequestsKey(t *testing.T) {
 	}
 }
 
+func TestRunIndexWrapsApiRequestError(t *testing.T) {
+	ctx := context.Background()
+	svc, err := service.New(service.Config{
+		DBPath: filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{cassTestCollector{sessions: []cass.Session{{
+			ID:        "index-error-1",
+			Agent:     "codex-cli",
+			Title:     "index error",
+			Workspace: "/work/index",
+			StartedAt: time.Now().Add(-time.Minute),
+			EndedAt:   time.Now(),
+			Messages:  []cass.Message{{Role: "user", Content: "hello"}},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+
+	if _, err := svc.Index(ctx, true); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+
+	err = runIndex(ctx, svc, []string{"--har-dir", filepath.Join(t.TempDir(), "missing")}, false)
+	if err == nil || !strings.Contains(err.Error(), "index api requests") {
+		t.Fatalf("runIndex error = %v, want wrapped api request wording", err)
+	}
+}
+
 func workflowByRunID(workflows []workflowListEntry, id string) *workflowListEntry {
 	for i := range workflows {
 		if workflows[i].RunID == id {
