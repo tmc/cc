@@ -986,7 +986,7 @@ function App() {
   return html`
     <div class="app">
       <div class="header">
-        <h1>cass <span>session search</span></h1>
+        <h1>cass <span>Session search</span></h1>
         ${headerStats ? html`
           <div class="header-stats">
             <span title="${exactNum(headerStats.sessions)} sessions">${fmtNum(headerStats.sessions)} sessions</span>
@@ -994,16 +994,16 @@ function App() {
             <span title="${exactNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} total tokens (${exactNum(headerStats.input_tokens || 0)} in + ${exactNum(headerStats.output_tokens || 0)} out)">${fmtNum((headerStats.input_tokens || 0) + (headerStats.output_tokens || 0))} tokens</span>
           </div>
         ` : null}
-        ${busy && html`<span class="db-busy-badge">db busy</span>`}
+        ${busy && html`<span class="db-busy-badge">DB busy</span>`}
         <div class="live-badge">
           <div class="live-dot ${connected ? 'connected' : ''}"></div>
-          ${connected ? 'live' : 'disconnected'}
+          ${connected ? 'Live' : 'Disconnected'}
         </div>
       </div>
       <div class="tabs" role="tablist">
         ${TABS.map(t => html`
           <button class="tab ${tab === t ? 'active' : ''}" onClick=${() => setTab(t)}
-            role="tab" aria-selected=${tab === t}>${t}</button>
+            role="tab" aria-selected=${tab === t}>${({ search: 'Search', graph: 'Graph', map: 'Map', teams: 'Teams', stats: 'Stats', usage: 'Usage' })[t]}</button>
         `)}
       </div>
       ${tab === 'search' && html`<${SearchPanel} searchRef=${searchRef} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} onNavigate=${setTab} />`}
@@ -3483,8 +3483,8 @@ function GraphTooltip({ tooltip, edgeTooltip, nodeData, onNavigate, isExpanded, 
             ].filter(Boolean).join(' · ') || 'No stats'}
           </div>
           ${startTs && html`<div class="graph-tooltip-stat">${relTime(startTs)}</div>`}
-          ${isActive(tooltip.id) && html`<div style="color:var(--green);margin-top:2px">active</div>`}
-          <div class="graph-tooltip-hint">click node to search</div>
+          ${isActive(tooltip.id) && html`<div style="color:var(--green);margin-top:2px">Active</div>`}
+          <div class="graph-tooltip-hint">Click node to search</div>
         </div>
       `;
     }
@@ -4308,10 +4308,10 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
             <span style="color:var(--accent)">—</span> iTerm2 message</button>
           <button class="filter-chip ${edgeFilter.observation ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, observation: !f.observation }))}>
-            <span style="color:var(--faint)">--</span> observe</button>
+            <span style="color:var(--faint)">--</span> Observe</button>
           <button class="filter-chip ${edgeFilter.split ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, split: !f.split }))}>
-            <span style="color:var(--green)">··</span> split</button>
+            <span style="color:var(--green)">··</span> Split</button>
           <button class="filter-chip ${edgeFilter.team ? 'active' : ''}"
             onClick=${() => setEdgeFilter(f => ({ ...f, team: !f.team }))}>
             <span style="color:var(--magenta)">—</span> team message <span style="color:var(--magenta);opacity:0.7">··</span> spawn</button>
@@ -4323,7 +4323,7 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
         </div>
         <button class="filter-chip ${activeOnly ? 'active' : ''}"
           onClick=${() => setActiveOnly(a => !a)} style="margin-left:8px">
-          <span style="color:var(--green)">●</span> active only</button>
+          <span style="color:var(--green)">●</span> Active only</button>
       </div>
       <div class="graph-container" onWheel=${onWheel} ref=${containerRef}
         onPointerDown=${onPointerDown} onPointerMove=${onPointerMove} onPointerUp=${onPointerUp}
@@ -4506,24 +4506,24 @@ function GraphPanel({ urlParams, updateParams, navVersion, onNavigate }) {
       </div>
       <div class="graph-legend">
         ${effectiveMode === 'workflow' ? html`
-          <span class="graph-legend-item"><span class="graph-legend-node node-session"></span>session</span>
-          <span class="graph-legend-item"><span class="graph-legend-node node-workflow"></span>workflow</span>
-          <span class="graph-legend-item"><span class="graph-legend-node node-workflow-agent"></span>workflow agent</span>
-          <span class="graph-legend-item"><span class="graph-legend-node node-subagent"></span>child agent</span>
+          <span class="graph-legend-item"><span class="graph-legend-node node-session"></span>Session</span>
+          <span class="graph-legend-item"><span class="graph-legend-node node-workflow"></span>Workflow</span>
+          <span class="graph-legend-item"><span class="graph-legend-node node-workflow-agent"></span>Workflow agent</span>
+          <span class="graph-legend-item"><span class="graph-legend-node node-subagent"></span>Child agent</span>
           <span class="graph-legend-sep"></span>
-          <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--accent)"></span>contains</span>
-          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--cyan)"></span>spawn</span>
-          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--yellow)"></span>child agent</span>
+          <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--accent)"></span>Contains</span>
+          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--cyan)"></span>Spawn</span>
+          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--yellow)"></span>Child agent</span>
           <span class="graph-legend-sep"></span>
-          <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--green)"></span>completed</span>
-          <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--cyan)"></span>running</span>
-          <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--yellow)"></span>async</span>
+          <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--green)"></span>Completed</span>
+          <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--cyan)"></span>Running</span>
+          <span class="graph-legend-item"><span class="graph-legend-dot" style="background:var(--yellow)"></span>Async</span>
         ` : html`
           <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--accent)"></span>iTerm2 message</span>
-          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--faint)"></span>observe</span>
-          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--green)"></span>split</span>
-          <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--magenta)"></span>team message</span>
-          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--magenta)"></span>team spawn</span>
+          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--faint)"></span>Observe</span>
+          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--green)"></span>Split</span>
+          <span class="graph-legend-item"><span class="graph-legend-line" style="background:var(--magenta)"></span>Team message</span>
+          <span class="graph-legend-item"><span class="graph-legend-line dashed" style="background:var(--magenta)"></span>Team spawn</span>
         `}
       </div>
       <div class="graph-scrubber">
