@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tmc/cc/cass"
 )
@@ -143,6 +144,26 @@ LENS: CUSTOM/HANDWRITTEN APIs (esp. JACCL). Decide.`)
 			t.Fatalf("agent %d = %+v, want id=%s label=%s phase=%s status=%s type=%s",
 				tt.index, a, tt.id, tt.label, tt.phase, tt.status, tt.agentType)
 		}
+	}
+}
+
+func TestReadWorkflowAgentsClosesStartedAgentsWhenWorkflowCompletes(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkflowAgentTestFile(t, filepath.Join(dir, "agent-a.jsonl"),
+		`LENS: ARCHITECTURE. Decide.`)
+	if err := os.WriteFile(filepath.Join(dir, "journal.jsonl"), []byte(`{"type":"started","agentId":"a"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agents := readWorkflowAgents(cass.WorkflowRun{
+		TranscriptDir: dir,
+		CompletedAt:   time.Now(),
+	}, workflowScriptInfo{LensKeys: []string{"architecture"}})
+	if len(agents) != 1 {
+		t.Fatalf("agents = %d, want 1", len(agents))
+	}
+	if agents[0].Status != "completed" {
+		t.Fatalf("status = %q, want completed", agents[0].Status)
 	}
 }
 

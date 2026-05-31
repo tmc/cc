@@ -374,6 +374,9 @@ func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo) []cass.Wo
 		if a.Status == "" {
 			a.Status = "unknown"
 		}
+		if a.Status == "running" && workflowCompleted(w) {
+			a.Status = "completed"
+		}
 		if meta := readWorkflowAgentMeta(strings.TrimSuffix(path, ".jsonl") + ".meta.json"); meta.AgentType != "" {
 			a.AgentType = meta.AgentType
 		}
@@ -384,6 +387,10 @@ func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo) []cass.Wo
 		agents = append(agents, a)
 	}
 	return agents
+}
+
+func workflowCompleted(w cass.WorkflowRun) bool {
+	return !w.CompletedAt.IsZero() || strings.EqualFold(w.Status, "completed")
 }
 
 func readWorkflowJournal(path string) ([]string, map[string]string) {
