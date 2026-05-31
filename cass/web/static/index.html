@@ -1283,6 +1283,7 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
         initialFilter=${toolFilter}
         initialTab=${detailTab}
         workflowAgentFocus=${workflowAgentFocus}
+        onWorkflowAgentFocusChange=${setWorkflowAgentFocus}
         onFilterChange=${setToolFilter}
         onTabChange=${setDetailTab} />
     </div>
@@ -2134,7 +2135,7 @@ function workflowAgentFocusMatch(focus, wf, ri, agent, agentIndex, key) {
   return candidates.includes(focus);
 }
 
-function WorkflowsTab({ workflows, focusAgent }) {
+function WorkflowsTab({ workflows, focusAgent, onFocusAgentChange }) {
   const [expanded, setExpanded] = useState(null); // "<runIdx>:<agentId>"
   const tabRef = useRef(null);
 
@@ -2165,6 +2166,11 @@ function WorkflowsTab({ workflows, focusAgent }) {
 
   if (!workflows || workflows.length === 0) {
     return html`<div class="empty" style="margin-top:20px">no workflow runs in this session</div>`;
+  }
+
+  function toggleAgent(key) {
+    if (focusAgent && onFocusAgentChange) onFocusAgentChange('');
+    setExpanded(prev => prev === key ? null : key);
   }
 
   return html`
@@ -2217,7 +2223,7 @@ function WorkflowsTab({ workflows, focusAgent }) {
                           return html`
                             <div class="wf-agent" key=${key}>
                               <div class="wf-agent-row ${isOpen ? 'expanded' : ''} ${focused ? 'focused' : ''}"
-                                   onClick=${() => setExpanded(prev => prev === key ? null : key)}
+                                   onClick=${() => toggleAgent(key)}
                                    title=${a.title || ''}>
                                 <span class="agent-tree-connector">${isLast ? '└─' : '├─'}</span>
                                 <${AgentStatusIcon} status=${a.status} />
@@ -2249,7 +2255,7 @@ function WorkflowsTab({ workflows, focusAgent }) {
   `;
 }
 
-function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowAgentFocus, onFilterChange, onTabChange }) {
+function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowAgentFocus, onWorkflowAgentFocusChange, onFilterChange, onTabChange }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -3145,7 +3151,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
               ? html`<div class="loading">loading agents...</div>`
               : html`<${AgentsTab} agentData=${agentData} workflows=${hit.workflows} />`}
           ` : activeTab === 'workflows' ? html`
-            <${WorkflowsTab} workflows=${hit.workflows} focusAgent=${workflowAgentFocus} />
+            <${WorkflowsTab} workflows=${hit.workflows} focusAgent=${workflowAgentFocus} onFocusAgentChange=${onWorkflowAgentFocusChange} />
           ` : renderRequestsTab()}
         </div>
       `}
