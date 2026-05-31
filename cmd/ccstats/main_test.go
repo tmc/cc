@@ -194,6 +194,171 @@ func writeStatsFixture(t *testing.T) string {
 	return path
 }
 
+func TestAnalyzeCharacteristicsReportsCoreMetrics(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+	})
+	*unitFlag = "requests"
+	*verboseFlag = false
+	*formatFlag = "text"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+
+	files := writeCharacteristicsFixture(t)
+	report, err := analyzeCharacteristics(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Totals.Sessions != 4 {
+		t.Fatalf("sessions = %d, want 4", report.Totals.Sessions)
+	}
+	if report.Totals.Requests != 5 {
+		t.Fatalf("requests = %d, want 5", report.Totals.Requests)
+	}
+	for _, key := range []string{"parallel4+", "context150k+", "subagentHeavy", "longRunning8h+"} {
+		if got := report.Characteristics[key].Pct; got <= 0 {
+			t.Fatalf("characteristic %s pct = %f, want > 0", key, got)
+		}
+	}
+	if report.Characteristics["parallel4+"].Pct < 0.7 {
+		t.Fatalf("parallel4+ pct = %f, want heavy parallel share", report.Characteristics["parallel4+"].Pct)
+	}
+}
+
+func TestRunCharacteristicsVerboseJSON(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+	})
+	*unitFlag = "cost"
+	*verboseFlag = true
+	*formatFlag = "json"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+
+	files := writeCharacteristicsFixture(t)
+	gotJSON := captureStdout(t, func() error {
+		return runCharacteristics(files)
+	})
+
+	var report characteristicsReport
+	if err := json.Unmarshal([]byte(gotJSON), &report); err != nil {
+		t.Fatalf("decode JSON report: %v\n%s", err, gotJSON)
+	}
+	if report.Unit != "cost" {
+		t.Fatalf("unit = %q, want cost", report.Unit)
+	}
+	if _, ok := report.Characteristics["cacheMissHeavy"]; !ok {
+		t.Fatalf("verbose report missing cacheMissHeavy: %#v", report.Characteristics)
+	}
+	for _, key := range []string{"opus", "sonnet", "haiku"} {
+		if _, ok := report.ModelShare[key]; !ok {
+			t.Fatalf("model share missing %q: %#v", key, report.ModelShare)
+		}
+	}
+	if report.Totals.Weight <= 0 {
+		t.Fatalf("total weight = %f, want > 0", report.Totals.Weight)
+	}
+}
+
+func writeCharacteristicsFixture(t *testing.T) []string {
+	t.Helper()
+
+	dir := t.TempDir()
+	base := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	return []string{
+		writeCharacteristicsSession(t, dir, "a.jsonl", []ccpkg.Entry{
+			assistantEntry("session-a", "session-a", "/loop nightly", base.Add(1*time.Minute), true, "claude-sonnet-4-6", 160000, 10000, 1000, 500, toolBlocks("ScheduleWakeup", 14)),
+			{Type: "system", SessionID: "session-a", Slug: "session-a", Timestamp: base.Add(2 * time.Minute), Subtype: "compact_boundary"},
+			assistantEntry("session-a", "session-a", "/loop nightly", base.Add(9*time.Hour+1*time.Minute), true, "claude-sonnet-4-6", 4000, 400, 40, 20, toolBlocks("", 0)),
+		}),
+		writeCharacteristicsSession(t, dir, "b.jsonl", []ccpkg.Entry{
+			assistantEntry("session-b", "session-b", "", base.Add(1*time.Minute), false, "claude-opus-4-7", 900, 120, 10, 5, toolBlocks("", 1)),
+		}),
+		writeCharacteristicsSession(t, dir, "c.jsonl", []ccpkg.Entry{
+			assistantEntry("session-c", "session-c", "", base.Add(1*time.Minute), false, "claude-haiku-4-5", 700, 60, 20, 5, toolBlocks("", 1)),
+		}),
+		writeCharacteristicsSession(t, dir, "d.jsonl", []ccpkg.Entry{
+			assistantEntry("session-d", "session-d", "", base.Add(1*time.Minute), false, "claude-sonnet-4-6", 800, 80, 15, 5, toolBlocks("", 1)),
+		}),
+	}
+}
+
+func writeCharacteristicsSession(t *testing.T, dir, name string, entries []ccpkg.Entry) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	for _, e := range entries {
+		if err := enc.Encode(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func assistantEntry(sessionID, slug, title string, ts time.Time, sidechain bool, model string, input, output, cacheRead, cacheCreate int, content json.RawMessage) ccpkg.Entry {
+	return ccpkg.Entry{
+		Type:        "assistant",
+		SessionID:   sessionID,
+		Slug:        slug,
+		CustomTitle: title,
+		Timestamp:   ts,
+		IsSidechain: sidechain,
+		Message: &ccpkg.Message{
+			Role:    "assistant",
+			Model:   model,
+			Content: content,
+			Usage: &ccpkg.Usage{
+				InputTokens:              input,
+				OutputTokens:             output,
+				CacheReadInputTokens:     cacheRead,
+				CacheCreationInputTokens: cacheCreate,
+			},
+		},
+	}
+}
+
+func toolBlocks(toolName string, count int) json.RawMessage {
+	blocks := make([]ccpkg.ContentBlock, 0, count+1)
+	blocks = append(blocks, ccpkg.ContentBlock{Type: "text", Text: "hello"})
+	for i := 0; i < count; i++ {
+		name := "Bash"
+		if i == 0 && toolName != "" {
+			name = toolName
+		}
+		blocks = append(blocks, ccpkg.ContentBlock{
+			Type:  "tool_use",
+			Name:  name,
+			Input: json.RawMessage(`{"command":"echo hello"}`),
+		})
+	}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
 func captureStdout(t *testing.T, fn func() error) string {
 	t.Helper()
 

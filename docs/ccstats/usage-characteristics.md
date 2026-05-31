@@ -1,6 +1,6 @@
 # ccstats: Usage-Characteristics Report
 
-Status: Draft 1
+Status: First slice shipped in `cmd/ccstats` (M1); remaining items stay draft.
 Author: tmc
 Date: 2026-04-20
 Scope: Add a second report tier to `ccstats` (or a sibling `ccanalyze` if we decide to split) that mirrors the cross-session "usage characteristics" view Claude Code and other session providers surface in their consumer UIs.

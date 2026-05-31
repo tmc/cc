@@ -16,9 +16,21 @@ import (
 )
 
 var (
-	sinceFlag  = flag.String("since", "", "Find sessions modified within duration (e.g. 16h, 7d)")
-	formatFlag = flag.String("format", "text", "Output format: text, json")
+	sinceFlag                = flag.String("since", "", "Find sessions modified within duration (e.g. 16h, 7d)")
+	formatFlag               = flag.String("format", "text", "Output format: text, json")
+	verboseFlag              = flag.Bool("verbose", false, "Include additional usage characteristics")
+	unitFlag                 = flag.String("unit", "cost", "Characteristics weighting unit: cost, tokens, requests")
+	parallelWindowFlag       = flag.Duration("parallel-window", 2*time.Minute, "Parallelism lookback window")
+	contextThresholdFlag     = flag.Int("context-threshold", 150000, "Context size threshold for the hosted UI characteristic")
+	longRunningThresholdFlag = flag.Duration("long-running-threshold", 8*time.Hour, "Session duration threshold for the long-running characteristic")
 )
+
+func init() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage:\n  ccstats [flags] [file...]\n  ccstats characteristics [flags] [file...]\n\nFlags:\n")
+		flag.PrintDefaults()
+	}
+}
 
 // sessionStats holds aggregated statistics for a session.
 type sessionStats struct {
@@ -50,20 +62,29 @@ type sessionStats struct {
 }
 
 func main() {
+	mode := "sessions"
+	if len(os.Args) > 1 && os.Args[1] == "characteristics" {
+		mode = "characteristics"
+		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+	}
 	flag.Parse()
-	if err := run(); err != nil {
+	if err := run(mode); err != nil {
 		fmt.Fprintf(os.Stderr, "ccstats: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(mode string) error {
 	files, err := resolveFiles()
 	if err != nil {
 		return err
 	}
 	if len(files) == 0 {
 		return fmt.Errorf("no files specified; use file args or -since flag")
+	}
+
+	if mode == "characteristics" {
+		return runCharacteristics(files)
 	}
 
 	var allStats []sessionStats

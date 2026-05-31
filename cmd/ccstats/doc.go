@@ -4,9 +4,14 @@
 // aggregate statistics: message and tool-use counts, start/end times
 // and duration, and input/output/cache token totals.
 //
+// ccstats characteristics reports cross-session usage characteristics over
+// the same file set. It supports -unit, -verbose, -parallel-window,
+// -context-threshold, and -long-running-threshold.
+//
 // # Usage
 //
 //	ccstats [flags] [file...]
+//	ccstats characteristics [flags] [file...]
 //
 // # Flags
 //
