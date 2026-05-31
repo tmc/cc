@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/cass/service"
+	"github.com/tmc/cc/ccteamcfg"
 )
 
 type testCollector struct {
@@ -202,6 +204,94 @@ func TestSearchCountFalseSkipsExactTotal(t *testing.T) {
 	}
 	if result.TotalCount != 2 || result.TotalCountExact {
 		t.Fatalf("count = %d exact=%v, want lower bound 2", result.TotalCount, result.TotalCountExact)
+	}
+}
+
+func TestTeamDetailUsesSummarySessions(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("CC_TEAMS_DIR", t.TempDir())
+
+	if err := ccteamcfg.WriteTeamConfig("web-team", &ccteamcfg.TeamConfig{
+		Name:        "web-team",
+		Description: "web test team",
+		CreatedAt:   100,
+		LeadAgentID: "lead",
+		Members: []ccteamcfg.TeamMember{
+			{AgentID: "lead", Name: "lead", AgentType: "lead", JoinedAt: 100, CWD: "/work/team"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Unix(100, 0)
+	var sessions []cass.Session
+	for i := 0; i < 51; i++ {
+		sessions = append(sessions, cass.Session{
+			ID:        "team-summary-" + strconv.Itoa(i),
+			Agent:     "codex-cli",
+			Title:     "Team summary",
+			Workspace: "/work/team",
+			TeamName:  "web-team",
+			StartedAt: start.Add(time.Duration(i) * time.Second),
+			EndedAt:   start.Add(time.Duration(i) * time.Second),
+			Messages:  []cass.Message{{Role: "user", Content: "team work"}},
+			Goals:     []cass.Goal{{Objective: "full payload should stay out of team detail", Status: "active"}},
+			Skills: []cass.SkillUse{
+				{Name: "imagegen", Kind: "available", Path: "/tmp/imagegen/SKILL.md"},
+				{Name: "history-audit", Kind: "selected", Path: "/tmp/history/SKILL.md"},
+			},
+			Stats: cass.SessionStats{
+				WorkflowRuns:      1,
+				WorkflowAgentRuns: 1,
+			},
+			Workflows: []cass.WorkflowRun{{
+				RunID:      "wf-team",
+				Name:       "team-workflow",
+				AgentCount: 1,
+				Agents:     []cass.WorkflowAgent{{ID: "agent-1", Title: "worker"}},
+			}},
+		})
+	}
+
+	svc, err := service.New(service.Config{
+		DBPath:     filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{testCollector{sessions: sessions}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { svc.Close() })
+	if n, err := svc.Index(ctx, true); err != nil || n != 51 {
+		t.Fatalf("Index = %d, %v; want 51, nil", n, err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/teams/web-team", nil)
+	rr := httptest.NewRecorder()
+	New(Config{Service: svc}).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %q", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Sessions cass.SearchResult `json:"sessions"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Sessions.Hits) != 50 {
+		t.Fatalf("hits = %d, want 50", len(body.Sessions.Hits))
+	}
+	if body.Sessions.TotalCount != 50 || body.Sessions.TotalCountExact {
+		t.Fatalf("count = %d exact=%v, want lower bound 50", body.Sessions.TotalCount, body.Sessions.TotalCountExact)
+	}
+	hit := body.Sessions.Hits[0]
+	if !hit.SummaryOnly {
+		t.Fatalf("SummaryOnly = false, want true")
+	}
+	if len(hit.Goals) != 0 || len(hit.Workflows) != 0 {
+		t.Fatalf("team detail carried nested payload: goals=%d workflows=%d", len(hit.Goals), len(hit.Workflows))
+	}
+	if len(hit.Skills) != 1 || hit.Skills[0].Name != "history-audit" || hit.Skills[0].Path != "" {
+		t.Fatalf("summary skills = %#v, want compact selected skill only", hit.Skills)
 	}
 }
 

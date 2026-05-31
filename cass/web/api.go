@@ -905,9 +905,10 @@ func (s *Server) handleTeamDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Find sessions belonging to this team.
-	sessions, err := s.svc.Search(r.Context(), cass.SearchRequest{
-		Filters: cass.Filters{Team: name},
-		Limit:   50,
+	sessions, err := s.svc.SearchSummary(r.Context(), cass.SearchRequest{
+		Filters:   cass.Filters{Team: name},
+		Limit:     50,
+		SkipCount: true,
 	})
 	if err != nil {
 		sessions = &cass.SearchResult{}
