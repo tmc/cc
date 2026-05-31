@@ -1,0 +1,39 @@
+{
+  "window": {
+    "start": "2026-05-31T12:01:00Z",
+    "end": "2026-05-31T21:01:00Z",
+    "label": "24h"
+  },
+  "unit": "cost",
+  "totals": {
+    "requests": 5,
+    "sessions": 4,
+    "weight": 177252.4
+  },
+  "characteristics": {
+    "context150k+": {
+      "pct": 0.9602126684885508,
+      "weight": 170200,
+      "description": "usage at or above the context threshold",
+      "callback": "Compact mid-task or clear when switching tasks."
+    },
+    "longRunning8h+": {
+      "pct": 0.9850811611013448,
+      "weight": 174608,
+      "description": "usage from sessions that span the long-running threshold",
+      "callback": "Long background sessions should be intentional."
+    },
+    "parallel4+": {
+      "pct": 0.975131507387206,
+      "weight": 172844.4,
+      "description": "usage while 4+ sessions were active in the lookback window",
+      "callback": "Queue work when you do not need every session at once."
+    },
+    "subagentHeavy": {
+      "pct": 0.9850811611013448,
+      "weight": 174608,
+      "description": "usage from sessions where sidechain requests dominate",
+      "callback": "Be deliberate about spawning subagents."
+    }
+  }
+}

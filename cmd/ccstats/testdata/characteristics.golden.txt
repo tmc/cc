@@ -1,0 +1,9 @@
+Last 24h · these are independent characteristics of your usage, not a breakdown
+
+  98%  4+ sessions running in parallel      [parallel4+]
+  96%  context > 150k                       [context150k+]
+  99%  subagent-heavy sessions              [subagentHeavy]
+  99%  sessions active for 8+ hours         [longRunning8h+]
+
+Unit: cost-weighted tokens · Window: 2026-05-31 12:01 → 2026-05-31 21:01
+Requests: 5 · Sessions: 4 · Total weight: 177.3K tok-eq

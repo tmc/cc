@@ -345,6 +345,33 @@ func TestRunCharacteristicsWarnsOnUnknownModel(t *testing.T) {
 	}
 }
 
+func TestCharacteristicsGolden(t *testing.T) {
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldParallel, oldContext, oldLong, oldSince := *parallelWindowFlag, *contextThresholdFlag, *longRunningThresholdFlag, *sinceFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*parallelWindowFlag = oldParallel
+		*contextThresholdFlag = oldContext
+		*longRunningThresholdFlag = oldLong
+		*sinceFlag = oldSince
+	})
+	*unitFlag = "cost"
+	*verboseFlag = false
+	*formatFlag = "text"
+	*parallelWindowFlag = 2 * time.Minute
+	*contextThresholdFlag = 150000
+	*longRunningThresholdFlag = 8 * time.Hour
+	*sinceFlag = "24h"
+
+	files := writeCharacteristicsFixture(t)
+	textOut, jsonOut := captureCharacteristicsOutputs(t, files)
+
+	assertGolden(t, filepath.Join("testdata", "characteristics.golden.txt"), textOut)
+	assertGolden(t, filepath.Join("testdata", "characteristics.golden.json"), jsonOut)
+}
+
 func writeCharacteristicsFixture(t *testing.T) []string {
 	t.Helper()
 
@@ -515,4 +542,56 @@ func captureRunOutput(t *testing.T, fn func() error) (string, string) {
 		t.Fatalf("operation failed: %v", runErr)
 	}
 	return outBuf.String(), errBuf.String()
+}
+
+func captureCharacteristicsOutputs(t *testing.T, files []string) (string, string) {
+	t.Helper()
+
+	oldUnit, oldVerbose, oldFormat := *unitFlag, *verboseFlag, *formatFlag
+	oldSince := *sinceFlag
+	t.Cleanup(func() {
+		*unitFlag = oldUnit
+		*verboseFlag = oldVerbose
+		*formatFlag = oldFormat
+		*sinceFlag = oldSince
+	})
+
+	*unitFlag = "cost"
+	*verboseFlag = false
+	*sinceFlag = "24h"
+
+	*formatFlag = "text"
+	textOut, errText := captureRunOutput(t, func() error {
+		return runCharacteristics(files)
+	})
+	if errText != "" {
+		t.Fatalf("unexpected stderr for text report:\n%s", errText)
+	}
+
+	*formatFlag = "json"
+	jsonOut, errText := captureRunOutput(t, func() error {
+		return runCharacteristics(files)
+	})
+	if errText != "" {
+		t.Fatalf("unexpected stderr for json report:\n%s", errText)
+	}
+
+	return textOut, jsonOut
+}
+
+func assertGolden(t *testing.T, path, got string) {
+	t.Helper()
+
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read golden %s: %v", path, err)
+	}
+	if got != string(want) {
+		t.Fatalf("golden mismatch for %s\n--- want ---\n%s\n--- got ---\n%s", path, want, got)
+	}
 }
