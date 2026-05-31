@@ -171,7 +171,7 @@ Commands:
   agent, ag    Inspect agent status
   approve, ap  Handle approval workflows
   handoff, ho  Build cross-tool session handoff prompt
-	memory, mm   List and read auto-memory files
+  memory, mm   List and read auto-memory files
   goals        Show goal-mode objectives indexed by cass
   skills       Show skill usage indexed by cass
   requests     Show indexed API request breakdown
