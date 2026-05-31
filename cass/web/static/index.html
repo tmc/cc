@@ -1829,7 +1829,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
 
   // Tab state: 'conversation' or 'requests'
   const [activeTabRaw, setActiveTabRaw] = useState(normalizeDetailTab(initialTab));
-  const [apiRequests, setApiRequests] = useState([]);
+  const [apiRequestsState, setApiRequestsState] = useState({ sessionID: '', items: [] });
   const [requestsLoading, setRequestsLoading] = useState(false);
 
   const bodyRef = useRef(null);
@@ -1838,12 +1838,13 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
     ? Object.values(hit.tool_breakdown).reduce((a, b) => a + b, 0)
     : 0;
   const resumeCmd = resumeCommand(hit);
-  const activeTab = activeTabRaw;
-  const needsSessionEntries = activeTab === 'conversation' || activeTab === 'agents';
   const detailTitle = displaySessionTitle(hit);
   const detailSkillCount = (hit?.selected_skill_count || 0) + (hit?.loaded_skill_count || 0);
   const requestCount = hit?.api_request_count || 0;
-  const showRequestsTab = activeTab === 'requests' || requestCount > 0 || apiRequests.length > 0;
+  const apiRequests = apiRequestsState.sessionID === hit?.session_id ? apiRequestsState.items : [];
+  const showRequestsTab = requestCount > 0 || apiRequests.length > 0;
+  const activeTab = activeTabRaw === 'requests' && !showRequestsTab ? 'conversation' : activeTabRaw;
+  const needsSessionEntries = activeTab === 'conversation' || activeTab === 'agents';
 
   function setActiveTab(tab) {
     const normalized = normalizeDetailTab(tab);
@@ -1883,11 +1884,11 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   useEffect(() => {
     if (!hit) {
       setEntries([]); setEntryCount(0); setSearchQuery('');
-      setActiveTabRaw('conversation'); setApiRequests([]); setDetailError('');
+      setActiveTabRaw('conversation'); setApiRequestsState({ sessionID: '', items: [] }); setDetailError('');
       setHasEarlierEntries(false); setLoadingEarlierEntries(false);
       return;
     }
-    setApiRequests([]);
+    setApiRequestsState({ sessionID: '', items: [] });
     setRequestsLoading(false);
     setHasEarlierEntries(false);
     setLoadingEarlierEntries(false);
@@ -1952,11 +1953,11 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, onFilterC
   // Fetch API requests when the tab is switched, or proactively.
   useEffect(() => {
     if (!hit || activeTab !== 'requests') return;
-    if (apiRequests.length > 0) return; // already loaded
+    if (apiRequestsState.sessionID === hit.session_id && apiRequestsState.items.length > 0) return; // already loaded
 
     setRequestsLoading(true);
     api('session/' + hit.session_id + '/requests')
-      .then(reqs => setApiRequests(reqs || []))
+      .then(reqs => setApiRequestsState({ sessionID: hit.session_id, items: reqs || [] }))
       .catch(e => console.error('failed resolving requests', e))
       .finally(() => setRequestsLoading(false));
   }, [hit?.session_id, activeTab]);
