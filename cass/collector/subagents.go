@@ -150,13 +150,9 @@ type taskNotificationRecord struct {
 // following queue-operation timestamp, and returns the records keyed
 // by task-id (== agentId).
 //
-// Pairing rule: the nearest later queue-operation entry consumes the
-// head of the notification queue, mirroring the observed FIFO shape.
-// We do not need to distinguish dequeue/remove/popAll: the type of
-// consume op is irrelevant to the dequeuedAt timestamp we record, and
-// trying to read the operation kind would require either widening
-// cc.Entry or reparsing raw JSON. Concurrent notifications are paired
-// in arrival order.
+// Pairing rule: dequeue/remove consume one pending notification, and
+// popAll consumes every pending notification at that timestamp. Concurrent
+// notifications are paired in FIFO order.
 //
 // Non-notification enqueues (free-text human input) are skipped at the
 // ParseTaskNotification step, so they neither create nor consume queue
@@ -166,33 +162,51 @@ func indexTaskNotifications(entries []cc.Entry) map[string]taskNotificationRecor
 
 	type pending struct {
 		taskID string
-		ts     time.Time
 	}
 	var queue []pending
+	consumeOne := func(ts time.Time) {
+		if len(queue) == 0 {
+			return
+		}
+		head := queue[0]
+		queue = queue[1:]
+		rec := out[head.taskID]
+		rec.dequeuedAt = ts
+		out[head.taskID] = rec
+	}
 
 	for _, e := range entries {
 		if e.Type != "queue-operation" {
 			continue
 		}
-		notif, ok := cc.ParseTaskNotification(e.Content)
-		if ok && notif.TaskID != "" {
-			rec := taskNotificationRecord{
-				notification: notif,
-				enqueuedAt:   e.Timestamp,
+
+		switch e.Operation {
+		case "enqueue", "":
+			notif, ok := cc.ParseTaskNotification(e.Content)
+			if ok && notif.TaskID != "" {
+				rec := taskNotificationRecord{
+					notification: notif,
+					enqueuedAt:   e.Timestamp,
+				}
+				out[notif.TaskID] = rec
+				queue = append(queue, pending{taskID: notif.TaskID})
 			}
-			out[notif.TaskID] = rec
-			queue = append(queue, pending{taskID: notif.TaskID, ts: e.Timestamp})
-			continue
+			if e.Operation != "" {
+				continue
+			}
+			// Legacy entries without an operation field used the next
+			// queue-operation as the consume signal.
+			if ok {
+				continue
+			}
+			consumeOne(e.Timestamp)
+		case "dequeue", "remove":
+			consumeOne(e.Timestamp)
+		case "popAll":
+			for len(queue) > 0 {
+				consumeOne(e.Timestamp)
+			}
 		}
-		// Non-enqueue (or human-input enqueue) — advance the head.
-		if len(queue) == 0 {
-			continue
-		}
-		head := queue[0]
-		queue = queue[1:]
-		rec := out[head.taskID]
-		rec.dequeuedAt = e.Timestamp
-		out[head.taskID] = rec
 	}
 	return out
 }

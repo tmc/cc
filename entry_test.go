@@ -13,7 +13,8 @@ func TestEntryPreservesExtendedJSONLFields(t *testing.T) {
 		"thinkingMetadata": {"signature":"sig-1"},
 		"todos": [{"content":"verify","status":"pending"}],
 		"requestId": "req-1",
-		"sourceToolAssistantUUID": "tool-parent-1"
+		"sourceToolAssistantUUID": "tool-parent-1",
+		"operation": "enqueue"
 	}`)
 	var entry Entry
 	if err := json.Unmarshal(data, &entry); err != nil {
@@ -25,6 +26,9 @@ func TestEntryPreservesExtendedJSONLFields(t *testing.T) {
 	}
 	if entry.SourceToolAssistantUUID != "tool-parent-1" {
 		t.Errorf("SourceToolAssistantUUID = %q, want tool-parent-1", entry.SourceToolAssistantUUID)
+	}
+	if entry.Operation != "enqueue" {
+		t.Errorf("Operation = %q, want enqueue", entry.Operation)
 	}
 	if !bytes.Contains(entry.ThinkingMetadata, []byte(`"signature"`)) {
 		t.Errorf("ThinkingMetadata = %s, want signature field", entry.ThinkingMetadata)

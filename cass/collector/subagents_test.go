@@ -172,6 +172,14 @@ func TestExtractSubagentRuns_HappyPath(t *testing.T) {
 			"sessionId": parentID,
 			"content":   taskNotificationXML(agentA, "toolu_a", "completed", 22407, 8, 53342, "", ""),
 		},
+		// Human-input enqueues do not consume the pending task notification.
+		{
+			"type":      "queue-operation",
+			"operation": "enqueue",
+			"timestamp": t0.Add(65 * time.Second).Format(time.RFC3339Nano),
+			"sessionId": parentID,
+			"content":   "unrelated queued human input",
+		},
 		// dequeue
 		{
 			"type":      "queue-operation",
@@ -247,6 +255,9 @@ func TestExtractSubagentRuns_HappyPath(t *testing.T) {
 	if !a.EnqueuedAt.Before(a.DequeuedAt) {
 		t.Errorf("A: EnqueuedAt %v not before DequeuedAt %v", a.EnqueuedAt, a.DequeuedAt)
 	}
+	if !a.DequeuedAt.Equal(t0.Add(70 * time.Second)) {
+		t.Errorf("A.DequeuedAt = %v, want dequeue timestamp", a.DequeuedAt)
+	}
 	if a.StartedAt.IsZero() || a.EndedAt.IsZero() || !a.StartedAt.Before(a.EndedAt) {
 		t.Errorf("A: started/ended invalid: started=%v ended=%v", a.StartedAt, a.EndedAt)
 	}
@@ -260,6 +271,61 @@ func TestExtractSubagentRuns_HappyPath(t *testing.T) {
 	}
 	if b.TotalTokens != 74674 {
 		t.Errorf("B.TotalTokens = %d, want 74674", b.TotalTokens)
+	}
+}
+
+func TestExtractSubagentRuns_PopAllDequeuesAllPending(t *testing.T) {
+	root := t.TempDir()
+	proj := projectRoot(root, "-tmp-fixture")
+	parentID := "12121212-1212-1212-1212-121212121212"
+	parentPath := filepath.Join(proj, parentID+".jsonl")
+
+	t0 := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	agentA := "popa11"
+	agentB := "popb22"
+
+	parent := []jsonlEntry{
+		{"type": "user", "uuid": "u1", "sessionId": parentID, "timestamp": t0.Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "hi"}},
+		{
+			"type":      "queue-operation",
+			"operation": "enqueue",
+			"timestamp": t0.Add(10 * time.Second).Format(time.RFC3339Nano),
+			"sessionId": parentID,
+			"content":   taskNotificationXML(agentA, "toolu_a", "completed", 10, 1, 100, "", ""),
+		},
+		{
+			"type":      "queue-operation",
+			"operation": "enqueue",
+			"timestamp": t0.Add(20 * time.Second).Format(time.RFC3339Nano),
+			"sessionId": parentID,
+			"content":   taskNotificationXML(agentB, "toolu_b", "completed", 20, 2, 200, "", ""),
+		},
+		{
+			"type":      "queue-operation",
+			"operation": "popAll",
+			"timestamp": t0.Add(30 * time.Second).Format(time.RFC3339Nano),
+			"sessionId": parentID,
+		},
+	}
+	writeJSONL(t, parentPath, parent)
+
+	for _, agent := range []string{agentA, agentB} {
+		sub := []jsonlEntry{
+			{"type": "user", "uuid": "s-" + agent, "sessionId": parentID, "agentId": agent, "isSidechain": true, "timestamp": t0.Add(5 * time.Second).Format(time.RFC3339Nano), "message": map[string]any{"role": "user", "content": "x"}},
+		}
+		writeJSONL(t, filepath.Join(proj, parentID, "subagents", "agent-"+agent+".jsonl"), sub)
+	}
+
+	sessions := scanCollector(t, root)
+	sess := findSession(t, sessions)
+	if len(sess.Subagents) != 2 {
+		t.Fatalf("Subagents = %d, want 2", len(sess.Subagents))
+	}
+	for _, agent := range []string{agentA, agentB} {
+		r := findRun(t, sess.Subagents, agent)
+		if !r.DequeuedAt.Equal(t0.Add(30 * time.Second)) {
+			t.Errorf("%s DequeuedAt = %v, want popAll timestamp", agent, r.DequeuedAt)
+		}
 	}
 }
 

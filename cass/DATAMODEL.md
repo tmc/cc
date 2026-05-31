@@ -349,6 +349,7 @@ logically abandoned.
 Lifecycle signals in parent JSONL:
 
     queue-operation {operation: "enqueue", content: {task_id: "<agentId>"}}   → start
+    queue-operation {operation: "dequeue" | "remove" | "popAll"}              → queued result consumed
     progress {data: {type: "agent_progress", agentId: "<id>"}}               → mirror
     toolUseResult {totalTokens, totalToolUseCount, totalDurationMs}          → end
 
@@ -710,9 +711,9 @@ token accounting.
 **Team config not fully indexed**: ~/.claude/teams/ is scanned but
 member models, prompts, and tmux pane IDs are only stored as JSON blob.
 
-**queue-operation entries unmodeled**: subagent lifecycle events exist
-in JSONL but are not parsed for timing data that would improve E5a
-attribution.
+**Team member mapping is heuristic outside team configs**: native team
+members have authoritative roster records, but ad hoc subagent
+definition links depend on exact `agent_type` / agent definition names.
 
 ### Low
 
@@ -746,13 +747,9 @@ Ranked by value/cost ratio:
 1. **Subagent model diversity** — verify model override via Task tool
    `model` parameter. 10 min. Closes three-way Haiku ambiguity gap.
 
-2. **queue-operation lifecycle completeness** — verify enqueue/dequeue
-   pairs fully bracket subagent lifetime. 5 min. Enables authoritative
-   time windows for E5a.
-
-3. **Subagent compaction** — does agent-acompact-<id> replace or
-   supplement? Determines if file enumeration is reliable. Requires
-   long-running subagent.
+2. **Progress mirroring coverage** — quantify how often
+   `agent_progress` messages can be linked back to subagent entries.
+   Low priority unless UI needs entry-level fan-out replay.
 
 4. **PID→It2 mapping durability** — test E7 persistence across
    subprocess exit, compaction, resume. Low priority given team infra.
