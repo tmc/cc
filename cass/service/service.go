@@ -94,6 +94,7 @@ func defaultCollectors() []cass.Collector {
 		&collector.ClaudeCode{},
 		&collector.GeminiCLI{}, // Added for Gemini CLI support
 		&collector.Codex{},
+		&collector.OpenCode{},
 		&collector.OpenClaw{},
 		&collector.Antigravity{},
 		&collector.Cursor{},
@@ -142,7 +143,7 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 		}
 
 		// Support passing arbitrary extra paths from the CLI to capable collectors.
-		if c.Name() == "claude-code" || c.Name() == "gemini-cli" || c.Name() == "codex" {
+		if c.Name() == "claude-code" || c.Name() == "gemini-cli" || c.Name() == "codex" || c.Name() == "opencode" {
 			paths = append(paths, extraPaths...)
 		}
 
@@ -553,6 +554,8 @@ func collectorForPath(path string) cass.Collector {
 	switch {
 	case strings.Contains(path, sep+".codex"+sep):
 		return &collector.Codex{}
+	case strings.Contains(path, sep+"opencode"+sep):
+		return &collector.OpenCode{}
 	case strings.Contains(path, sep+".gemini"+sep):
 		return &collector.GeminiCLI{}
 	default:

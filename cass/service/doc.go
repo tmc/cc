@@ -12,7 +12,7 @@
 //   - DBPath: path to the SQLite database. If empty, defaults to
 //     ~/.cache/cass/index.db. Parent directories are created on New.
 //   - Collectors: collector set to use. If nil, a default set covering
-//     Claude Code, Gemini CLI, Codex, OpenClaw, Antigravity, and Cursor
+//     Claude Code, Gemini CLI, Codex, opencode, OpenClaw, Antigravity, and Cursor
 //     is installed.
 //   - Logger: slog logger used for non-fatal warnings. Defaults to
 //     [slog.Default].

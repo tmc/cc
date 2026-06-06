@@ -1,7 +1,7 @@
 // Package cass implements Coding Agent Session Search.
 //
 // CASS aggregates coding session history from AI agents (Claude Code, Codex,
-// Cursor, etc.) into a unified, searchable index backed by SQLite FTS5.
+// Cursor, opencode, etc.) into a unified, searchable index backed by SQLite FTS5.
 //
 // # Architecture
 //

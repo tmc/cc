@@ -10,6 +10,7 @@
 //   - [GeminiCLI]: ~/.gemini/tmp/<project>/chats/ session JSON files
 //   - [Cursor]: Cursor IDE workspace storage
 //   - [OpenClaw]: ~/.openclaw/agents/<agent>/sessions/ JSONL files
+//   - [OpenCode]: ~/.local/share/opencode/storage session data
 //   - [Antigravity]: ~/.gemini/antigravity/ session data
 //
 // # Derived-data helpers
