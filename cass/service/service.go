@@ -98,6 +98,7 @@ func defaultCollectors() []cass.Collector {
 		&collector.OpenClaw{},
 		&collector.Antigravity{},
 		&collector.Cursor{},
+		&collector.Pi{},
 	}
 }
 
@@ -558,6 +559,8 @@ func collectorForPath(path string) cass.Collector {
 		return &collector.OpenCode{}
 	case strings.Contains(path, sep+".gemini"+sep):
 		return &collector.GeminiCLI{}
+	case strings.Contains(path, sep+".pi"+sep) || strings.Contains(path, sep+"agent"+sep+"sessions"+sep):
+		return &collector.Pi{}
 	default:
 		return &collector.ClaudeCode{}
 	}

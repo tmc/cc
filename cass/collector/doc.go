@@ -12,6 +12,7 @@
 //   - [OpenClaw]: ~/.openclaw/agents/<agent>/sessions/ JSONL files
 //   - [OpenCode]: ~/.local/share/opencode/storage session data
 //   - [Antigravity]: ~/.gemini/antigravity/ session data
+//   - [Pi]: ~/.pi/agent/sessions/ JSONL session files
 //
 // # Derived-data helpers
 //

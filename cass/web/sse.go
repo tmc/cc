@@ -214,6 +214,14 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 		}
 	}
 
+	ph, err := ccpaths.PiHome()
+	if err == nil && ph != "" {
+		piRoot := filepath.Join(ph, "sessions")
+		if err := fw.addDirRecursive(piRoot); err != nil {
+			fw.log.Warn("watch dir", "path", piRoot, "err", err)
+		}
+	}
+
 	// Debounce timer. Keep all access to pending on this goroutine; the timer
 	// only signals through debounceC.
 	var debounce *time.Timer
