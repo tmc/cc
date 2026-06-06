@@ -89,6 +89,19 @@ func CodexHome() (string, error) {
 	return filepath.Join(home, ".codex"), nil
 }
 
+// OpenCodeHome returns the base directory for opencode data.
+// It uses OPENCODE_HOME if set, otherwise defaults to ~/.local/share/opencode.
+func OpenCodeHome() (string, error) {
+	if h := os.Getenv("OPENCODE_HOME"); h != "" {
+		return h, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "share", "opencode"), nil
+}
+
 // DecodeSegments tries all possible decodings of dash-separated path segments
 // and returns the first existing path.
 //

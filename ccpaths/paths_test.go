@@ -127,3 +127,14 @@ func TestCodexHomeOverride(t *testing.T) {
 		t.Errorf("CodexHome with CODEX_HOME = %q, want /custom/codex", got)
 	}
 }
+
+func TestOpenCodeHomeOverride(t *testing.T) {
+	t.Setenv("OPENCODE_HOME", "/custom/opencode")
+	got, err := OpenCodeHome()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/custom/opencode" {
+		t.Errorf("OpenCodeHome with OPENCODE_HOME = %q, want /custom/opencode", got)
+	}
+}

@@ -59,6 +59,7 @@ func TestAllIndexEntriesFilters(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CLAUDE_HOME", root)
 	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini-empty"))
+	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode-empty"))
 
 	now := time.Now()
 	idx := SessionIndex{
@@ -103,5 +104,38 @@ func TestAllIndexEntriesFilters(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Errorf("AllIndexEntries(48h, \"\") len = %d, want 2", len(got))
+	}
+}
+
+func TestAllIndexEntriesIncludesOpenCode(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_HOME", filepath.Join(root, "claude-empty"))
+	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini-empty"))
+	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode"))
+
+	sessionPath := filepath.Join(root, "opencode", "storage", "session", "proj", "ses_index_open.json")
+	writeIndexFile(t, sessionPath, `{"id":"ses_index_open","directory":"/work/open","time":{"created":4102444800000}}`)
+	writeIndexFile(t, filepath.Join(root, "opencode", "storage", "message", "ses_index_open", "msg_user.json"), `{"id":"msg_user","sessionID":"ses_index_open","role":"user","time":{"created":4102444801000}}`)
+	writeIndexFile(t, filepath.Join(root, "opencode", "storage", "part", "msg_user", "prt_user.json"), `{"id":"prt_user","sessionID":"ses_index_open","messageID":"msg_user","type":"text","text":"hello index opencode"}`)
+
+	got, err := AllIndexEntries(24*time.Hour, "open")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("AllIndexEntries len = %d, want 1: %#v", len(got), got)
+	}
+	if got[0].SessionID != "ses_index_open" || got[0].ProjectPath != "/work/open" || got[0].FirstPrompt != "hello index opencode" {
+		t.Fatalf("AllIndexEntries[0] = %#v", got[0])
+	}
+}
+
+func writeIndexFile(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

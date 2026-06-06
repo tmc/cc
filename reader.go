@@ -702,6 +702,9 @@ func ReadFile(ctx context.Context, path string) ([]Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if isOpenCodeSessionPath(path) {
+		return readOpenCodeFile(ctx, path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -1074,8 +1077,8 @@ func collapseWhitespace(s string, max int) string {
 	return s
 }
 
-// FindSessionFiles finds JSONL session files under ~/.claude/projects/,
-// ~/.gemini/projects/, and ~/.codex/sessions/. It excludes subagent files,
+// FindSessionFiles finds session files under ~/.claude/projects/,
+// ~/.gemini/projects/, ~/.codex/sessions/, and opencode storage. It excludes subagent files,
 // filters by modification time, and stops early when ctx is canceled.
 func FindSessionFiles(ctx context.Context, since time.Duration, project string) ([]string, error) {
 	ch, err := ccpaths.ClaudeHome()
@@ -1084,6 +1087,7 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	}
 	gh, _ := ccpaths.GeminiHome()
 	xh, _ := ccpaths.CodexHome()
+	oh, _ := ccpaths.OpenCodeHome()
 
 	cutoff := time.Now().Add(-since)
 	var files []string
@@ -1100,6 +1104,9 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	if xh != "" {
 		dirs = append(dirs, rootDir{path: filepath.Join(xh, "sessions"), kind: "codex"})
 	}
+	if oh != "" {
+		dirs = append(dirs, rootDir{path: filepath.Join(oh, "storage", "session"), kind: "opencode"})
+	}
 
 	for _, dir := range dirs {
 		if err := ctx.Err(); err != nil {
@@ -1115,7 +1122,11 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 			if info.IsDir() && info.Name() == "subagents" {
 				return filepath.SkipDir
 			}
-			if !strings.HasSuffix(path, ".jsonl") {
+			if dir.kind == "opencode" {
+				if !isOpenCodeSessionPath(path) {
+					return nil
+				}
+			} else if !strings.HasSuffix(path, ".jsonl") {
 				return nil
 			}
 			if info.ModTime().Before(cutoff) {
@@ -1126,6 +1137,10 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 				switch dir.kind {
 				case "codex":
 					if !codexPathMatchesProject(ctx, path, q) {
+						return nil
+					}
+				case "opencode":
+					if !openCodePathMatchesProject(ctx, path, q) {
 						return nil
 					}
 				default:
@@ -1143,6 +1158,22 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 		}
 	}
 	return files, nil
+}
+
+func openCodePathMatchesProject(ctx context.Context, path, query string) bool {
+	entries, err := ReadFile(ctx, path)
+	if err != nil {
+		return strings.Contains(strings.ToLower(path), query)
+	}
+	for _, e := range entries {
+		if e.CWD != "" && strings.Contains(strings.ToLower(e.CWD), query) {
+			return true
+		}
+		if e.CustomTitle != "" && strings.Contains(strings.ToLower(e.CustomTitle), query) {
+			return true
+		}
+	}
+	return strings.Contains(strings.ToLower(path), query)
 }
 
 func codexPathMatchesProject(ctx context.Context, path, query string) bool {
