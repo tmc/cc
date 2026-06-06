@@ -37,6 +37,36 @@ func TestLoadMessagesOpenCodeFollow(t *testing.T) {
 	}
 }
 
+func TestFindPiSessionFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi"))
+	path := filepath.Join(root, "pi", "sessions", "--work--", "2026-04-19T00-00-00-000Z_019da713.jsonl")
+	writeReplayFile(t, path, `{"type":"session","id":"019da713","timestamp":"2026-04-19T00:00:00.000Z","cwd":"/work"}`+"\n")
+
+	got, ok := findPiSessionFile("019da713")
+	if !ok || got != path {
+		t.Fatalf("findPiSessionFile = %q, %v; want %q, true", got, ok, path)
+	}
+}
+
+func TestLoadMessagesPi(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ".pi", "agent", "sessions", "--work--", "2026-04-19T00-00-00-000Z_sid.jsonl")
+	writeReplayFile(t, path, `{"type":"session","id":"sid","timestamp":"2026-04-19T00:00:00.000Z","cwd":"/work"}`+"\n"+
+		`{"type":"message","id":"u","parentId":null,"timestamp":"2026-04-19T00:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"hello pi"}],"timestamp":1}}`+"\n")
+
+	messages, reader, file, err := loadMessages(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reader != nil || file != nil {
+		t.Fatalf("reader=%v file=%v, want nil pi follow handles", reader, file)
+	}
+	if len(messages) != 1 || messages[0].Message == nil || messages[0].Message.Role != "user" {
+		t.Fatalf("messages = %#v, want one user message", messages)
+	}
+}
+
 func writeReplayFile(t *testing.T, path, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

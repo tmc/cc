@@ -45,6 +45,15 @@ func TestResumeInvocation(t *testing.T) {
 			wantArgs: []string{"--session", "ses_resume"},
 		},
 		{
+			name: "pi",
+			entry: cc.IndexEntry{
+				FullPath:  filepath.Join("/tmp", ".pi", "agent", "sessions", "--p--", "ts_id.jsonl"),
+				SessionID: "pi-session-id",
+			},
+			wantBin:  "pi",
+			wantArgs: []string{"--session", filepath.Join("/tmp", ".pi", "agent", "sessions", "--p--", "ts_id.jsonl")},
+		},
+		{
 			name: "claude",
 			entry: cc.IndexEntry{
 				FullPath:  filepath.Join("/tmp", ".claude", "projects", "p", "s.jsonl"),
@@ -280,6 +289,24 @@ func TestIndexEntryForOpenCodePath(t *testing.T) {
 		t.Fatal("indexEntryForPath returned false")
 	}
 	if got.SessionID != "ses_index" || got.ProjectPath != "/work/index" || got.FullPath != path {
+		t.Fatalf("indexEntryForPath = %#v", got)
+	}
+}
+
+func TestIndexEntryForPiPath(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sessions")
+	path := filepath.Join(root, "--work-pi--", "2026-04-19T00-00-00-000Z_idx.jsonl")
+	writeTextFile(t, path, `{"type":"session","id":"pi-idx","timestamp":"2026-04-19T00:00:00.000Z","cwd":"/work/pi"}`)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := indexEntryForPath(path, searchRoot{dir: root, kind: "pi"}, info)
+	if !ok {
+		t.Fatal("indexEntryForPath returned false")
+	}
+	if got.SessionID != "pi-idx" || got.ProjectPath != "/work/pi" || got.FullPath != path {
 		t.Fatalf("indexEntryForPath = %#v", got)
 	}
 }

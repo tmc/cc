@@ -507,6 +507,12 @@ func sessionRoots() ([]searchRoot, error) {
 			roots = append(roots, searchRoot{dir: d, kind: "opencode"})
 		}
 	}
+	ph, _ := ccpaths.PiHome()
+	if ph != "" {
+		if d := filepath.Join(ph, "sessions"); dirExists(d) {
+			roots = append(roots, searchRoot{dir: d, kind: "pi"})
+		}
+	}
 	return roots, nil
 }
 
@@ -701,6 +707,18 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 				}
 			}
 		}
+	case "pi":
+		// pi encodes the cwd into the session dir name lossily; the session
+		// header's id and cwd are authoritative.
+		projectPath = filepath.Dir(path)
+		if id, cwd, ok := piSessionHeader(path); ok {
+			if id != "" {
+				sessionID = id
+			}
+			if cwd != "" {
+				projectPath = cwd
+			}
+		}
 	default:
 		rel, err := filepath.Rel(root.dir, path)
 		if err != nil {
@@ -735,7 +753,51 @@ func sessionIDFromPath(path, kind string) string {
 	if kind == "opencode" && strings.HasPrefix(base, "ses_") && strings.HasSuffix(base, ".json") {
 		return strings.TrimSuffix(base, ".json")
 	}
-	return strings.TrimSuffix(base, ".jsonl")
+	id := strings.TrimSuffix(base, ".jsonl")
+	if kind == "pi" {
+		// pi names files <ISO-timestamp>_<uuid>.jsonl; the uuid is the session
+		// id. Fall back to it when the header cannot be read.
+		if i := strings.LastIndex(id, "_"); i >= 0 && i+1 < len(id) {
+			id = id[i+1:]
+		}
+	}
+	return id
+}
+
+// isPiResumePath reports whether a session path is a pi session, by its default
+// ~/.pi/ location or the agent/sessions layout used under PI_CODING_AGENT_DIR.
+func isPiResumePath(path string) bool {
+	sep := string(filepath.Separator)
+	return strings.Contains(path, sep+".pi"+sep) ||
+		strings.Contains(path, sep+"agent"+sep+"sessions"+sep)
+}
+
+// piSessionHeader reads the first line of a pi session file and returns its
+// session id and cwd.
+func piSessionHeader(path string) (id, cwd string, ok bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", "", false
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), cc.MaxLineSize)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var h struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+			CWD  string `json:"cwd"`
+		}
+		if json.Unmarshal([]byte(line), &h) != nil || h.Type != "session" {
+			return "", "", false
+		}
+		return h.ID, h.CWD, true
+	}
+	return "", "", false
 }
 
 func dirExists(path string) bool {
@@ -791,6 +853,9 @@ func resumeInvocation(m cc.IndexEntry) (string, []string) {
 			return "gemini", []string{"-r", m.SessionID}
 		}
 		return "gemini", nil
+	case isPiResumePath(m.FullPath):
+		// pi resumes by session file path, not by id.
+		return "pi", []string{"--session", m.FullPath}
 	default:
 		if m.SessionID != "" {
 			return "claude", []string{"-r", m.SessionID}

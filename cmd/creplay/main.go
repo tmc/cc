@@ -369,8 +369,8 @@ func (m model) renderContent() string {
 }
 
 func (m *model) readNextMessage() (Message, error) {
-	if m.reader == nil && isOpenCodeReplayFile(m.file) {
-		messages, err := loadOpenCodeMessages(m.file)
+	if m.reader == nil && (isOpenCodeReplayFile(m.file) || isPiReplayFile(m.file)) {
+		messages, err := loadNormalizedMessages(m.file)
 		if err != nil {
 			return Message{}, err
 		}
@@ -403,8 +403,8 @@ func (m *model) readNextMessage() (Message, error) {
 }
 
 func loadMessages(file string, follow bool) ([]Message, *bufio.Reader, *os.File, error) {
-	if isOpenCodeReplayFile(file) {
-		messages, err := loadOpenCodeMessages(file)
+	if isOpenCodeReplayFile(file) || isPiReplayFile(file) {
+		messages, err := loadNormalizedMessages(file)
 		return messages, nil, nil, err
 	}
 
@@ -480,6 +480,9 @@ func findSessionFile(sessionID string) (string, error) {
 	if file, ok := findOpenCodeSessionFile(sessionID); ok {
 		return file, nil
 	}
+	if file, ok := findPiSessionFile(sessionID); ok {
+		return file, nil
+	}
 
 	return "", fmt.Errorf("session file not found for ID: %s", sessionID)
 }
@@ -489,7 +492,13 @@ func isOpenCodeReplayFile(file string) bool {
 	return strings.Contains(p, "/storage/session/") && strings.HasPrefix(filepath.Base(file), "ses_") && strings.HasSuffix(file, ".json")
 }
 
-func loadOpenCodeMessages(file string) ([]Message, error) {
+func isPiReplayFile(file string) bool {
+	return cc.IsPiSessionPath(file)
+}
+
+// loadNormalizedMessages reads a session through cc.ReadFile (which normalizes
+// opencode and pi formats) and adapts the entries to replay Messages.
+func loadNormalizedMessages(file string) ([]Message, error) {
 	entries, err := cc.ReadFile(context.Background(), file)
 	if err != nil {
 		return nil, err
@@ -532,6 +541,32 @@ func findOpenCodeSessionFile(sessionID string) (string, bool) {
 		}
 		base := filepath.Base(path)
 		if base == want+".json" || strings.TrimSuffix(base, ".json") == sessionID {
+			found = path
+		}
+		return nil
+	})
+	return found, found != ""
+}
+
+// findPiSessionFile resolves a pi session ID to its file. pi names files
+// <timestamp>_<sessionID>.jsonl, so a session matches when its filename ends in
+// _<sessionID>.jsonl or equals <sessionID>.jsonl.
+func findPiSessionFile(sessionID string) (string, bool) {
+	home, err := ccpaths.PiHome()
+	if err != nil || home == "" {
+		return "", false
+	}
+	root := filepath.Join(home, "sessions")
+	var found string
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() || found != "" {
+			return nil
+		}
+		base := filepath.Base(path)
+		if !strings.HasSuffix(base, ".jsonl") {
+			return nil
+		}
+		if base == sessionID+".jsonl" || strings.HasSuffix(base, "_"+sessionID+".jsonl") {
 			found = path
 		}
 		return nil
