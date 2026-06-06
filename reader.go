@@ -705,6 +705,9 @@ func ReadFile(ctx context.Context, path string) ([]Entry, error) {
 	if isOpenCodeSessionPath(path) {
 		return readOpenCodeFile(ctx, path)
 	}
+	if isPiSessionPath(path) {
+		return readPiFile(ctx, path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -1088,6 +1091,7 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	gh, _ := ccpaths.GeminiHome()
 	xh, _ := ccpaths.CodexHome()
 	oh, _ := ccpaths.OpenCodeHome()
+	ph, _ := ccpaths.PiHome()
 
 	cutoff := time.Now().Add(-since)
 	var files []string
@@ -1106,6 +1110,9 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	}
 	if oh != "" {
 		dirs = append(dirs, rootDir{path: filepath.Join(oh, "storage", "session"), kind: "opencode"})
+	}
+	if ph != "" {
+		dirs = append(dirs, rootDir{path: filepath.Join(ph, "sessions"), kind: "pi"})
 	}
 
 	for _, dir := range dirs {
@@ -1143,6 +1150,10 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 					if !openCodePathMatchesProject(ctx, path, q) {
 						return nil
 					}
+				case "pi":
+					if !piPathMatchesProject(ctx, path, q) {
+						return nil
+					}
 				default:
 					rel, _ := filepath.Rel(dir.path, path)
 					if !strings.Contains(strings.ToLower(rel), q) {
@@ -1177,6 +1188,22 @@ func openCodePathMatchesProject(ctx context.Context, path, query string) bool {
 }
 
 func codexPathMatchesProject(ctx context.Context, path, query string) bool {
+	entries, err := ReadFile(ctx, path)
+	if err != nil {
+		return strings.Contains(strings.ToLower(path), query)
+	}
+	for _, e := range entries {
+		if e.CWD != "" && strings.Contains(strings.ToLower(e.CWD), query) {
+			return true
+		}
+	}
+	return strings.Contains(strings.ToLower(path), query)
+}
+
+// piPathMatchesProject matches a pi session against a project query. Pi encodes
+// the cwd into the session directory name lossily, so the session header's cwd
+// is authoritative; the encoded path is a fallback.
+func piPathMatchesProject(ctx context.Context, path, query string) bool {
 	entries, err := ReadFile(ctx, path)
 	if err != nil {
 		return strings.Contains(strings.ToLower(path), query)

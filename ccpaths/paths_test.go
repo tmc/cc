@@ -138,3 +138,32 @@ func TestOpenCodeHomeOverride(t *testing.T) {
 		t.Errorf("OpenCodeHome with OPENCODE_HOME = %q, want /custom/opencode", got)
 	}
 }
+
+func TestPiHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{"default", "", filepath.Join(home, ".pi", "agent")},
+		{"absolute override", "/custom/pi", "/custom/pi"},
+		{"tilde override", "~/work/pi", filepath.Join(home, "work", "pi")},
+		{"bare tilde", "~", home},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PI_CODING_AGENT_DIR", tt.env)
+			got, err := PiHome()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("PiHome with PI_CODING_AGENT_DIR=%q = %q, want %q", tt.env, got, tt.want)
+			}
+		})
+	}
+}

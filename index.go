@@ -115,7 +115,62 @@ func AllIndexEntries(since time.Duration, project string) ([]IndexEntry, error) 
 		return nil, err
 	}
 	all = append(all, openCodeEntries...)
+
+	piEntries, err := piIndexEntries(cutoff, project)
+	if err != nil {
+		return nil, err
+	}
+	all = append(all, piEntries...)
 	return all, nil
+}
+
+func piIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error) {
+	home, err := ccpaths.PiHome()
+	if err != nil {
+		return nil, err
+	}
+	root := filepath.Join(home, "sessions")
+	var entries []IndexEntry
+	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return nil
+		}
+		if !isPiSessionPath(path) || info.ModTime().Before(cutoff) {
+			return nil
+		}
+		if !piPathMatchesProject(context.Background(), path, strings.ToLower(project)) {
+			return nil
+		}
+		parsed, err := ReadFile(context.Background(), path)
+		if err != nil {
+			return nil
+		}
+		s := Summarize(path, parsed)
+		if s.TotalLines == 0 || s.LastTime.Before(cutoff) {
+			return nil
+		}
+		modified := s.LastTime.Format(time.RFC3339Nano)
+		created := modified
+		if !s.FirstTime.IsZero() {
+			created = s.FirstTime.Format(time.RFC3339Nano)
+		}
+		entries = append(entries, IndexEntry{
+			SessionID:    s.SessionID,
+			FullPath:     path,
+			ProjectPath:  s.CWD,
+			GitBranch:    s.GitBranch,
+			FirstPrompt:  s.FirstPrompt,
+			Summary:      s.CustomTitle,
+			MessageCount: s.UserMessages + s.AsstMessages,
+			Created:      created,
+			Modified:     modified,
+		})
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return entries, nil
+	}
+	return entries, nil
 }
 
 func openCodeIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error) {

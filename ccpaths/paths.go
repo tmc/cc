@@ -102,6 +102,30 @@ func OpenCodeHome() (string, error) {
 	return filepath.Join(home, ".local", "share", "opencode"), nil
 }
 
+// PiHome returns the base directory for pi (pi-coding-agent) data, the
+// directory that holds the sessions/ tree.
+//
+// It uses PI_CODING_AGENT_DIR if set, otherwise defaults to ~/.pi/agent. A
+// leading "~" in PI_CODING_AGENT_DIR is expanded to the home directory, since
+// pi accepts that form.
+func PiHome() (string, error) {
+	if d := os.Getenv("PI_CODING_AGENT_DIR"); d != "" {
+		if d == "~" || strings.HasPrefix(d, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return "", err
+			}
+			return filepath.Join(home, strings.TrimPrefix(d[1:], "/")), nil
+		}
+		return d, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".pi", "agent"), nil
+}
+
 // DecodeSegments tries all possible decodings of dash-separated path segments
 // and returns the first existing path.
 //
