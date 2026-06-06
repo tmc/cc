@@ -206,6 +206,14 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 		}
 	}
 
+	oh, err := ccpaths.OpenCodeHome()
+	if err == nil && oh != "" {
+		opencodeRoot := filepath.Join(oh, "storage")
+		if err := fw.addDirRecursive(opencodeRoot); err != nil {
+			fw.log.Warn("watch dir", "path", opencodeRoot, "err", err)
+		}
+	}
+
 	// Debounce timer. Keep all access to pending on this goroutine; the timer
 	// only signals through debounceC.
 	var debounce *time.Timer
@@ -225,7 +233,7 @@ func (fw *FileWatcher) Start(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if !strings.HasSuffix(event.Name, ".jsonl") {
+			if !isSessionWatchFile(event.Name) {
 				// Watch new directories (including subagent dirs).
 				if event.Has(fsnotify.Create) {
 					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
@@ -313,7 +321,69 @@ func (fw *FileWatcher) schedule(ctx context.Context, files map[string]struct{}) 
 // [service.ParentSessionPath], the single source of truth shared with
 // IndexPaths so the watcher and the indexer collapse subagent paths identically.
 func parentSessionPath(p string) string {
+	if q := opencodeParentSessionPath(p); q != "" {
+		return q
+	}
 	return service.ParentSessionPath(p)
+}
+
+func isSessionWatchFile(path string) bool {
+	if strings.HasSuffix(path, ".jsonl") {
+		return true
+	}
+	p := filepath.ToSlash(path)
+	return strings.Contains(p, "/storage/session/") && strings.HasPrefix(filepath.Base(path), "ses_") && strings.HasSuffix(path, ".json") ||
+		strings.Contains(p, "/storage/message/") && strings.HasSuffix(path, ".json") ||
+		strings.Contains(p, "/storage/part/") && strings.HasSuffix(path, ".json")
+}
+
+func opencodeParentSessionPath(path string) string {
+	p := filepath.ToSlash(path)
+	switch {
+	case strings.Contains(p, "/storage/session/"):
+		return path
+	case strings.Contains(p, "/storage/message/"):
+		sid := filepath.Base(filepath.Dir(path))
+		return findOpenCodeSessionPath(path, sid)
+	case strings.Contains(p, "/storage/part/"):
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		var part struct {
+			SessionID string `json:"sessionID"`
+		}
+		if json.Unmarshal(data, &part) != nil || part.SessionID == "" {
+			return ""
+		}
+		return findOpenCodeSessionPath(path, part.SessionID)
+	default:
+		return ""
+	}
+}
+
+func findOpenCodeSessionPath(path, sid string) string {
+	root := opencodeStorageRoot(path)
+	if root == "" || sid == "" {
+		return ""
+	}
+	matches, _ := filepath.Glob(filepath.Join(root, "session", "*", sid+".json"))
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[0]
+}
+
+func opencodeStorageRoot(path string) string {
+	dir := filepath.Dir(path)
+	for filepath.Base(dir) != "storage" {
+		next := filepath.Dir(dir)
+		if next == dir {
+			return ""
+		}
+		dir = next
+	}
+	return dir
 }
 
 func (fw *FileWatcher) processPending(ctx context.Context, files map[string]struct{}) {

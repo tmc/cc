@@ -83,11 +83,20 @@ function! s:source_path() abort
 endfunction
 
 function! s:is_session_lines(path, lines) abort
-  if fnamemodify(a:path, ':e') !=# 'jsonl'
+  let l:path = substitute(fnamemodify(a:path, ':p'), '\\', '/', 'g')
+  let l:ext = fnamemodify(a:path, ':e')
+  if l:ext !=# 'jsonl'
+    if l:ext !=# 'json' || l:path !~# '/storage/session/.*/ses_[^/]\+\.json$'
+      return 0
+    endif
+    for l:line in a:lines
+      if l:line =~# '"id"\s*:\s*"ses_'
+        return 1
+      endif
+    endfor
     return 0
   endif
 
-  let l:path = substitute(fnamemodify(a:path, ':p'), '\\', '/', 'g')
   if l:path =~# '/subagents/agent-[^/]\+\.jsonl$'
     return 1
   endif
