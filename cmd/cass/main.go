@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log/slog"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1360,6 +1360,11 @@ func resumeCommand(h cass.Hit) string {
 			return prefix + "codex resume " + shellQuote(h.SessionID)
 		}
 		return prefix + "codex resume"
+	case "opencode":
+		if h.SessionID != "" {
+			return prefix + "opencode --session " + shellQuote(h.SessionID)
+		}
+		return prefix + "opencode"
 	default:
 		if id := claudeResumeID(h); id != "" {
 			return prefix + "claude --resume " + shellQuote(id)

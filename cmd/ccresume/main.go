@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -505,6 +506,9 @@ func sessionRoots() ([]searchRoot, error) {
 			roots = append(roots, searchRoot{dir: d, kind: "codex"})
 		}
 	}
+	if d := filepath.Join(os.Getenv("HOME"), ".local", "share", "opencode", "storage", "session"); dirExists(d) {
+		roots = append(roots, searchRoot{dir: d, kind: "opencode"})
+	}
 	return roots, nil
 }
 
@@ -689,6 +693,23 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 		if strings.HasPrefix(sessionID, "rollout-") && len(sessionID) >= len("rollout-2006-01-02T15-04-05-")+1 {
 			sessionID = strings.TrimPrefix(sessionID[len("rollout-2006-01-02T15-04-05-"):], "-")
 		}
+	case "opencode":
+		projectPath = filepath.Dir(path)
+		data, err := os.ReadFile(path)
+		if err == nil {
+			var v struct {
+				ID        string `json:"id"`
+				Directory string `json:"directory"`
+			}
+			if json.Unmarshal(data, &v) == nil {
+				if v.ID != "" {
+					sessionID = v.ID
+				}
+				if v.Directory != "" {
+					projectPath = v.Directory
+				}
+			}
+		}
 	default:
 		rel, err := filepath.Rel(root.dir, path)
 		if err != nil {
@@ -754,6 +775,11 @@ func resumeInvocation(m cc.IndexEntry) (string, []string) {
 			return "codex", []string{"resume", m.SessionID}
 		}
 		return "codex", []string{"resume"}
+	case strings.Contains(m.FullPath, string(filepath.Separator)+"opencode"+string(filepath.Separator)):
+		if m.SessionID != "" {
+			return "opencode", []string{"--session", m.SessionID}
+		}
+		return "opencode", nil
 	case strings.Contains(m.FullPath, string(filepath.Separator)+".gemini"+string(filepath.Separator)):
 		if m.SessionID != "" {
 			return "gemini", []string{"-r", m.SessionID}
