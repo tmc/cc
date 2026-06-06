@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tmc/cc"
 	"github.com/tmc/cc/ccgit"
 	"github.com/tmc/cc/ccpaths"
 )
@@ -72,7 +74,9 @@ func run() error {
 	args := flag.Args()
 	if len(args) > 0 {
 		// Check if first arg is a number (like "chistory 50")
-		if n, err := fmt.Sscanf(args[0], "%d", nFlag); n == 1 && err == nil {
+		var nval int
+		if n, err := fmt.Sscanf(args[0], "%d", &nval); n == 1 && err == nil {
+			*nFlag = nval
 			args = args[1:]
 		}
 		if len(args) > 0 {
@@ -170,6 +174,26 @@ func findSessionFiles() ([]string, error) {
 
 	var files []string
 	seen := make(map[string]bool)
+	addFile := func(path string) {
+		absPath, _ := filepath.Abs(path)
+		if !seen[absPath] {
+			seen[absPath] = true
+			files = append(files, path)
+		}
+	}
+
+	if *sessionsFlag == "" {
+		coreFiles, err := cc.FindSessionFiles(context.Background(), since, "")
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range coreFiles {
+			if *sessionFlag != "" && !strings.Contains(path, *sessionFlag) {
+				continue
+			}
+			addFile(path)
+		}
+	}
 
 	for _, dir := range searchDirs {
 		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -183,7 +207,7 @@ func findSessionFiles() ([]string, error) {
 				}
 				return nil
 			}
-			if !strings.HasSuffix(path, ".ndjson") {
+			if !isHistorySessionPath(path) {
 				return nil
 			}
 			if info.ModTime().Before(cutoff) {
@@ -193,11 +217,7 @@ func findSessionFiles() ([]string, error) {
 				return nil
 			}
 
-			absPath, _ := filepath.Abs(path)
-			if !seen[absPath] {
-				seen[absPath] = true
-				files = append(files, path)
-			}
+			addFile(path)
 			return nil
 		})
 		if err != nil && !os.IsNotExist(err) {
@@ -218,14 +238,25 @@ func findSessionFiles() ([]string, error) {
 	return files, nil
 }
 
+func isHistorySessionPath(path string) bool {
+	if strings.HasSuffix(path, ".ndjson") || strings.HasSuffix(path, ".jsonl") {
+		return true
+	}
+	return strings.HasPrefix(filepath.Base(path), "ses_") && strings.HasSuffix(path, ".json")
+}
+
 func getGlobalSearchDirs() []string {
 	ch, _ := ccpaths.ClaudeHome()
+	oh, _ := ccpaths.OpenCodeHome()
 	home, _ := os.UserHomeDir()
 	dirs := []string{
 		".",
 		".sessions",
 		filepath.Join(ch, "sessions"),
 		filepath.Join(home, ".config", "claude", "sessions"),
+	}
+	if oh != "" {
+		dirs = append(dirs, filepath.Join(oh, "storage", "session"))
 	}
 	return dirs
 }
@@ -255,6 +286,10 @@ func getProjectSearchDirs() []string {
 }
 
 func searchFile(path string, re *regexp.Regexp) ([]searchMatch, error) {
+	if entries, err := cc.ReadFile(context.Background(), path); err == nil {
+		return searchEntries(path, entries, re)
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -306,6 +341,80 @@ func searchFile(path string, re *regexp.Regexp) ([]searchMatch, error) {
 	}
 
 	return matches, scanner.Err()
+}
+
+func searchEntries(path string, entries []cc.Entry, re *regexp.Regexp) ([]searchMatch, error) {
+	var messages []sessionMessage
+	var matches []searchMatch
+	for i, e := range entries {
+		msg, err := sessionMessageFromEntry(e)
+		if err != nil {
+			continue
+		}
+		messages = append(messages, msg)
+		if !matchesFilter(msg) {
+			continue
+		}
+		content := entryContent(e)
+		if re == nil || re.MatchString(content) {
+			matches = append(matches, searchMatch{
+				File:    path,
+				Line:    i + 1,
+				Type:    getMessageType(msg),
+				Content: content,
+			})
+		}
+	}
+	if (*contextFlag > 0 || *aFlag > 0 || *bFlag > 0) && len(matches) > 0 {
+		matches = addContext(matches, messages, path)
+	}
+	return matches, nil
+}
+
+func entryContent(e cc.Entry) string {
+	if e.Message != nil {
+		return e.Message.TextContent()
+	}
+	if e.Content != "" {
+		return e.Content
+	}
+	if e.Summary != "" {
+		return e.Summary
+	}
+	if e.CustomTitle != "" {
+		return e.CustomTitle
+	}
+	return ""
+}
+
+func sessionMessageFromEntry(e cc.Entry) (sessionMessage, error) {
+	raw, err := json.Marshal(e)
+	if err != nil {
+		return sessionMessage{}, err
+	}
+	msg := sessionMessage{
+		Type: e.Type,
+		raw:  string(raw),
+	}
+	if e.Message != nil {
+		msg.Message = &struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}{
+			Role:    e.Message.Role,
+			Content: e.Message.Content,
+		}
+		msg.Content = json.RawMessage(strconvQuote(e.Message.TextContent()))
+	}
+	if e.Content != "" {
+		msg.Content = json.RawMessage(strconvQuote(e.Content))
+	}
+	return msg, nil
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 func matchesFilter(msg sessionMessage) bool {

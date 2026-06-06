@@ -393,17 +393,14 @@ func fileHasToolMatch(path, cmdText, resultText string) (bool, error) {
 	if cmdText == "" && resultText != "" {
 		return fileContains(path, resultText)
 	}
-	f, err := os.Open(path)
+	entries, err := cc.ReadFile(context.Background(), path)
 	if err != nil {
 		return false, nil
 	}
-	defer f.Close()
 	cmdIDs := map[string]bool{}
 	sawCommand := cmdText == ""
 	sawResult := resultText == ""
-	r := cc.NewReader(context.Background(), f)
-	for r.Next() {
-		e := r.Entry()
+	for _, e := range entries {
 		if e.Message != nil {
 			for _, tu := range e.Message.ToolUses() {
 				if toolUseContains(tu, cmdText) {
@@ -429,9 +426,6 @@ func fileHasToolMatch(path, cmdText, resultText string) (bool, error) {
 		if sawCommand && sawResult {
 			return true, nil
 		}
-	}
-	if err := r.Err(); err != nil {
-		return false, err
 	}
 	return sawCommand && sawResult, nil
 }
@@ -506,8 +500,12 @@ func sessionRoots() ([]searchRoot, error) {
 			roots = append(roots, searchRoot{dir: d, kind: "codex"})
 		}
 	}
-	if d := filepath.Join(os.Getenv("HOME"), ".local", "share", "opencode", "storage", "session"); dirExists(d) {
-		roots = append(roots, searchRoot{dir: d, kind: "opencode"})
+	oh, _ := ccpaths.OpenCodeHome()
+	if oh != "" {
+		d := filepath.Join(oh, "storage", "session")
+		if dirExists(d) {
+			roots = append(roots, searchRoot{dir: d, kind: "opencode"})
+		}
 	}
 	return roots, nil
 }
@@ -569,20 +567,14 @@ func parseJSONCWDField(query string) (string, bool) {
 }
 
 func fileHasSessionCWD(path, cwd string) (bool, error) {
-	f, err := os.Open(path)
+	entries, err := cc.ReadFile(context.Background(), path)
 	if err != nil {
 		return false, nil
 	}
-	defer f.Close()
-	r := cc.NewReader(context.Background(), f)
-	for r.Next() {
-		e := r.Entry()
+	for _, e := range entries {
 		if e.CWD == cwd && (e.Subtype == "session_meta" || e.Subtype == "turn_context" || e.Type == "user" || e.Type == "assistant") {
 			return true, nil
 		}
-	}
-	if err := r.Err(); err != nil {
-		return false, err
 	}
 	return false, nil
 }
@@ -592,7 +584,7 @@ func recentMatchingPaths(roots []searchRoot, query string, minutes int) ([]strin
 	for _, root := range roots {
 		args = append(args, root.dir)
 	}
-	args = append(args, "-type", "f", "-name", "*.jsonl", "-mmin", fmt.Sprintf("-%d", minutes), "-print")
+	args = append(args, "-type", "f", "(", "-name", "*.jsonl", "-o", "-name", "ses_*.json", ")", "-mmin", fmt.Sprintf("-%d", minutes), "-print")
 	cmd := exec.Command("find", args...)
 	out, err := cmd.Output()
 	if err != nil {
@@ -659,10 +651,6 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
 		path := scanner.Text()
-		if !strings.HasSuffix(path, ".jsonl") {
-			continue
-		}
-
 		var rootMatch searchRoot
 		for _, root := range roots {
 			if strings.HasPrefix(path, root.dir) {
@@ -671,6 +659,9 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 			}
 		}
 		if rootMatch.dir == "" {
+			continue
+		}
+		if !isResumeSessionPath(path, rootMatch.kind) {
 			continue
 		}
 
@@ -686,7 +677,7 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 }
 
 func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.IndexEntry, bool) {
-	sessionID := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	sessionID := sessionIDFromPath(path, root.kind)
 	projectPath := filepath.Dir(path)
 	switch root.kind {
 	case "codex":
@@ -730,6 +721,21 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 		ProjectPath: projectPath,
 		Modified:    info.ModTime().Format(time.RFC3339Nano),
 	}, true
+}
+
+func isResumeSessionPath(path, kind string) bool {
+	if strings.HasSuffix(path, ".jsonl") {
+		return true
+	}
+	return kind == "opencode" && strings.HasPrefix(filepath.Base(path), "ses_") && strings.HasSuffix(path, ".json")
+}
+
+func sessionIDFromPath(path, kind string) string {
+	base := filepath.Base(path)
+	if kind == "opencode" && strings.HasPrefix(base, "ses_") && strings.HasSuffix(base, ".json") {
+		return strings.TrimSuffix(base, ".json")
+	}
+	return strings.TrimSuffix(base, ".jsonl")
 }
 
 func dirExists(path string) bool {

@@ -36,6 +36,15 @@ func TestResumeInvocation(t *testing.T) {
 			wantArgs: []string{"-r", "gemini-session-id"},
 		},
 		{
+			name: "opencode",
+			entry: cc.IndexEntry{
+				FullPath:  filepath.Join("/tmp", "opencode", "storage", "session", "p", "ses_resume.json"),
+				SessionID: "ses_resume",
+			},
+			wantBin:  "opencode",
+			wantArgs: []string{"--session", "ses_resume"},
+		},
+		{
 			name: "claude",
 			entry: cc.IndexEntry{
 				FullPath:  filepath.Join("/tmp", ".claude", "projects", "p", "s.jsonl"),
@@ -243,6 +252,38 @@ func TestFileHasToolMatchCommandAndResult(t *testing.T) {
 	}
 }
 
+func TestRecentMatchingPathsIncludesOpenCodeSessions(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "storage", "session")
+	path := filepath.Join(root, "project", "ses_recent.json")
+	writeTextFile(t, path, `{"id":"ses_recent","directory":"/work/recent","title":"needle opencode"}`)
+
+	got, err := recentMatchingPaths([]searchRoot{{dir: root, kind: "opencode"}}, "needle opencode", 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != path {
+		t.Fatalf("recentMatchingPaths = %#v, want %q", got, path)
+	}
+}
+
+func TestIndexEntryForOpenCodePath(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "storage", "session")
+	path := filepath.Join(root, "project", "ses_index.json")
+	writeTextFile(t, path, `{"id":"ses_index","directory":"/work/index"}`)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := indexEntryForPath(path, searchRoot{dir: root, kind: "opencode"}, info)
+	if !ok {
+		t.Fatal("indexEntryForPath returned false")
+	}
+	if got.SessionID != "ses_index" || got.ProjectPath != "/work/index" || got.FullPath != path {
+		t.Fatalf("indexEntryForPath = %#v", got)
+	}
+}
+
 func writeJSONL(t *testing.T, path string, lines []map[string]any) {
 	t.Helper()
 	f, err := os.Create(path)
@@ -255,5 +296,15 @@ func writeJSONL(t *testing.T, path string, lines []map[string]any) {
 		if err := enc.Encode(l); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func writeTextFile(t *testing.T, path, text string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text), 0o666); err != nil {
+		t.Fatal(err)
 	}
 }

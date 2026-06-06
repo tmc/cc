@@ -56,10 +56,13 @@ func run() error {
 	var writes []writeOp
 
 	for _, r := range readers {
-		rd := cc.NewReader(context.Background(), r)
+		entries, err := entriesFromReader(r)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+			continue
+		}
 		var ts string
-		for rd.Next() {
-			e := rd.Entry()
+		for _, e := range entries {
 			if !e.Timestamp.IsZero() {
 				ts = e.Timestamp.Local().Format("15:04:05")
 			}
@@ -178,6 +181,18 @@ func printDiffs(edits []editOp, writes []writeOp) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+func entriesFromReader(r io.Reader) ([]cc.Entry, error) {
+	if f, ok := r.(*os.File); ok && f != os.Stdin {
+		return cc.ReadFile(context.Background(), f.Name())
+	}
+	rd := cc.NewReader(context.Background(), r)
+	var entries []cc.Entry
+	for rd.Next() {
+		entries = append(entries, rd.Entry())
+	}
+	return entries, rd.Err()
 }
 
 func inputs() ([]io.Reader, []io.Closer, error) {

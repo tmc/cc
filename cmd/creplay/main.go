@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 )
 
 // Message represents a Claude Code session message
@@ -366,6 +369,16 @@ func (m model) renderContent() string {
 }
 
 func (m *model) readNextMessage() (Message, error) {
+	if m.reader == nil && isOpenCodeReplayFile(m.file) {
+		messages, err := loadOpenCodeMessages(m.file)
+		if err != nil {
+			return Message{}, err
+		}
+		if len(messages) <= len(m.messages) {
+			return Message{}, io.EOF
+		}
+		return messages[len(m.messages)], nil
+	}
 	if m.reader == nil {
 		return Message{}, io.EOF
 	}
@@ -389,7 +402,12 @@ func (m *model) readNextMessage() (Message, error) {
 	return msg, nil
 }
 
-func loadMessages(file string) ([]Message, *bufio.Reader, *os.File, error) {
+func loadMessages(file string, follow bool) ([]Message, *bufio.Reader, *os.File, error) {
+	if isOpenCodeReplayFile(file) {
+		messages, err := loadOpenCodeMessages(file)
+		return messages, nil, nil, err
+	}
+
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to open file: %w", err)
@@ -459,8 +477,66 @@ func findSessionFile(sessionID string) (string, error) {
 			}
 		}
 	}
+	if file, ok := findOpenCodeSessionFile(sessionID); ok {
+		return file, nil
+	}
 
 	return "", fmt.Errorf("session file not found for ID: %s", sessionID)
+}
+
+func isOpenCodeReplayFile(file string) bool {
+	p := filepath.ToSlash(file)
+	return strings.Contains(p, "/storage/session/") && strings.HasPrefix(filepath.Base(file), "ses_") && strings.HasSuffix(file, ".json")
+}
+
+func loadOpenCodeMessages(file string) ([]Message, error) {
+	entries, err := cc.ReadFile(context.Background(), file)
+	if err != nil {
+		return nil, err
+	}
+	var messages []Message
+	for _, e := range entries {
+		if e.Message == nil {
+			continue
+		}
+		raw, err := json.Marshal(e)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, Message{
+			Type: e.Type,
+			Message: &struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			}{Role: e.Message.Role, Content: e.Message.Content},
+			raw: string(raw),
+		})
+	}
+	return messages, nil
+}
+
+func findOpenCodeSessionFile(sessionID string) (string, bool) {
+	home, err := ccpaths.OpenCodeHome()
+	if err != nil || home == "" {
+		return "", false
+	}
+	root := filepath.Join(home, "storage", "session")
+	want := sessionID
+	if !strings.HasPrefix(want, "ses_") {
+		want = "ses_" + want
+	}
+	var found string
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() || found != "" {
+			return nil
+		}
+		base := filepath.Base(path)
+		if base == want+".json" || strings.TrimSuffix(base, ".json") == sessionID {
+			found = path
+		}
+		return nil
+	})
+	return found, found != ""
 }
 
 func main() {
@@ -494,7 +570,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	messages, reader, fileHandle, err := loadMessages(file)
+	messages, reader, fileHandle, err := loadMessages(file, *follow)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading messages: %v\n", err)
 		os.Exit(1)

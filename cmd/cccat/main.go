@@ -44,6 +44,25 @@ func run() error {
 
 	var count int
 	for _, r := range readers {
+		if f, ok := r.(*os.File); ok && f != os.Stdin {
+			entries, err := cc.ReadFile(context.Background(), f.Name())
+			if err != nil {
+				return err
+			}
+			for _, e := range entries {
+				if !match(e) {
+					continue
+				}
+				count++
+				if *countFlag {
+					continue
+				}
+				if err := output(e); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		rd := cc.NewReader(context.Background(), r)
 		for rd.Next() {
 			e := rd.Entry()

@@ -113,14 +113,18 @@ func normalizeTarget(v string) (targetAgent, launchBin string, err error) {
 		return "claude-code", "claude", nil
 	case "codex", "codex-cli", "codex-app":
 		return "codex-cli", "codex", nil
+	case "opencode", "open-code":
+		return "opencode", "opencode", nil
 	default:
-		return "", "", fmt.Errorf("unsupported -to %q (want gemini|gemini-cli|claude|claude-code|codex|codex-cli|codex-app)", v)
+		return "", "", fmt.Errorf("unsupported -to %q (want gemini|gemini-cli|claude|claude-code|codex|codex-cli|codex-app|opencode)", v)
 	}
 }
 
 func inferSourceAgent(path string, entries []cc.Entry) string {
 	for _, e := range entries {
 		switch {
+		case e.Source == "opencode":
+			return "opencode"
 		case e.Originator == "codex_cli_rs" || e.Source == "cli":
 			return "codex-cli"
 		case e.Originator == "Codex Desktop" || e.Source == "vscode":
@@ -136,19 +140,18 @@ func inferSourceAgent(path string, entries []cc.Entry) string {
 		return "claude-code"
 	case strings.Contains(p, ".gemini"):
 		return "gemini-cli"
+	case strings.Contains(p, "opencode"):
+		return "opencode"
 	default:
 		return "unknown"
 	}
 }
 
 func readSessionEntries(path string) ([]cc.Entry, error) {
-	if strings.HasSuffix(path, ".jsonl") {
-		return cc.ReadFile(context.Background(), path)
-	}
 	if strings.HasSuffix(path, ".json") && strings.HasPrefix(filepath.Base(path), "session-") {
 		return readGeminiSessionJSON(path)
 	}
-	return nil, fmt.Errorf("unsupported session file format: %s", path)
+	return cc.ReadFile(context.Background(), path)
 }
 
 func readGeminiSessionJSON(path string) ([]cc.Entry, error) {

@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
-	"github.com/tmc/cc/cass"
-	"github.com/tmc/cc/cass/collector"
 	"github.com/tmc/cc/ccpaths"
 )
 
@@ -110,12 +108,6 @@ func runFull(since time.Duration) error {
 		}
 		sessions = append(sessions, s)
 	}
-	opencode, err := openCodeSummaries(context.Background(), since, *projectFlag)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: opencode: %v\n", err)
-	} else {
-		sessions = append(sessions, opencode...)
-	}
 
 	sort.Slice(sessions, func(i, j int) bool {
 		return sessions[i].LastTime.After(sessions[j].LastTime)
@@ -157,69 +149,6 @@ func runFull(since time.Duration) error {
 		}
 		return nil
 	}
-}
-
-func openCodeSummaries(ctx context.Context, since time.Duration, project string) ([]cc.SessionSummary, error) {
-	c := &collector.OpenCode{}
-	det, err := c.Detect(ctx)
-	if err != nil || det == nil || !det.Found {
-		return nil, err
-	}
-	out := make(chan cass.Session, 100)
-	cfg := cass.ScanConfig{Paths: det.Paths, Project: project}
-	if since > 0 {
-		cfg.Since = time.Now().Add(-since)
-	}
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- c.Scan(ctx, cfg, out)
-	}()
-
-	var summaries []cc.SessionSummary
-	for sess := range out {
-		summaries = append(summaries, cc.SessionSummary{
-			SessionID:    sess.ID,
-			File:         sess.SourcePath,
-			Project:      sess.Workspace,
-			CWD:          sess.Workspace,
-			FirstTime:    sess.StartedAt,
-			LastTime:     sess.EndedAt,
-			FirstPrompt:  firstOpenCodePrompt(sess.Messages),
-			UserMessages: countRole(sess.Messages, "user"),
-			AsstMessages: countRole(sess.Messages, "assistant"),
-			TotalLines:   len(sess.Messages),
-			Model:        stringMeta(sess.Metadata, "model"),
-			Slug:         "opencode",
-		})
-	}
-	return summaries, <-errCh
-}
-
-func firstOpenCodePrompt(messages []cass.Message) string {
-	for _, msg := range messages {
-		if msg.Role == "user" {
-			return msg.Content
-		}
-	}
-	return ""
-}
-
-func countRole(messages []cass.Message, role string) int {
-	n := 0
-	for _, msg := range messages {
-		if msg.Role == role {
-			n++
-		}
-	}
-	return n
-}
-
-func stringMeta(meta map[string]any, key string) string {
-	if meta == nil {
-		return ""
-	}
-	s, _ := meta[key].(string)
-	return s
 }
 
 func collapse(s string, max int) string {

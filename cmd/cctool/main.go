@@ -108,9 +108,11 @@ func run() error {
 	counts := make(map[string]int)
 
 	for _, r := range readers {
-		rd := cc.NewReader(context.Background(), r)
-		for rd.Next() {
-			e := rd.Entry()
+		entries, err := entriesFromReader(r)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
 			if e.Message == nil {
 				continue
 			}
@@ -124,9 +126,6 @@ func run() error {
 				}
 				printToolUse(tu)
 			}
-		}
-		if rd.Err() != nil {
-			return rd.Err()
 		}
 		if c, ok := r.(io.Closer); ok && c != os.Stdin {
 			c.Close()
@@ -154,6 +153,18 @@ func run() error {
 		}
 	}
 	return nil
+}
+
+func entriesFromReader(r io.Reader) ([]cc.Entry, error) {
+	if f, ok := r.(*os.File); ok && f != os.Stdin {
+		return cc.ReadFile(context.Background(), f.Name())
+	}
+	rd := cc.NewReader(context.Background(), r)
+	var entries []cc.Entry
+	for rd.Next() {
+		entries = append(entries, rd.Entry())
+	}
+	return entries, rd.Err()
 }
 
 func inputs() ([]io.Reader, []io.Closer, error) {
