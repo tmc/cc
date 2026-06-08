@@ -1171,7 +1171,12 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	return files, nil
 }
 
-func openCodePathMatchesProject(ctx context.Context, path, query string) bool {
+// cwdPathMatchesProject matches a session against a project query for formats
+// (codex, opencode, pi) whose on-disk directory encodes the cwd lossily, so the
+// session's own cwd is authoritative and the encoded path is only a fallback.
+// extra, when non-nil, contributes additional per-entry strings to match (e.g.
+// opencode's custom title).
+func cwdPathMatchesProject(ctx context.Context, path, query string, extra func(Entry) string) bool {
 	entries, err := ReadFile(ctx, path)
 	if err != nil {
 		return strings.Contains(strings.ToLower(path), query)
@@ -1180,38 +1185,23 @@ func openCodePathMatchesProject(ctx context.Context, path, query string) bool {
 		if e.CWD != "" && strings.Contains(strings.ToLower(e.CWD), query) {
 			return true
 		}
-		if e.CustomTitle != "" && strings.Contains(strings.ToLower(e.CustomTitle), query) {
-			return true
+		if extra != nil {
+			if s := extra(e); s != "" && strings.Contains(strings.ToLower(s), query) {
+				return true
+			}
 		}
 	}
 	return strings.Contains(strings.ToLower(path), query)
+}
+
+func openCodePathMatchesProject(ctx context.Context, path, query string) bool {
+	return cwdPathMatchesProject(ctx, path, query, func(e Entry) string { return e.CustomTitle })
 }
 
 func codexPathMatchesProject(ctx context.Context, path, query string) bool {
-	entries, err := ReadFile(ctx, path)
-	if err != nil {
-		return strings.Contains(strings.ToLower(path), query)
-	}
-	for _, e := range entries {
-		if e.CWD != "" && strings.Contains(strings.ToLower(e.CWD), query) {
-			return true
-		}
-	}
-	return strings.Contains(strings.ToLower(path), query)
+	return cwdPathMatchesProject(ctx, path, query, nil)
 }
 
-// piPathMatchesProject matches a pi session against a project query. Pi encodes
-// the cwd into the session directory name lossily, so the session header's cwd
-// is authoritative; the encoded path is a fallback.
 func piPathMatchesProject(ctx context.Context, path, query string) bool {
-	entries, err := ReadFile(ctx, path)
-	if err != nil {
-		return strings.Contains(strings.ToLower(path), query)
-	}
-	for _, e := range entries {
-		if e.CWD != "" && strings.Contains(strings.ToLower(e.CWD), query) {
-			return true
-		}
-	}
-	return strings.Contains(strings.ToLower(path), query)
+	return cwdPathMatchesProject(ctx, path, query, nil)
 }
