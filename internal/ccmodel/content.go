@@ -1,4 +1,4 @@
-package cc
+package ccmodel
 
 import (
 	"encoding/json"

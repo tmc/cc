@@ -1,4 +1,12 @@
-package cc
+// Package piread decodes pi (pi-coding-agent) JSONL session files into the
+// normalized cc data model. pi stores one session per file under
+// <agent-dir>/sessions, with tool results recorded as their own entries; this
+// package normalizes that layout. [ReadFile] reads a file and [IsSessionPath]
+// recognizes one.
+//
+// This package is internal to cc and imports only ccmodel; cc.ReadFile
+// dispatches to it by path.
+package piread
 
 import (
 	"bufio"
@@ -10,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tmc/cc/internal/ccmodel"
 )
 
 // pi (pi-coding-agent) stores one JSONL file per session under
@@ -18,7 +28,7 @@ import (
 // id/parentId. Tool results are recorded as their own "message" entries with
 // role "toolResult" rather than as content blocks, and reasoning is carried in
 // "thinking" blocks. This reader normalizes that layout into the canonical
-// Entry/Message/ContentBlock shape with Source "pi".
+// ccmodel.Entry/ccmodel.Message/ccmodel.ContentBlock shape with Source "pi".
 //
 // The format is documented in pi's TypeScript declarations (session-manager,
 // pi-ai content blocks); the structs below mirror only the fields cc consumes.
@@ -70,14 +80,14 @@ type piBlock struct {
 	MIMEType  string          `json:"mimeType"`
 }
 
-// isPiSessionPath reports whether path is a pi session file. The fast path
+// IsSessionPath reports whether path is a pi session file. The fast path
 // matches pi's default ~/.pi/agent/sessions/<project>/<file>.jsonl layout
 // without I/O. For other layouts (a PI_CODING_AGENT_DIR override that is not
 // named "agent"), it falls back to sniffing the first line for a pi session
 // header, which positively distinguishes pi files from Claude/Codex .jsonl
 // files that share the .jsonl extension. The sniff only runs for .jsonl files
 // sitting under a "sessions" directory, so the common case stays cheap.
-func isPiSessionPath(path string) bool {
+func IsSessionPath(path string) bool {
 	if !strings.HasSuffix(path, ".jsonl") {
 		return false
 	}
@@ -110,7 +120,7 @@ func piHeaderSniff(path string) bool {
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, initialBufferSize), MaxLineSize)
+	sc.Buffer(make([]byte, ccmodel.InitialBufferSize), ccmodel.MaxLineSize)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
@@ -124,7 +134,7 @@ func piHeaderSniff(path string) bool {
 	return false
 }
 
-func readPiFile(ctx context.Context, path string) ([]Entry, error) {
+func ReadFile(ctx context.Context, path string) ([]ccmodel.Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -155,7 +165,7 @@ func readPiFile(ctx context.Context, path string) ([]Entry, error) {
 	if header.Version != 0 {
 		version = strconv.Itoa(header.Version)
 	}
-	entries := []Entry{{
+	entries := []ccmodel.Entry{{
 		Type:      "session_meta",
 		Subtype:   "session_meta",
 		SessionID: sessionID,
@@ -187,15 +197,15 @@ func readPiFile(ctx context.Context, path string) ([]Entry, error) {
 	return entries, nil
 }
 
-func piMessageEntry(sessionID string, header piSessionHeader, version string, pe piEntry) (Entry, bool) {
+func piMessageEntry(sessionID string, header piSessionHeader, version string, pe piEntry) (ccmodel.Entry, bool) {
 	msg := pe.Message
 	blocks := piBlocks(msg)
 	if len(blocks) == 0 {
-		return Entry{}, false
+		return ccmodel.Entry{}, false
 	}
 	raw, err := json.Marshal(blocks)
 	if err != nil {
-		return Entry{}, false
+		return ccmodel.Entry{}, false
 	}
 
 	role := msg.Role
@@ -206,9 +216,9 @@ func piMessageEntry(sessionID string, header piSessionHeader, version string, pe
 		role = "user"
 	}
 
-	var usage *Usage
+	var usage *ccmodel.Usage
 	if msg.Usage != nil {
-		usage = &Usage{
+		usage = &ccmodel.Usage{
 			InputTokens:              msg.Usage.Input,
 			OutputTokens:             msg.Usage.Output,
 			CacheReadInputTokens:     msg.Usage.CacheRead,
@@ -216,7 +226,7 @@ func piMessageEntry(sessionID string, header piSessionHeader, version string, pe
 		}
 	}
 
-	return Entry{
+	return ccmodel.Entry{
 		Type:       role,
 		SessionID:  sessionID,
 		UUID:       pe.ID,
@@ -226,7 +236,7 @@ func piMessageEntry(sessionID string, header piSessionHeader, version string, pe
 		Version:    version,
 		Source:     "pi",
 		Usage:      usage,
-		Message: &Message{
+		Message: &ccmodel.Message{
 			ID:         pe.ID,
 			Role:       role,
 			Content:    raw,
@@ -240,7 +250,7 @@ func piMessageEntry(sessionID string, header piSessionHeader, version string, pe
 // piBlocks converts a pi message into canonical content blocks. Tool-result
 // messages (role "toolResult") become a single tool_result block; ordinary
 // messages map text/thinking/toolCall/image blocks.
-func piBlocks(msg *piMessage) []ContentBlock {
+func piBlocks(msg *piMessage) []ccmodel.ContentBlock {
 	if msg.Role == "toolResult" {
 		content := strings.TrimSpace(piContentText(msg.Content))
 		// Drop a tool result that carries nothing useful (no id, no content,
@@ -248,7 +258,7 @@ func piBlocks(msg *piMessage) []ContentBlock {
 		if content == "" && msg.ToolCallID == "" && !msg.IsError {
 			return nil
 		}
-		return []ContentBlock{{
+		return []ccmodel.ContentBlock{{
 			Type:      "tool_result",
 			ToolUseID: msg.ToolCallID,
 			Content:   content,
@@ -260,31 +270,31 @@ func piBlocks(msg *piMessage) []ContentBlock {
 	if json.Unmarshal(msg.Content, &raw) != nil {
 		// Content may be a bare string for user/custom messages.
 		if text := piContentText(msg.Content); text != "" {
-			return []ContentBlock{{Type: "text", Text: text}}
+			return []ccmodel.ContentBlock{{Type: "text", Text: text}}
 		}
 		return nil
 	}
 
-	var blocks []ContentBlock
+	var blocks []ccmodel.ContentBlock
 	for _, b := range raw {
 		switch b.Type {
 		case "text":
 			if b.Text != "" {
-				blocks = append(blocks, ContentBlock{Type: "text", Text: b.Text})
+				blocks = append(blocks, ccmodel.ContentBlock{Type: "text", Text: b.Text})
 			}
 		case "thinking":
 			if b.Thinking != "" {
-				blocks = append(blocks, ContentBlock{Type: "text", Text: b.Thinking})
+				blocks = append(blocks, ccmodel.ContentBlock{Type: "text", Text: b.Thinking})
 			}
 		case "toolCall":
-			blocks = append(blocks, ContentBlock{
+			blocks = append(blocks, ccmodel.ContentBlock{
 				Type:  "tool_use",
 				ID:    b.ID,
 				Name:  piToolName(b.Name),
 				Input: b.Arguments,
 			})
 		case "image":
-			blocks = append(blocks, ContentBlock{
+			blocks = append(blocks, ccmodel.ContentBlock{
 				Type:     "image",
 				Data:     b.Data,
 				MIMEType: b.MIMEType,
@@ -351,7 +361,7 @@ func piToolName(name string) string {
 // same generous line buffer cc applies to other session files.
 func readPiLines(ctx context.Context, f *os.File) ([]json.RawMessage, error) {
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, initialBufferSize), MaxLineSize)
+	sc.Buffer(make([]byte, ccmodel.InitialBufferSize), ccmodel.MaxLineSize)
 
 	var lines []json.RawMessage
 	n := 0

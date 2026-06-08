@@ -1,4 +1,11 @@
-package cc
+// Package opencoderead decodes opencode session storage into the normalized cc
+// data model. opencode stores a session as a directory tree of per-message and
+// per-part JSON files under storage/session, so [ReadFile] walks that tree and
+// [IsSessionPath] recognizes such a path.
+//
+// This package is internal to cc and imports only ccmodel; cc.ReadFile
+// dispatches to it by path.
+package opencoderead
 
 import (
 	"context"
@@ -9,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tmc/cc/internal/ccmodel"
 )
 
 type openCodeSessionFile struct {
@@ -87,7 +96,7 @@ type openCodePartFile struct {
 	Time      openCodeTime   `json:"time"`
 }
 
-func isOpenCodeSessionPath(path string) bool {
+func IsSessionPath(path string) bool {
 	base := filepath.Base(path)
 	if !strings.HasPrefix(base, "ses_") || !strings.HasSuffix(base, ".json") {
 		return false
@@ -101,7 +110,7 @@ func isOpenCodeSessionPath(path string) bool {
 	return false
 }
 
-func readOpenCodeFile(ctx context.Context, path string) ([]Entry, error) {
+func ReadFile(ctx context.Context, path string) ([]ccmodel.Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -146,12 +155,12 @@ func readOpenCodeFile(ctx context.Context, path string) ([]Entry, error) {
 		return records[i].Time.Created < records[j].Time.Created
 	})
 
-	var entries []Entry
+	var entries []ccmodel.Entry
 	metaTime := unixMillis(sf.Time.Created)
 	if metaTime.IsZero() && len(records) > 0 {
 		metaTime = unixMillis(records[0].Time.Created)
 	}
-	entries = append(entries, Entry{
+	entries = append(entries, ccmodel.Entry{
 		Type:      "session_meta",
 		Subtype:   "session_meta",
 		SessionID: sf.ID,
@@ -162,7 +171,7 @@ func readOpenCodeFile(ctx context.Context, path string) ([]Entry, error) {
 		Source:    "opencode",
 	})
 	if sf.Title != "" {
-		entries = append(entries, Entry{
+		entries = append(entries, ccmodel.Entry{
 			Type:        "custom-title",
 			SessionID:   sf.ID,
 			Timestamp:   metaTime,
@@ -178,7 +187,7 @@ func readOpenCodeFile(ctx context.Context, path string) ([]Entry, error) {
 		parts := readOpenCodeParts(ctx, root, rec.ID)
 		blocks := openCodeBlocks(parts)
 		if len(blocks) == 0 && rec.Summary.Title != "" {
-			blocks = append(blocks, ContentBlock{Type: "text", Text: rec.Summary.Title})
+			blocks = append(blocks, ccmodel.ContentBlock{Type: "text", Text: rec.Summary.Title})
 		}
 		if len(blocks) == 0 {
 			continue
@@ -188,7 +197,7 @@ func readOpenCodeFile(ctx context.Context, path string) ([]Entry, error) {
 			return nil, err
 		}
 		t := unixMillis(rec.Time.Created)
-		usage := &Usage{
+		usage := &ccmodel.Usage{
 			InputTokens:              rec.Tokens.Input,
 			OutputTokens:             rec.Tokens.Output,
 			CacheReadInputTokens:     rec.Tokens.Cache.Read,
@@ -202,7 +211,7 @@ func readOpenCodeFile(ctx context.Context, path string) ([]Entry, error) {
 		if rec.Path.CWD != "" {
 			cwd = rec.Path.CWD
 		}
-		entries = append(entries, Entry{
+		entries = append(entries, ccmodel.Entry{
 			Type:       rec.Role,
 			SessionID:  sf.ID,
 			UUID:       rec.ID,
@@ -213,7 +222,7 @@ func readOpenCodeFile(ctx context.Context, path string) ([]Entry, error) {
 			Slug:       sf.Slug,
 			Source:     "opencode",
 			Usage:      usage,
-			Message: &Message{
+			Message: &ccmodel.Message{
 				ID:      rec.ID,
 				Role:    rec.Role,
 				Content: raw,
@@ -259,13 +268,13 @@ func readOpenCodeParts(ctx context.Context, root, messageID string) []openCodePa
 	return parts
 }
 
-func openCodeBlocks(parts []openCodePartFile) []ContentBlock {
-	var blocks []ContentBlock
+func openCodeBlocks(parts []openCodePartFile) []ccmodel.ContentBlock {
+	var blocks []ccmodel.ContentBlock
 	for _, part := range parts {
 		switch part.Type {
 		case "text":
 			if part.Text != "" {
-				blocks = append(blocks, ContentBlock{Type: "text", Text: part.Text})
+				blocks = append(blocks, ccmodel.ContentBlock{Type: "text", Text: part.Text})
 			}
 		case "tool":
 			input, _ := json.Marshal(part.State["input"])
@@ -273,7 +282,7 @@ func openCodeBlocks(parts []openCodePartFile) []ContentBlock {
 			if toolUseID == "" {
 				toolUseID = part.ID
 			}
-			blocks = append(blocks, ContentBlock{
+			blocks = append(blocks, ccmodel.ContentBlock{
 				Type:  "tool_use",
 				ID:    toolUseID,
 				Name:  openCodeToolName(part.Tool),
@@ -287,16 +296,16 @@ func openCodeBlocks(parts []openCodePartFile) []ContentBlock {
 	return blocks
 }
 
-func openCodeToolResult(part openCodePartFile, toolUseID string) (ContentBlock, bool) {
+func openCodeToolResult(part openCodePartFile, toolUseID string) (ccmodel.ContentBlock, bool) {
 	content, hasOutput := openCodeStateString(part.State, "output")
 	errText, hasError := openCodeStateString(part.State, "error")
 	if !hasOutput && !hasError {
-		return ContentBlock{}, false
+		return ccmodel.ContentBlock{}, false
 	}
 	if !hasOutput {
 		content = errText
 	}
-	return ContentBlock{
+	return ccmodel.ContentBlock{
 		Type:      "tool_result",
 		ToolUseID: toolUseID,
 		Content:   content,

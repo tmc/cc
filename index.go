@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/internal/opencoderead"
+	"github.com/tmc/cc/internal/piread"
 )
 
 // SessionIndex is the sessions-index.json file written by Claude Code.
@@ -135,7 +137,7 @@ func piIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error) {
 		if err != nil || info == nil || info.IsDir() {
 			return nil
 		}
-		if !isPiSessionPath(path) || info.ModTime().Before(cutoff) {
+		if !piread.IsSessionPath(path) || info.ModTime().Before(cutoff) {
 			return nil
 		}
 		if !piPathMatchesProject(context.Background(), path, strings.ToLower(project)) {
@@ -184,7 +186,7 @@ func openCodeIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error
 		if err != nil || info == nil || info.IsDir() {
 			return nil
 		}
-		if !isOpenCodeSessionPath(path) || info.ModTime().Before(cutoff) {
+		if !opencoderead.IsSessionPath(path) || info.ModTime().Before(cutoff) {
 			return nil
 		}
 		if !openCodePathMatchesProject(context.Background(), path, project) {
