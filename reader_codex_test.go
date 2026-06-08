@@ -16,6 +16,8 @@ func TestFindSessionFilesContextCanceled(t *testing.T) {
 	t.Setenv("CLAUDE_HOME", filepath.Join(root, "claude"))
 	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini"))
 	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
+	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi"))
 	if err := os.MkdirAll(filepath.Join(root, "claude", "projects"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -730,6 +732,8 @@ func TestFindSessionFilesIncludesCodexAndProjectFilterByCWD(t *testing.T) {
 	claudeHome := filepath.Join(tmp, ".claude")
 	geminiHome := filepath.Join(tmp, ".gemini")
 	codexHome := filepath.Join(tmp, ".codex")
+	opencodeHome := filepath.Join(tmp, ".opencode")
+	piHome := filepath.Join(tmp, ".pi", "agent")
 
 	for _, dir := range []string{
 		filepath.Join(claudeHome, "projects"),
@@ -744,6 +748,8 @@ func TestFindSessionFilesIncludesCodexAndProjectFilterByCWD(t *testing.T) {
 	t.Setenv("CLAUDE_HOME", claudeHome)
 	t.Setenv("GEMINI_HOME", geminiHome)
 	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("OPENCODE_HOME", opencodeHome)
+	t.Setenv("PI_CODING_AGENT_DIR", piHome)
 
 	codexFile := filepath.Join(codexHome, "sessions", "2026", "02", "25", "rollout-2026-02-25T12-00-00-abc.jsonl")
 	writeJSONL(t, codexFile,

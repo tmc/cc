@@ -59,7 +59,9 @@ func TestAllIndexEntriesFilters(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CLAUDE_HOME", root)
 	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini-empty"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex-empty"))
 	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode-empty"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi-empty"))
 
 	now := time.Now()
 	idx := SessionIndex{
@@ -111,7 +113,9 @@ func TestAllIndexEntriesIncludesOpenCode(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CLAUDE_HOME", filepath.Join(root, "claude-empty"))
 	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini-empty"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex-empty"))
 	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi-empty"))
 
 	sessionPath := filepath.Join(root, "opencode", "storage", "session", "proj", "ses_index_open.json")
 	writeIndexFile(t, sessionPath, `{"id":"ses_index_open","directory":"/work/open","time":{"created":4102444800000}}`)
