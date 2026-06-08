@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -142,6 +143,31 @@ func TestReadFilePiBareStringContent(t *testing.T) {
 	}
 }
 
+func TestReadFilePiImageBlock(t *testing.T) {
+	// An assistant message may carry an image block (base64 data + mime type),
+	// which maps to a canonical image ContentBlock alongside any text.
+	root := t.TempDir()
+	sessionPath := filepath.Join(root, ".pi", "agent", "sessions", "proj", "s.jsonl")
+	writeTestFile(t, sessionPath, `{"type":"session","id":"s","timestamp":"2026-04-19T00:00:00.000Z","cwd":"/w"}
+{"type":"message","id":"a","parentId":null,"timestamp":"2026-04-19T00:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"here is a chart"},{"type":"image","data":"aGVsbG8=","mimeType":"image/png"}],"model":"m","timestamp":1}}
+`)
+	entries, err := ReadFile(context.Background(), sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := entries[len(entries)-1].Message.ContentBlocks()
+	if len(blocks) != 2 {
+		t.Fatalf("got %d blocks, want text+image: %#v", len(blocks), blocks)
+	}
+	if blocks[0].Type != "text" || blocks[0].Text != "here is a chart" {
+		t.Fatalf("blocks[0] = %#v, want text \"here is a chart\"", blocks[0])
+	}
+	img := blocks[1]
+	if img.Type != "image" || img.Data != "aGVsbG8=" || img.MIMEType != "image/png" {
+		t.Fatalf("image block = %#v", img)
+	}
+}
+
 func TestReadFilePiDropsEmptyToolResult(t *testing.T) {
 	root := t.TempDir()
 	sessionPath := filepath.Join(root, ".pi", "agent", "sessions", "proj", "s.jsonl")
@@ -162,6 +188,73 @@ func TestReadFilePiDropsEmptyToolResult(t *testing.T) {
 	results := entries[1].Message.ToolResults()
 	if len(results) != 1 || !results[0].IsError || results[0].ToolUseID != "c2" {
 		t.Fatalf("kept result = %#v, want erroring c2", results)
+	}
+}
+
+func TestReadFilePiErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"empty", "", "pi session empty"},
+		{"missing header", `{"type":"message","id":"a"}` + "\n", "pi session missing header"},
+		{"not session type", `{"type":"model_change"}` + "\n", "pi session missing header"},
+		{"missing id", `{"type":"session","timestamp":"2026-04-19T00:00:00.000Z"}` + "\n", "pi session missing id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "s.jsonl")
+			writeTestFile(t, path, tt.content)
+			_, err := readPiFile(context.Background(), path)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("readPiFile err = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestPiToolName(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"bash", "Bash"},
+		{"edit", "Edit"},
+		{"write", "Write"},
+		{"read", "Read"},
+		{"grep", "Grep"},
+		{"glob", "Glob"},
+		{"find", "Glob"},
+		{"ls", "LS"},
+		{"GREP", "Grep"},     // case-insensitive.
+		{"mytool", "mytool"}, // custom names pass through unchanged.
+	}
+	for _, tt := range tests {
+		if got := piToolName(tt.in); got != tt.want {
+			t.Errorf("piToolName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestReadFilePiBareStringThinking(t *testing.T) {
+	// Two paths that the block-array tests miss: an assistant message whose
+	// content is a bare string (not a block array), and a toolResult whose
+	// content is a block array carrying a thinking block (exercising
+	// piContentText's array+thinking branch rather than piBlocks).
+	root := t.TempDir()
+	sessionPath := filepath.Join(root, ".pi", "agent", "sessions", "proj", "s.jsonl")
+	writeTestFile(t, sessionPath, `{"type":"session","id":"s","timestamp":"2026-04-19T00:00:00.000Z","cwd":"/w"}
+{"type":"message","id":"a","parentId":null,"timestamp":"2026-04-19T00:00:01.000Z","message":{"role":"assistant","content":"bare assistant reply","model":"m","timestamp":1}}
+{"type":"message","id":"b","parentId":"a","timestamp":"2026-04-19T00:00:02.000Z","message":{"role":"toolResult","toolCallId":"c1","content":[{"type":"thinking","thinking":"pondering"},{"type":"text","text":"the answer"}],"timestamp":2}}
+`)
+	entries, err := ReadFile(context.Background(), sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := entries[1].Message.TextContent(); got != "bare assistant reply" {
+		t.Errorf("assistant bare-string text = %q, want %q", got, "bare assistant reply")
+	}
+	results := entries[2].Message.ToolResults()
+	if len(results) != 1 || results[0].Content != "pondering\nthe answer" {
+		t.Fatalf("tool result content = %#v, want thinking+text joined", results)
 	}
 }
 

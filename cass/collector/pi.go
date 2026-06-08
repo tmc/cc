@@ -128,18 +128,7 @@ func (c *Pi) scanDir(ctx context.Context, root string, config cass.ScanConfig, o
 }
 
 func (c *Pi) parseSession(ctx context.Context, config cass.ScanConfig, path string) (cass.Session, error) {
-	// Read pi files directly rather than via cc.ReadFile's path-based dispatch:
-	// the collector already knows these are pi sessions. The injected Parse hook
-	// (a cache-backed reader) still wins when set.
-	var (
-		entries []cc.Entry
-		err     error
-	)
-	if config.Parse != nil {
-		entries, err = config.Parse(ctx, path)
-	} else {
-		entries, err = cc.ReadPiFile(ctx, path)
-	}
+	entries, err := readSessionFile(ctx, config, path)
 	if err != nil {
 		return cass.Session{}, err
 	}

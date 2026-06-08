@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -31,9 +32,12 @@ type piSessionHeader struct {
 }
 
 type piEntry struct {
-	Type      string     `json:"type"`
-	ID        string     `json:"id"`
-	ParentID  string     `json:"parentId"`
+	Type     string `json:"type"`
+	ID       string `json:"id"`
+	ParentID string `json:"parentId"`
+	// Timestamp is the envelope RFC3339 time. It is authoritative: pi also
+	// records an inner message.timestamp (epoch millis) that can diverge from
+	// the envelope by several seconds, so piMessage deliberately omits it.
 	Timestamp string     `json:"timestamp"`
 	Message   *piMessage `json:"message"`
 }
@@ -63,13 +67,8 @@ type piBlock struct {
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
 	Data      string          `json:"data"`
-	MimeType  string          `json:"mimeType"`
+	MIMEType  string          `json:"mimeType"`
 }
-
-// IsPiSessionPath reports whether path looks like a pi (pi-coding-agent)
-// session file. It is exported so commands can detect pi files using the same
-// rule as [ReadFile].
-func IsPiSessionPath(path string) bool { return isPiSessionPath(path) }
 
 // isPiSessionPath reports whether path is a pi session file. The fast path
 // matches pi's default ~/.pi/agent/sessions/<project>/<file>.jsonl layout
@@ -125,13 +124,6 @@ func piHeaderSniff(path string) bool {
 	return false
 }
 
-// ReadPiFile reads a pi (pi-coding-agent) JSONL session file and returns its
-// normalized entries. It is exported for callers that already know a file is a
-// pi session and want to bypass the path-based detection in [ReadFile].
-func ReadPiFile(ctx context.Context, path string) ([]Entry, error) {
-	return readPiFile(ctx, path)
-}
-
 func readPiFile(ctx context.Context, path string) ([]Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -161,7 +153,7 @@ func readPiFile(ctx context.Context, path string) ([]Entry, error) {
 
 	version := ""
 	if header.Version != 0 {
-		version = fmt.Sprintf("%d", header.Version)
+		version = strconv.Itoa(header.Version)
 	}
 	entries := []Entry{{
 		Type:      "session_meta",
@@ -293,9 +285,9 @@ func piBlocks(msg *piMessage) []ContentBlock {
 			})
 		case "image":
 			blocks = append(blocks, ContentBlock{
-				Type:      "image",
-				Data:      b.Data,
-				MediaType: b.MimeType,
+				Type:     "image",
+				Data:     b.Data,
+				MIMEType: b.MIMEType,
 			})
 		}
 	}

@@ -493,7 +493,8 @@ func isOpenCodeReplayFile(file string) bool {
 }
 
 func isPiReplayFile(file string) bool {
-	return cc.IsPiSessionPath(file)
+	p := filepath.ToSlash(file)
+	return strings.Contains(p, "/agent/sessions/") && strings.HasSuffix(file, ".jsonl")
 }
 
 // loadNormalizedMessages reads a session through cc.ReadFile (which normalizes

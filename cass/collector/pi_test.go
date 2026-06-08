@@ -35,7 +35,9 @@ func TestPiNameAndDetect(t *testing.T) {
 }
 
 func TestPiScan(t *testing.T) {
-	root := t.TempDir()
+	// Root mirrors pi's real layout (<PiHome>/sessions) so the walked files sit
+	// under a sessions/ dir, which is how cc.ReadFile detects them as pi.
+	root := filepath.Join(t.TempDir(), "sessions")
 	sessionPath := filepath.Join(root, "--work-repo--", "2026-04-19T18-49-16-013Z_sid.jsonl")
 	mkdirAll(t, filepath.Dir(sessionPath))
 	writeFile(t, sessionPath, `{"type":"session","version":3,"id":"sid-pi","timestamp":"2026-04-19T18:49:16.013Z","cwd":"/work/repo"}
@@ -92,7 +94,7 @@ func TestPiScan(t *testing.T) {
 }
 
 func TestPiScanSinceFilter(t *testing.T) {
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "sessions")
 	path := filepath.Join(root, "proj", "old.jsonl")
 	mkdirAll(t, filepath.Dir(path))
 	writeFile(t, path, `{"type":"session","id":"old","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/work"}
