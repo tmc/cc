@@ -1,10 +1,12 @@
-// Package cc reads Claude Code and Codex CLI session files.
+// Package cc reads AI coding-agent session files: Claude Code, Codex, opencode,
+// and pi.
 //
 // A session file is newline-delimited JSON (NDJSON): each line is one [Entry].
 // [Reader] streams entries from an io.Reader, decoding both the Claude JSONL
-// format and the Codex envelope format transparently. [ReadFile] and [ReadAll]
-// are convenience wrappers, and [Summarize] folds a slice of entries into a
-// [SessionSummary].
+// format and the Codex envelope format transparently. [ReadFile] additionally
+// detects opencode and pi sessions by path and normalizes them into the same
+// [Entry] shape. [ReadFile] and [ReadAll] are convenience wrappers, and
+// [Summarize] folds a slice of entries into a [SessionSummary].
 //
 //	entries, err := cc.ReadFile(ctx, path)
 //	if err != nil {
