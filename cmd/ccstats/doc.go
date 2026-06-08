@@ -1,8 +1,8 @@
 // Command ccstats reports token usage, tool counts, and timing for sessions.
 //
-// It reads one or more Claude Code session JSONL files and prints
-// aggregate statistics: message and tool-use counts, start/end times
-// and duration, and input/output/cache token totals.
+// It reads one or more coding-agent session files (Claude Code, Codex,
+// opencode, pi) and prints aggregate statistics: message and tool-use counts,
+// start/end times and duration, and input/output/cache token totals.
 //
 // ccstats characteristics reports cross-session usage characteristics over
 // the same file set. It supports -unit, -verbose, -parallel-window,

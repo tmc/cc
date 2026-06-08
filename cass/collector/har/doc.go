@@ -24,7 +24,7 @@
 //	if err != nil {
 //		log.Fatal(err)
 //	}
-//	fmt.Println(req.SessionID, req.Model, req.Usage.OutputTokens)
+//	fmt.Println(req.SessionID, req.Model, req.OutputTokens)
 //
 //	reqs, err := har.ScanDirContext(ctx, "/path/to/har/dir")
 //	if err != nil {

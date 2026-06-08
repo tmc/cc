@@ -1,7 +1,7 @@
 // Command ccfmt formats coding-agent session transcripts.
 //
-// ccfmt reads Claude Code or Codex JSONL session files (or stdin) and
-// renders them in cleaner formats for humans. The markdown format is
+// ccfmt reads Claude Code, Codex, opencode, or pi session files (or stdin)
+// and renders them in cleaner formats for humans. The markdown format is
 // intended for publishing transcripts on GitHub or GitHub Pages.
 //
 // # Usage

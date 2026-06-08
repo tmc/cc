@@ -27,7 +27,7 @@
 //	defer svc.Close()
 //
 //	// Index sessions from all detected agents.
-//	n, err := svc.Index(ctx)
+//	n, err := svc.Index(ctx, false)
 //
 //	// Search across all indexed sessions.
 //	results, err := svc.Search(ctx, cass.SearchRequest{Query: "auth bug"})

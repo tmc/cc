@@ -25,7 +25,7 @@
 //
 // Concerns beyond session reading live in sibling packages:
 //
-//   - [github.com/tmc/cc/ccpaths]: Claude/Gemini/Codex home dirs and path encoding
+//   - [github.com/tmc/cc/ccpaths]: agent home dirs and path encoding
 //   - [github.com/tmc/cc/ccgit]: git worktree context resolution
 //   - [github.com/tmc/cc/ccfs]: atomic-write and flock helpers
 //   - [github.com/tmc/cc/ccteamcfg]: team configuration storage

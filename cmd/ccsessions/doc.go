@@ -1,7 +1,7 @@
 // Command ccsessions lists recent coding-agent sessions.
 //
-// ccsessions reads session files from the Claude Code, Gemini CLI,
-// Codex CLI, and opencode session directories and prints one row per session with
+// ccsessions reads session files from the Claude Code, Gemini CLI, Codex CLI,
+// opencode, and pi session directories and prints one row per session with
 // timestamp, ID, project, message counts, and (with -v) the first user
 // prompt.
 //

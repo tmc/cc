@@ -1,8 +1,8 @@
-// Command cchistory searches Claude Code session NDJSON files.
+// Command cchistory searches coding-agent session files.
 //
-// cchistory walks one or more session directories, scans `.ndjson`
-// session files modified within a recent window, and prints messages
-// matching an optional regex.
+// cchistory walks one or more session directories, scans recent session
+// files (.ndjson, .jsonl, and opencode ses_*.json) modified within a recent
+// window, and prints messages matching an optional regex.
 //
 // # Usage
 //
@@ -43,8 +43,9 @@
 //	~/.claude/sessions/<git-hash>
 //	~/.claude/sessions
 //
-// -global adds `.`, `.sessions`, `~/.claude/sessions`, and
-// `~/.config/claude/sessions`. -local searches only `.`.
+// -global adds `.`, `.sessions`, `~/.claude/sessions`,
+// `~/.config/claude/sessions`, and the opencode storage/session directory.
+// -local searches only `.`.
 //
 // # Examples
 //

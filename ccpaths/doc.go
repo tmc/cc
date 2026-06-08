@@ -1,11 +1,13 @@
-// Package ccpaths resolves the Claude, Gemini, and Codex home directories and
-// encodes or decodes Claude Code's project-directory path format.
+// Package ccpaths resolves the Claude, Gemini, Codex, opencode, and pi home
+// directories and encodes or decodes Claude Code's project-directory path
+// format.
 //
 // # Home directories
 //
-// [ClaudeHome], [GeminiHome], and [CodexHome] honor the CLAUDE_HOME,
-// GEMINI_HOME, and CODEX_HOME environment variables, falling back to ~/.claude,
-// ~/.gemini, and ~/.codex respectively.
+// [ClaudeHome], [GeminiHome], [CodexHome], [OpenCodeHome], and [PiHome] honor
+// the CLAUDE_HOME, GEMINI_HOME, CODEX_HOME, OPENCODE_HOME, and
+// PI_CODING_AGENT_DIR environment variables, falling back to ~/.claude,
+// ~/.gemini, ~/.codex, ~/.local/share/opencode, and ~/.pi/agent respectively.
 //
 // # Path encoding
 //
