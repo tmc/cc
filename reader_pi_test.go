@@ -226,6 +226,7 @@ func TestFindSessionFilesPi(t *testing.T) {
 	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
 	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode"))
 	t.Setenv("PI_CODING_AGENT_DIR", piHome)
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "antigravity-empty"))
 	if err := os.MkdirAll(filepath.Join(root, "claude", "projects"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -254,6 +255,7 @@ func TestPiIndexEntries(t *testing.T) {
 	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini"))
 	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode"))
 	t.Setenv("PI_CODING_AGENT_DIR", piHome)
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "antigravity-empty"))
 	if err := os.MkdirAll(filepath.Join(root, "claude", "projects"), 0o755); err != nil {
 		t.Fatal(err)
 	}

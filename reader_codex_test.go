@@ -18,6 +18,7 @@ func TestFindSessionFilesContextCanceled(t *testing.T) {
 	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
 	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode"))
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "antigravity-empty"))
 	if err := os.MkdirAll(filepath.Join(root, "claude", "projects"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -750,6 +751,7 @@ func TestFindSessionFilesIncludesCodexAndProjectFilterByCWD(t *testing.T) {
 	t.Setenv("CODEX_HOME", codexHome)
 	t.Setenv("OPENCODE_HOME", opencodeHome)
 	t.Setenv("PI_CODING_AGENT_DIR", piHome)
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(tmp, "antigravity-empty"))
 
 	codexFile := filepath.Join(codexHome, "sessions", "2026", "02", "25", "rollout-2026-02-25T12-00-00-abc.jsonl")
 	writeJSONL(t, codexFile,

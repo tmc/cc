@@ -14,6 +14,7 @@ import (
 
 	"github.com/tmc/cc/ccgit"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/internal/antigravityread"
 	"github.com/tmc/cc/internal/codexread"
 	"github.com/tmc/cc/internal/opencoderead"
 	"github.com/tmc/cc/internal/piread"
@@ -145,6 +146,9 @@ func ReadFile(ctx context.Context, path string) ([]Entry, error) {
 	}
 	if piread.IsSessionPath(path) {
 		return piread.ReadFile(ctx, path)
+	}
+	if antigravityread.IsSessionPath(path) {
+		return antigravityread.ReadFile(ctx, path)
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -530,6 +534,7 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	xh, _ := ccpaths.CodexHome()
 	oh, _ := ccpaths.OpenCodeHome()
 	ph, _ := ccpaths.PiHome()
+	ah, _ := ccpaths.AntigravityHome()
 
 	cutoff := time.Now().Add(-since)
 	var files []string
@@ -552,6 +557,15 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	if ph != "" {
 		dirs = append(dirs, rootDir{path: filepath.Join(ph, "sessions"), kind: "pi"})
 	}
+	if ah != "" {
+		dirs = append(dirs, rootDir{path: filepath.Join(ah, "brain"), kind: "antigravity"})
+	}
+	if gh != "" {
+		cliPath := filepath.Join(gh, "antigravity-cli", "brain")
+		if info, err := os.Stat(cliPath); err == nil && info.IsDir() {
+			dirs = append(dirs, rootDir{path: cliPath, kind: "antigravity"})
+		}
+	}
 
 	for _, dir := range dirs {
 		if err := ctx.Err(); err != nil {
@@ -566,6 +580,34 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 			}
 			if info.IsDir() && info.Name() == "subagents" {
 				return filepath.SkipDir
+			}
+			if dir.kind == "antigravity" {
+				if antigravityread.IsSessionPath(path) {
+					if info.ModTime().Before(cutoff) {
+						if info.IsDir() {
+							return filepath.SkipDir
+						}
+						return nil
+					}
+					if project != "" {
+						q := strings.ToLower(project)
+						targetDir := path
+						if !info.IsDir() {
+							targetDir = filepath.Dir(filepath.Dir(filepath.Dir(path)))
+						}
+						if !antigravityPathMatchesProject(ctx, targetDir, q) {
+							if info.IsDir() {
+								return filepath.SkipDir
+							}
+							return nil
+						}
+					}
+					files = append(files, path)
+					if info.IsDir() {
+						return filepath.SkipDir
+					}
+				}
+				return nil
 			}
 			if dir.kind == "opencode" {
 				if !opencoderead.IsSessionPath(path) {
@@ -641,5 +683,9 @@ func codexPathMatchesProject(ctx context.Context, path, query string) bool {
 }
 
 func piPathMatchesProject(ctx context.Context, path, query string) bool {
+	return cwdPathMatchesProject(ctx, path, query, nil)
+}
+
+func antigravityPathMatchesProject(ctx context.Context, path, query string) bool {
 	return cwdPathMatchesProject(ctx, path, query, nil)
 }

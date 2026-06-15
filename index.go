@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/internal/antigravityread"
 	"github.com/tmc/cc/internal/opencoderead"
 	"github.com/tmc/cc/internal/piread"
 )
@@ -123,6 +124,12 @@ func AllIndexEntries(since time.Duration, project string) ([]IndexEntry, error) 
 		return nil, err
 	}
 	all = append(all, piEntries...)
+
+	antigravityEntries, err := antigravityIndexEntries(cutoff, project)
+	if err != nil {
+		return nil, err
+	}
+	all = append(all, antigravityEntries...)
 	return all, nil
 }
 
@@ -220,6 +227,71 @@ func openCodeIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error
 	})
 	if os.IsNotExist(err) {
 		return entries, nil
+	}
+	return entries, nil
+}
+
+func antigravityIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error) {
+	home, err := ccpaths.AntigravityHome()
+	if err != nil {
+		return nil, err
+	}
+	root := filepath.Join(home, "brain")
+
+	var roots []string
+	if info, err := os.Stat(root); err == nil && info.IsDir() {
+		roots = append(roots, root)
+	}
+	if gHome, err := ccpaths.GeminiHome(); err == nil && gHome != "" {
+		cliPath := filepath.Join(gHome, "antigravity-cli", "brain")
+		if info, err := os.Stat(cliPath); err == nil && info.IsDir() {
+			roots = append(roots, cliPath)
+		}
+	}
+
+	var entries []IndexEntry
+	for _, r := range roots {
+		err = filepath.Walk(r, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info == nil {
+				return nil
+			}
+			if info.IsDir() {
+				if antigravityread.IsSessionPath(path) {
+					if info.ModTime().Before(cutoff) {
+						return filepath.SkipDir
+					}
+					if !antigravityPathMatchesProject(context.Background(), path, strings.ToLower(project)) {
+						return filepath.SkipDir
+					}
+					parsed, err := ReadFile(context.Background(), path)
+					if err != nil {
+						return filepath.SkipDir
+					}
+					s := Summarize(path, parsed)
+					if s.TotalLines == 0 || s.LastTime.Before(cutoff) {
+						return filepath.SkipDir
+					}
+					modified := s.LastTime.Format(time.RFC3339Nano)
+					created := modified
+					if !s.FirstTime.IsZero() {
+						created = s.FirstTime.Format(time.RFC3339Nano)
+					}
+					entries = append(entries, IndexEntry{
+						SessionID:    s.SessionID,
+						FullPath:     path,
+						ProjectPath:  s.CWD,
+						GitBranch:    s.GitBranch,
+						FirstPrompt:  s.FirstPrompt,
+						Summary:      s.CustomTitle,
+						MessageCount: s.UserMessages + s.AsstMessages,
+						Created:      created,
+						Modified:     modified,
+					})
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		})
 	}
 	return entries, nil
 }

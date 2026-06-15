@@ -129,6 +129,7 @@ func TestFindSessionFilesOpenCode(t *testing.T) {
 	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
 	t.Setenv("OPENCODE_HOME", opencodeHome)
 	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "antigravity-empty"))
 	if err := os.MkdirAll(filepath.Join(root, "claude", "projects"), 0o755); err != nil {
 		t.Fatal(err)
 	}
