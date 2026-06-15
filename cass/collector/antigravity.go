@@ -2,14 +2,13 @@ package collector
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
+	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 )
 
@@ -140,260 +139,134 @@ func (c *Antigravity) emitSession(ctx context.Context, dir string, config cass.S
 	return nil
 }
 
-type antigravityArtifact struct {
-	name string
-	path string
-}
-
-type antigravityArtifactMeta struct {
-	ArtifactType string `json:"artifactType"`
-	Summary      string `json:"summary"`
-	UpdatedAt    string `json:"updatedAt"`
-	Version      string `json:"version"`
-}
-
-type antigravityWorkspaceFile struct {
-	Folders []struct {
-		Path string `json:"path"`
-	} `json:"folders"`
-}
-
 func (c *Antigravity) parseBrainSession(dir string) (cass.Session, error) {
-	files, err := antigravityArtifactFiles(dir)
+	entries, err := cc.ReadFile(context.Background(), dir)
 	if err != nil {
 		return cass.Session{}, err
 	}
-	if len(files) == 0 {
-		return cass.Session{}, fmt.Errorf("empty antigravity brain session: %s", dir)
+	if len(entries) == 0 {
+		return cass.Session{}, fmt.Errorf("empty session: %s", dir)
 	}
 
-	id := filepath.Base(dir)
-	session := cass.Session{
-		ID:         "ag-" + id,
-		Agent:      c.Name(),
-		SourcePath: dir,
-		Workspace:  antigravityWorkspace(dir),
-		Metadata: map[string]any{
-			"brain_id": id,
-		},
-	}
+	sum := cc.Summarize(dir, entries)
 
-	var artifacts []map[string]string
-	for _, file := range files {
-		data, err := os.ReadFile(file.path)
-		if err != nil {
+	var messages []cass.Message
+	var turns int
+	for _, e := range entries {
+		if e.Message == nil {
 			continue
 		}
-		text := strings.TrimSpace(string(data))
+		text := strings.TrimSpace(e.Message.TextContent())
 		if text == "" {
 			continue
 		}
-
-		meta := readAntigravityArtifactMeta(file.path + ".metadata.json")
-		t := antigravityArtifactTime(meta, file.path)
-		if !t.IsZero() {
-			if session.StartedAt.IsZero() || t.Before(session.StartedAt) {
-				session.StartedAt = t
-			}
-			if session.EndedAt.IsZero() || t.After(session.EndedAt) {
-				session.EndedAt = t
-			}
+		// Calculate turns like claudecode/pi collectors
+		if e.Message.Role == "user" && !e.Message.IsToolResultOnly() {
+			turns++
 		}
-
-		role := "assistant"
-		if file.name == "task.md" || file.name == "agent_prompt.md" {
-			role = "user"
-			session.Stats.Turns++
-		}
-		session.Messages = append(session.Messages, cass.Message{
-			ID:        id + ":" + file.name,
-			Role:      role,
+		messages = append(messages, cass.Message{
+			ID:        e.UUID,
+			Role:      e.Message.Role,
 			Content:   text,
-			CreatedAt: t,
+			CreatedAt: e.Timestamp,
 		})
+	}
 
-		artifact := map[string]string{"file": file.name}
-		if meta.ArtifactType != "" {
-			artifact["type"] = meta.ArtifactType
+	stats := ExtractStats(entries)
+	// Override turns with our computed count to keep consistency
+	stats.Turns = turns
+
+	links := ExtractLinks(entries)
+	skills := ExtractSkills(entries, c.Name())
+
+	meta := map[string]any{
+		"brain_id": filepath.Base(dir),
+	}
+	if sum.Version != "" {
+		meta["version"] = sum.Version
+	}
+	if sum.Model != "" {
+		meta["model"] = sum.Model
+	}
+	if len(links) > 0 {
+		meta["session_links"] = links
+	}
+
+	meta["artifact_count"] = len(messages)
+
+	// Preserve legacy artifacts list for compatibility with existing DB queries
+	var artifacts []map[string]string
+	for _, e := range entries {
+		if strings.Contains(e.UUID, ":") {
+			parts := strings.Split(e.UUID, ":")
+			fileName := parts[len(parts)-1]
+			artifacts = append(artifacts, map[string]string{
+				"file": fileName,
+			})
 		}
-		if meta.Version != "" {
-			artifact["version"] = meta.Version
+	}
+	meta["artifacts"] = artifacts
+
+	id := sum.SessionID
+	if id == "" {
+		id = "ag-" + filepath.Base(dir)
+	}
+
+	durationSecs := stats.DurationSecs
+	if durationSecs == 0 && !sum.FirstTime.IsZero() && !sum.LastTime.IsZero() {
+		durationSecs = int(sum.LastTime.Sub(sum.FirstTime).Seconds())
+	}
+	stats.DurationSecs = durationSecs
+
+	return cass.Session{
+		ID:         id,
+		Agent:      c.Name(),
+		Title:      antigravityTitle(entries, dir),
+		Workspace:  sum.CWD,
+		SourcePath: dir,
+		StartedAt:  sum.FirstTime,
+		EndedAt:    sum.LastTime,
+		Messages:   messages,
+		Skills:     skills,
+		Stats:      stats,
+		Metadata:   meta,
+	}, nil
+}
+
+func antigravityTitle(entries []cc.Entry, dir string) string {
+	for _, e := range entries {
+		if e.Message == nil || e.Message.Role != "user" {
+			continue
 		}
-		if meta.Summary != "" {
-			artifact["summary"] = meta.Summary
+		text := e.Message.TextContent()
+		for _, line := range strings.Split(text, "\n") {
+			line = strings.TrimSpace(line)
+			line = strings.TrimLeft(line, "#")
+			line = strings.TrimSpace(line)
+			line = strings.TrimPrefix(line, "- [ ]")
+			line = strings.TrimPrefix(line, "- [x]")
+			line = strings.TrimPrefix(line, "- [X]")
+			line = strings.TrimSpace(line)
+			if line != "" {
+				if len(line) > 80 {
+					return line[:80] + "..."
+				}
+				return line
+			}
 		}
-		artifacts = append(artifacts, artifact)
 	}
-	if len(session.Messages) == 0 {
-		return cass.Session{}, fmt.Errorf("empty antigravity messages: %s", dir)
-	}
-	if session.Title == "" {
-		session.Title = antigravityTitle(session.Messages, artifacts, id)
-	}
-	if !session.StartedAt.IsZero() && !session.EndedAt.IsZero() {
-		session.Stats.DurationSecs = int(session.EndedAt.Sub(session.StartedAt).Seconds())
-	}
-	session.Metadata["artifact_count"] = len(session.Messages)
-	session.Metadata["artifacts"] = artifacts
-	return session, nil
+	return filepath.Base(dir)
 }
 
 func isAntigravityBrainSessionDir(dir string) bool {
-	files, err := antigravityArtifactFiles(dir)
-	return err == nil && len(files) > 0
-}
-
-func antigravityArtifactFiles(dir string) ([]antigravityArtifact, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
+	if _, err := os.Stat(filepath.Join(dir, ".system_generated", "logs", "transcript.jsonl")); err == nil {
+		return true
 	}
-	var files []antigravityArtifact
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if strings.HasSuffix(name, ".metadata.json") || strings.Contains(name, ".resolved") {
-			continue
-		}
-		ext := strings.ToLower(filepath.Ext(name))
-		if ext != ".md" && ext != ".txt" {
-			continue
-		}
-		files = append(files, antigravityArtifact{
-			name: name,
-			path: filepath.Join(dir, name),
-		})
+	if _, err := os.Stat(filepath.Join(dir, "task.md")); err == nil {
+		return true
 	}
-	sort.Slice(files, func(i, j int) bool {
-		ri, rj := antigravityArtifactRank(files[i].name), antigravityArtifactRank(files[j].name)
-		if ri != rj {
-			return ri < rj
-		}
-		return files[i].name < files[j].name
-	})
-	return files, nil
-}
-
-func antigravityArtifactRank(name string) int {
-	switch name {
-	case "task.md":
-		return 0
-	case "agent_prompt.md":
-		return 1
-	case "implementation_plan.md":
-		return 2
-	case "walkthrough.md":
-		return 3
+	if _, err := os.Stat(filepath.Join(dir, "agent_prompt.md")); err == nil {
+		return true
 	}
-	if strings.HasSuffix(name, ".md") {
-		return 4
-	}
-	return 5
-}
-
-func readAntigravityArtifactMeta(path string) antigravityArtifactMeta {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return antigravityArtifactMeta{}
-	}
-	var meta antigravityArtifactMeta
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return antigravityArtifactMeta{}
-	}
-	return meta
-}
-
-func antigravityArtifactTime(meta antigravityArtifactMeta, path string) time.Time {
-	if meta.UpdatedAt != "" {
-		if t, err := time.Parse(time.RFC3339Nano, meta.UpdatedAt); err == nil {
-			return t
-		}
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return time.Time{}
-	}
-	return info.ModTime()
-}
-
-func antigravityTitle(messages []cass.Message, artifacts []map[string]string, id string) string {
-	for _, m := range messages {
-		if m.Role != "user" {
-			continue
-		}
-		if title := firstAntigravityTitleLine(m.Content); title != "" {
-			return truncateTitle(title)
-		}
-	}
-	for _, artifact := range artifacts {
-		if summary := strings.TrimSpace(artifact["summary"]); summary != "" {
-			return truncateTitle(summary)
-		}
-	}
-	return id
-}
-
-func firstAntigravityTitleLine(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		line = strings.TrimLeft(line, "#")
-		line = strings.TrimSpace(line)
-		line = strings.TrimPrefix(line, "- [ ]")
-		line = strings.TrimPrefix(line, "- [x]")
-		line = strings.TrimPrefix(line, "- [X]")
-		line = strings.TrimSpace(line)
-		if line != "" {
-			return line
-		}
-	}
-	return ""
-}
-
-func antigravityWorkspace(dir string) string {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".code-workspace") {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var ws antigravityWorkspaceFile
-		if err := json.Unmarshal(data, &ws); err != nil {
-			continue
-		}
-		for _, folder := range ws.Folders {
-			if folder.Path == "" {
-				continue
-			}
-			return cleanAntigravityWorkspacePath(dir, folder.Path)
-		}
-	}
-	return ""
-}
-
-func cleanAntigravityWorkspacePath(base, path string) string {
-	if path == "~" {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = home
-		}
-	} else if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
-		}
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(base, path)
-	}
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	return filepath.Clean(path)
+	return false
 }
