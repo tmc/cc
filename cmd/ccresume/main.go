@@ -513,6 +513,17 @@ func sessionRoots() ([]searchRoot, error) {
 			roots = append(roots, searchRoot{dir: d, kind: "pi"})
 		}
 	}
+	ah, _ := ccpaths.AntigravityHome()
+	if ah != "" {
+		if d := filepath.Join(ah, "brain"); dirExists(d) {
+			roots = append(roots, searchRoot{dir: d, kind: "antigravity"})
+		}
+	}
+	if gh != "" {
+		if d := filepath.Join(gh, "antigravity-cli", "brain"); dirExists(d) {
+			roots = append(roots, searchRoot{dir: d, kind: "antigravity"})
+		}
+	}
 	return roots, nil
 }
 
@@ -530,6 +541,7 @@ func recentContentMatches(query string, since time.Duration) ([]cc.IndexEntry, e
 		return nil, err
 	}
 	var matches []cc.IndexEntry
+	seen := map[string]bool{}
 	cwdQuery, hasCWDQuery := parseJSONCWDField(query)
 	for _, path := range paths {
 		info, err := os.Stat(path)
@@ -553,6 +565,10 @@ func recentContentMatches(query string, since time.Duration) ([]cc.IndexEntry, e
 			continue
 		}
 		if e, ok := indexEntryForPath(path, rootMatch, info); ok {
+			if seen[e.FullPath] {
+				continue
+			}
+			seen[e.FullPath] = true
 			if hasCWDQuery {
 				e.ProjectPath = cwdQuery
 			} else if filepath.IsAbs(query) {
@@ -654,6 +670,7 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 	}
 
 	var matches []cc.IndexEntry
+	seen := map[string]bool{}
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
 		path := scanner.Text()
@@ -676,6 +693,10 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 			continue
 		}
 		if e, ok := indexEntryForPath(path, rootMatch, info); ok {
+			if seen[e.FullPath] {
+				continue
+			}
+			seen[e.FullPath] = true
 			matches = append(matches, e)
 		}
 	}
@@ -685,6 +706,7 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.IndexEntry, bool) {
 	sessionID := sessionIDFromPath(path, root.kind)
 	projectPath := filepath.Dir(path)
+	modified := info.ModTime()
 	switch root.kind {
 	case "codex":
 		if strings.HasPrefix(sessionID, "rollout-") && len(sessionID) >= len("rollout-2006-01-02T15-04-05-")+1 {
@@ -719,6 +741,30 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 				projectPath = cwd
 			}
 		}
+	case "antigravity":
+		// Antigravity sessions are directories under brain/<conversation-uuid>.
+		// rg may match a transcript or artifact file nested inside; resolve to
+		// the brain session directory and use the reader to recover id and cwd.
+		convID := antigravityConversationIDFromPath(path)
+		if convID == "" {
+			return cc.IndexEntry{}, false
+		}
+		sessionDir := filepath.Join(root.dir, convID)
+		path = sessionDir
+		sessionID = "ag-" + convID
+		projectPath = sessionDir
+		if entries, err := cc.ReadFile(context.Background(), sessionDir); err == nil {
+			s := cc.Summarize(sessionDir, entries)
+			if s.SessionID != "" {
+				sessionID = s.SessionID
+			}
+			if s.CWD != "" {
+				projectPath = s.CWD
+			}
+			if !s.LastTime.IsZero() {
+				modified = s.LastTime
+			}
+		}
 	default:
 		rel, err := filepath.Rel(root.dir, path)
 		if err != nil {
@@ -737,11 +783,15 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 		SessionID:   sessionID,
 		FullPath:    path,
 		ProjectPath: projectPath,
-		Modified:    info.ModTime().Format(time.RFC3339Nano),
+		Modified:    modified.Format(time.RFC3339Nano),
 	}, true
 }
 
 func isResumeSessionPath(path, kind string) bool {
+	if kind == "antigravity" {
+		// Any file matched under brain/ resolves to its conversation directory.
+		return antigravityConversationIDFromPath(path) != ""
+	}
 	if strings.HasSuffix(path, ".jsonl") {
 		return true
 	}
@@ -770,6 +820,40 @@ func isPiResumePath(path string) bool {
 	sep := string(filepath.Separator)
 	return strings.Contains(path, sep+".pi"+sep) ||
 		strings.Contains(path, sep+"agent"+sep+"sessions"+sep)
+}
+
+// isAntigravityResumePath reports whether a session path is an Antigravity (agy)
+// session, by the "brain" directory that holds per-conversation session dirs.
+func isAntigravityResumePath(path string) bool {
+	sep := string(filepath.Separator)
+	return strings.Contains(path, sep+"brain"+sep) ||
+		strings.HasSuffix(path, sep+"brain")
+}
+
+// antigravityConversationID returns the bare conversation UUID used by
+// "agy --conversation". It prefers the indexed SessionID (stripping the "ag-"
+// prefix added by the reader) and falls back to the brain session directory
+// name derived from the path.
+func antigravityConversationID(m cc.IndexEntry) string {
+	if id := strings.TrimPrefix(m.SessionID, "ag-"); id != "" {
+		return id
+	}
+	return antigravityConversationIDFromPath(m.FullPath)
+}
+
+// antigravityConversationIDFromPath extracts the brain session directory name
+// (the conversation UUID) from an Antigravity session path. The path may be the
+// session directory itself or a transcript file nested under it.
+func antigravityConversationIDFromPath(path string) string {
+	sep := string(filepath.Separator)
+	_, rest, ok := strings.Cut(path, sep+"brain"+sep)
+	if !ok {
+		return ""
+	}
+	if id, _, ok := strings.Cut(rest, sep); ok {
+		return id
+	}
+	return rest
 }
 
 // piSessionHeader reads the first line of a pi session file and returns its
@@ -848,6 +932,14 @@ func resumeInvocation(m cc.IndexEntry) (string, []string) {
 			return "opencode", []string{"--session", m.SessionID}
 		}
 		return "opencode", nil
+	case isAntigravityResumePath(m.FullPath):
+		// Antigravity resumes a conversation by its bare UUID, which is the
+		// brain session directory name. This must be checked before .gemini
+		// since the default Antigravity home lives under ~/.gemini.
+		if id := antigravityConversationID(m); id != "" {
+			return "agy", []string{"--conversation", id}
+		}
+		return "agy", nil
 	case strings.Contains(m.FullPath, string(filepath.Separator)+".gemini"+string(filepath.Separator)):
 		if m.SessionID != "" {
 			return "gemini", []string{"-r", m.SessionID}

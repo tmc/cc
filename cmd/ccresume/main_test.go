@@ -54,6 +54,23 @@ func TestResumeInvocation(t *testing.T) {
 			wantArgs: []string{"--session", filepath.Join("/tmp", ".pi", "agent", "sessions", "--p--", "ts_id.jsonl")},
 		},
 		{
+			name: "antigravity",
+			entry: cc.IndexEntry{
+				FullPath:  filepath.Join("/tmp", ".gemini", "antigravity", "brain", "conv-uuid"),
+				SessionID: "ag-conv-uuid",
+			},
+			wantBin:  "agy",
+			wantArgs: []string{"--conversation", "conv-uuid"},
+		},
+		{
+			name: "antigravity from path",
+			entry: cc.IndexEntry{
+				FullPath: filepath.Join("/tmp", ".gemini", "antigravity-cli", "brain", "conv-uuid", ".system_generated", "logs", "transcript.jsonl"),
+			},
+			wantBin:  "agy",
+			wantArgs: []string{"--conversation", "conv-uuid"},
+		},
+		{
 			name: "claude",
 			entry: cc.IndexEntry{
 				FullPath:  filepath.Join("/tmp", ".claude", "projects", "p", "s.jsonl"),
@@ -198,6 +215,42 @@ func TestPreferredProjectPathUsesHomeGoSrcSymlink(t *testing.T) {
 	want := filepath.Join(home, "go", "src", "github.com", "tmc", "appledocs")
 	if got != want {
 		t.Fatalf("preferredProjectPath = %q, want %q", got, want)
+	}
+}
+
+func TestAntigravityConversationIDFromPath(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "session directory",
+			path: filepath.Join("/home", ".gemini", "antigravity", "brain", "abc-123"),
+			want: "abc-123",
+		},
+		{
+			name: "nested transcript file",
+			path: filepath.Join("/home", ".gemini", "antigravity", "brain", "abc-123", ".system_generated", "logs", "transcript.jsonl"),
+			want: "abc-123",
+		},
+		{
+			name: "cli brain root",
+			path: filepath.Join("/home", ".gemini", "antigravity-cli", "brain", "def-456", "task.md"),
+			want: "def-456",
+		},
+		{
+			name: "no brain segment",
+			path: filepath.Join("/home", ".claude", "projects", "p", "s.jsonl"),
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := antigravityConversationIDFromPath(tt.path); got != tt.want {
+				t.Fatalf("antigravityConversationIDFromPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
 	}
 }
 

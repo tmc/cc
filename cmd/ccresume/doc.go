@@ -3,8 +3,8 @@
 // ccresume searches recent sessions for a query (positional argument, or the
 // clipboard if -clip is set), groups results by git worktree, and prints the
 // resume command for the best match (e.g. claude -r <id>, or the agent-specific
-// form for codex, gemini, opencode, and pi sessions). With -l the resume is
-// launched directly. Sessions for the current worktree are prioritized.
+// form for codex, gemini, opencode, pi, and antigravity sessions). With -l the
+// resume is launched directly. Sessions for the current worktree are prioritized.
 //
 // # Usage
 //
