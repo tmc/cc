@@ -167,3 +167,14 @@ func TestPiHome(t *testing.T) {
 		})
 	}
 }
+
+func TestAntigravityHomeOverride(t *testing.T) {
+	t.Setenv("ANTIGRAVITY_HOME", "/custom/antigravity")
+	got, err := AntigravityHome()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/custom/antigravity" {
+		t.Errorf("AntigravityHome with ANTIGRAVITY_HOME = %q, want /custom/antigravity", got)
+	}
+}

@@ -76,6 +76,19 @@ func GeminiHome() (string, error) {
 	return filepath.Join(home, ".gemini"), nil
 }
 
+// AntigravityHome returns the base directory for Antigravity data.
+// It uses ANTIGRAVITY_HOME if set, otherwise defaults to ~/.gemini/antigravity.
+func AntigravityHome() (string, error) {
+	if h := os.Getenv("ANTIGRAVITY_HOME"); h != "" {
+		return h, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".gemini", "antigravity"), nil
+}
+
 // CodexHome returns the base directory for Codex data.
 // It uses CODEX_HOME if set, otherwise defaults to ~/.codex.
 func CodexHome() (string, error) {
