@@ -202,6 +202,62 @@ func TestEncodeShareGPT(t *testing.T) {
 	}
 }
 
+// TestEncodeMetaHarness verifies the Meta.Harness field is carried through into
+// every encoded record's meta object when set. It is a fixed enum token, not a
+// path or secret, so it is emitted verbatim by all three encoders.
+func TestEncodeMetaHarness(t *testing.T) {
+	for _, f := range []Format{FormatAnthropic, FormatOpenAI, FormatShareGPT} {
+		t.Run(string(f), func(t *testing.T) {
+			enc, err := NewEncoder(f)
+			if err != nil {
+				t.Fatalf("NewEncoder(%q): %v", f, err)
+			}
+			s := sampleForEncoding()
+			s.Meta.Harness = "codex"
+			var buf bytes.Buffer
+			if err := enc.Encode(&buf, s); err != nil {
+				t.Fatalf("Encode: %v", err)
+			}
+			var m map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+				t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
+			}
+			meta, ok := m["meta"].(map[string]any)
+			if !ok {
+				t.Fatalf("meta missing or wrong type: %T", m["meta"])
+			}
+			if got, ok := meta["harness"]; !ok {
+				t.Errorf("meta.harness key absent; want it present when Harness is set")
+			} else if got != "codex" {
+				t.Errorf("meta.harness = %v, want codex", got)
+			}
+		})
+	}
+}
+
+// TestEncodeMetaHarnessOmitEmpty guards the backward-compatibility contract: an
+// unset Harness (the empty string) is omitted via omitempty, so records that
+// never set it stay byte-identical to the pre-Harness encoding and stdin records
+// (which have no on-disk path) carry no misleading harness key.
+func TestEncodeMetaHarnessOmitEmpty(t *testing.T) {
+	for _, f := range []Format{FormatAnthropic, FormatOpenAI, FormatShareGPT} {
+		t.Run(string(f), func(t *testing.T) {
+			enc, err := NewEncoder(f)
+			if err != nil {
+				t.Fatalf("NewEncoder(%q): %v", f, err)
+			}
+			s := sampleForEncoding() // Meta.Harness left empty.
+			var buf bytes.Buffer
+			if err := enc.Encode(&buf, s); err != nil {
+				t.Fatalf("Encode: %v", err)
+			}
+			if strings.Contains(buf.String(), "harness") {
+				t.Errorf("empty Harness leaked a harness key: %s", buf.String())
+			}
+		})
+	}
+}
+
 // TestEncodeDanglingToolUse confirms encoders do not panic and produce sensible
 // output when a tool_use has no matching tool_result.
 func TestEncodeDanglingToolUse(t *testing.T) {

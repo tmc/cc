@@ -337,6 +337,133 @@ func TestSignalFilterNoHuman(t *testing.T) {
 	}
 }
 
+// TestTransformNoiseFilter is a table over the leading-tag drop behavior. With
+// DropCommands set (the CLI default), a user turn whose text begins with a known
+// harness wrapper (slash-command expansion or instruction/context preamble) is
+// dropped, while a genuine prompt — including one that merely mentions a tag
+// mid-sentence — is kept. With DropCommands unset (the library zero value), the
+// noise turn survives. Each session pairs the candidate user turn with an
+// assistant reply so a kept turn yields a sample and a dropped one yields the
+// remaining assistant-only sample (still non-nil, but with no leading prompt).
+func TestTransformNoiseFilter(t *testing.T) {
+	tests := []struct {
+		name      string
+		prompt    string
+		drop      bool
+		wantFirst string // expected FirstPrompt after transform
+	}{
+		// Each noisePrefix is dropped when DropCommands is set.
+		{name: "command-name dropped", prompt: "<command-name>/clear</command-name>", drop: true, wantFirst: ""},
+		{name: "command-message dropped", prompt: "<command-message>running</command-message>", drop: true, wantFirst: ""},
+		{name: "command-args dropped", prompt: "<command-args>--all</command-args>", drop: true, wantFirst: ""},
+		{name: "local-command-stdout dropped", prompt: "<local-command-stdout>ok</local-command-stdout>", drop: true, wantFirst: ""},
+		{name: "environment_context dropped", prompt: "<environment_context>cwd=/x</environment_context>", drop: true, wantFirst: ""},
+		{name: "user_instructions dropped", prompt: "<user_instructions>be terse</user_instructions>", drop: true, wantFirst: ""},
+		{name: "AGENTS.md preamble dropped", prompt: "# AGENTS.md instructions\nUse tabs.", drop: true, wantFirst: ""},
+		{name: "leading whitespace before tag dropped", prompt: "\n  <command-name>/help</command-name>", drop: true, wantFirst: ""},
+
+		// A normal prompt is kept even with DropCommands set.
+		{name: "normal prompt kept", prompt: "add a -v flag to the CLI", drop: true, wantFirst: "add a -v flag to the CLI"},
+		// A tag mentioned mid-sentence is not a prefix, so it is kept.
+		{name: "mid-sentence tag mention kept", prompt: "explain what <command-name> does in the parser", drop: true, wantFirst: "explain what <command-name> does in the parser"},
+
+		// With DropCommands unset (library zero value), the noise turn survives.
+		{name: "command-name kept when DropCommands off", prompt: "<command-name>/clear</command-name>", drop: false, wantFirst: "<command-name>/clear</command-name>"},
+		{name: "user_instructions kept when DropCommands off", prompt: "<user_instructions>be terse</user_instructions>", drop: false, wantFirst: "<user_instructions>be terse</user_instructions>"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entries := []cc.Entry{
+				userText(tt.prompt),
+				assistant("m", textBlock("acknowledged")),
+			}
+			s, err := Transform(entries, Options{DropCommands: tt.drop})
+			if err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			if s == nil {
+				t.Fatal("nil sample; the assistant reply should always survive")
+			}
+			if got := s.Meta.FirstPrompt; got != tt.wantFirst {
+				t.Errorf("FirstPrompt = %q, want %q", got, tt.wantFirst)
+			}
+		})
+	}
+}
+
+// TestTransformNoiseOnlySession verifies that a session consisting solely of a
+// noise turn (a bare slash-command expansion with no assistant reply) yields a
+// nil sample under DropCommands, since hasSignal then finds no real turn.
+func TestTransformNoiseOnlySession(t *testing.T) {
+	entries := []cc.Entry{userText("<command-name>/clear</command-name>")}
+	s, err := Transform(entries, Options{DropCommands: true})
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	if s != nil {
+		t.Fatalf("noise-only session yielded a sample, want nil: %+v", s)
+	}
+}
+
+// TestFillMetaModel is a table over the model-backfill behavior. Model reflects
+// the first non-empty Message.Model with no fabrication: claude carries a real
+// model id, pi carries its literal config slug "default" (left verbatim, not a
+// reader placeholder), and codex carries no per-message model — the codex model
+// lives on a turn_context entry that Transform drops as meta — so Meta.Model is
+// empty by design.
+func TestFillMetaModel(t *testing.T) {
+	tests := []struct {
+		name      string
+		model     string // Message.Model on the assistant entry
+		wantModel string
+	}{
+		{name: "claude model preserved", model: "claude-opus-4-8", wantModel: "claude-opus-4-8"},
+		{name: "pi default slug preserved verbatim", model: "default", wantModel: "default"},
+		{name: "codex empty model not fabricated", model: "", wantModel: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entries := []cc.Entry{
+				userText("go"),
+				assistant(tt.model, toolUseBlock("t1", "Bash", `{"command":"ls"}`)),
+				toolResultUser(toolResultBlock("t1", "out", false)),
+			}
+			s, err := Transform(entries, Options{})
+			if err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			if s == nil {
+				t.Fatal("nil sample")
+			}
+			if got := s.Meta.Model; got != tt.wantModel {
+				t.Errorf("Meta.Model = %q, want %q", got, tt.wantModel)
+			}
+		})
+	}
+}
+
+// TestFillMetaModelFirstNonEmpty verifies fillMeta records the first non-empty
+// Message.Model and does not overwrite it from a later entry. A codex-style
+// session whose early turns carry no model but whose later turn does would still
+// surface that model; conversely an empty later model never clears an earlier one.
+func TestFillMetaModelFirstNonEmpty(t *testing.T) {
+	entries := []cc.Entry{
+		userText("go"),
+		assistant("", toolUseBlock("t1", "Bash", `{"command":"ls"}`)), // no model on this turn
+		toolResultUser(toolResultBlock("t1", "out", false)),
+		assistant("claude-opus-4-8", textBlock("done")), // model appears later
+	}
+	s, err := Transform(entries, Options{})
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	if got := s.Meta.Model; got != "claude-opus-4-8" {
+		t.Errorf("Meta.Model = %q, want claude-opus-4-8 (first non-empty wins)", got)
+	}
+}
+
 // TestTransformOptions covers System prepend and IncludeThinking.
 func TestTransformOptions(t *testing.T) {
 	base := []cc.Entry{
@@ -581,7 +708,7 @@ func TestFingerprintFirstUser(t *testing.T) {
 // buildSample constructs a Sample with n alternating user/assistant turns.
 func buildSample(n int) *Sample {
 	var turns []Turn
-	for i := 0; i < n; i++ {
+	for i := range n {
 		role := RoleUser
 		if i%2 == 1 {
 			role = RoleAssistant

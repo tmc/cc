@@ -38,8 +38,12 @@ type Options struct {
 	// Empty uses the default template; see [Transform].
 	SystemText string
 
-	// DropCommands drops slash-command expansion user turns (text begins with
-	// "<command-name>"). IsMeta and non-message entries are always dropped.
+	// DropCommands removes harness noise from user turns: slash-command
+	// expansions and system/instruction/context preambles that a reader did not
+	// already mark IsMeta. A turn is dropped only when its text begins with a
+	// known wrapper tag (see noisePrefixes); a prompt that merely mentions such
+	// a tag mid-text is kept. IsMeta and non-message entries are always dropped
+	// regardless of this option.
 	DropCommands bool
 
 	// MaxToolResultBytes truncates any single tool_result content or tool_use
@@ -86,7 +90,8 @@ type Turn struct {
 // Meta carries session-level provenance for a [Sample].
 type Meta struct {
 	SessionID   string `json:"session_id"`
-	Source      string `json:"source"` // file path (redacted to ~ by Redact)
+	Source      string `json:"source"`            // file path (redacted to ~ by Redact)
+	Harness     string `json:"harness,omitempty"` // producing harness: claude|codex|gemini|opencode|pi|antigravity|unknown; "" when unknown/unset
 	Model       string `json:"model,omitempty"`
 	CWD         string `json:"cwd,omitempty"`
 	GitBranch   string `json:"git_branch,omitempty"`
@@ -166,7 +171,11 @@ func Transform(entries []cc.Entry, opts Options) (*Sample, error) {
 	return &Sample{Meta: meta, Turns: turns}, nil
 }
 
-// fillMeta records the first non-empty session metadata seen.
+// fillMeta records the first non-empty session metadata seen. Model reflects
+// the first non-empty Message.Model; it is empty for harnesses (such as codex)
+// that carry the model at session or turn scope rather than per message, where
+// the model lives on a turn_context entry that Transform drops as meta. No
+// per-harness default model is fabricated.
 func fillMeta(m *Meta, e cc.Entry) {
 	if m.SessionID == "" {
 		m.SessionID = e.SessionID
@@ -234,17 +243,48 @@ func toolResultTurn(m *cc.Message) (Turn, bool) {
 	return Turn{Role: RoleUser, Blocks: blocks}, true
 }
 
+// noisePrefixes are the leading wrapper tags that mark a user turn as harness
+// noise rather than a human prompt: slash-command expansions and
+// instruction/context preambles that a reader did not already mark IsMeta. A
+// turn is dropped only when its text (after trimming leading whitespace) begins
+// with one of these exact markers, so a prompt that merely mentions a tag
+// mid-text is never affected. The markers are matched literally (no
+// lowercasing).
+var noisePrefixes = []string{
+	"<command-name>",           // claude slash-command expansion
+	"<command-message>",        // claude slash-command expansion
+	"<command-args>",           // claude slash-command expansion
+	"<local-command-stdout>",   // claude local command output echo
+	"<environment_context>",    // codex/others context preamble (when not IsMeta)
+	"<user_instructions>",      // codex/others instruction preamble (when not IsMeta)
+	"# AGENTS.md instructions", // AGENTS.md preamble (when not IsMeta)
+}
+
 // userTurn renders a human user message into a Turn. It reports false for
-// command expansions (when opts.DropCommands) and for empty turns.
+// harness noise (when opts.DropCommands; see noisePrefixes) and for empty
+// turns.
 func userTurn(m *cc.Message, opts Options) (Turn, bool) {
 	text := m.TextContent()
 	if text == "" {
 		return Turn{}, false
 	}
-	if opts.DropCommands && strings.HasPrefix(text, "<command-name>") {
+	if opts.DropCommands && isNoisePrefix(text) {
 		return Turn{}, false
 	}
 	return Turn{Role: RoleUser, Blocks: []Block{{Kind: KindText, Text: text}}}, true
+}
+
+// isNoisePrefix reports whether text begins with a known harness wrapper tag,
+// after trimming leading whitespace. It matches a prefix only, so a prompt that
+// merely mentions a tag mid-sentence is never dropped.
+func isNoisePrefix(text string) bool {
+	t := strings.TrimLeft(text, " \t\r\n")
+	for _, p := range noisePrefixes {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // systemTurn builds the synthetic system turn from session metadata.
