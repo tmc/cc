@@ -20,11 +20,19 @@
 //	-format FMT       Output encoding: anthropic (default), openai, sharegpt.
 //	-since DUR        Discovery window (default 30d); supports d, w, h.
 //	-project SUB      Substring filter on the session path.
+//	-harness LIST     Comma-separated harness allowlist for discovery:
+//	                  claude, codex, gemini, opencode, pi, antigravity
+//	                  (empty = all). Applies to discovery only; explicit file
+//	                  arguments and stdin are passed through untouched. An
+//	                  unknown name is a usage error (exit 2).
 //	-o FILE           Write NDJSON to FILE (default stdout). Ignored with -split.
 //	-split R          Train/valid ratio in (0,1): fraction to TRAIN. 0 disables.
 //	-out DIR          Directory for -split output (default ".").
 //	-min-tool-uses N  Minimum tool calls to keep a sample (default 1).
 //	-no-redact        Disable PII/secret redaction (on by default).
+//	-drop-noise       Drop harness noise turns: slash-command expansions and
+//	                  instruction/context preambles a reader did not already
+//	                  mark as meta (default true; -drop-noise=false to keep them).
 //	-subagents        Interleave subagent (IsSidechain) entries.
 //	-window N         Head/tail-window samples longer than N turns (0 = off).
 //	-dedup            Drop samples whose first human turn duplicates an earlier one.
@@ -33,6 +41,17 @@
 //	-max-tool-bytes N Truncate any single tool payload to N bytes (0 = off).
 //	-thinking         Keep assistant thinking blocks as text.
 //	-v                Verbose progress and a final summary on stderr.
+//
+// # Harness identity
+//
+// Each discovered session is tagged with its producing harness (claude, codex,
+// gemini, opencode, pi, antigravity, or unknown) via cc.Harness, which
+// classifies by the on-disk location. The tag is recorded as the "harness"
+// field of each record's metadata. Because identity is derived from the path,
+// it is unavailable for stdin: a session read from "-" carries no harness
+// field. The Model field reflects each message's recorded model and may be
+// empty for harnesses (such as codex) that carry the model at session scope
+// rather than per message.
 //
 // # Formats
 //
@@ -65,6 +84,6 @@
 //
 //	0   Success (including zero samples produced).
 //	1   I/O or discovery failure.
-//	2   Usage error (unknown -format, bad -since, -split out of range,
-//	    or "-" combined with other file arguments).
+//	2   Usage error (unknown -format, unknown -harness name, bad -since,
+//	    -split out of range, or "-" combined with other file arguments).
 package main

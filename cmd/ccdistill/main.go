@@ -42,6 +42,8 @@ var (
 	systemTextFlag   = flag.String("system-text", "", "override the synthetic system text (implies -system)")
 	maxToolBytesFlag = flag.Int("max-tool-bytes", 0, "truncate any single tool payload to N bytes (0 = off)")
 	thinkingFlag     = flag.Bool("thinking", false, "keep assistant thinking blocks as text")
+	noiseFlag        = flag.Bool("drop-noise", true, "drop harness noise turns (slash-command expansions, instruction/context preambles)")
+	harnessFlag      = flag.String("harness", "", "comma-separated harness allowlist for discovery: claude,codex,gemini,opencode,pi,antigravity (empty = all)")
 	verboseFlag      = flag.Bool("v", false, "verbose progress and a final summary on stderr")
 )
 
@@ -63,6 +65,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	hset, err := parseHarnessFilter(*harnessFlag)
+	if err != nil {
+		return err
+	}
 	if *splitFlag != 0 && (*splitFlag <= 0 || *splitFlag >= 1) {
 		return usagef("split must be in (0,1), got %v", *splitFlag)
 	}
@@ -70,6 +76,7 @@ func run() error {
 	opts := ccdistill.Options{
 		System:             *systemFlag || *systemTextFlag != "",
 		SystemText:         *systemTextFlag,
+		DropCommands:       *noiseFlag,
 		MaxToolResultBytes: *maxToolBytesFlag,
 		IncludeThinking:    *thinkingFlag,
 	}
@@ -80,7 +87,7 @@ func run() error {
 		return err
 	}
 
-	files, stdin, err := selectInputs(ctx, flag.Args())
+	files, stdin, err := selectInputs(ctx, flag.Args(), hset)
 	if err != nil {
 		return err
 	}
@@ -104,6 +111,12 @@ func run() error {
 			return nil
 		}
 		s.Meta.Source = file
+		// Harness identity is derived from the on-disk location, so it is
+		// unavailable for stdin (the synthetic "-" source). Leaving it empty
+		// emits no harness key (omitempty) rather than the noise "unknown".
+		if file != "-" {
+			s.Meta.Harness = cc.Harness(file)
+		}
 		if !filter(s) {
 			st.dropped++
 			return nil
@@ -179,9 +192,52 @@ func parseFormat(s string) (ccdistill.Format, error) {
 	}
 }
 
+// parseHarnessFilter parses the -harness allowlist. An empty string returns
+// (nil, nil), meaning no filtering. Unknown names are a usage error. The
+// sentinel "unknown" is deliberately not accepted: discovery cannot be asked
+// for unclassifiable files.
+func parseHarnessFilter(s string) (map[string]bool, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	valid := map[string]bool{
+		"claude": true, "codex": true, "gemini": true,
+		"opencode": true, "pi": true, "antigravity": true,
+	}
+	set := make(map[string]bool)
+	for name := range strings.SplitSeq(s, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if !valid[name] {
+			return nil, usagef("unknown harness %q (want claude, codex, gemini, opencode, pi, or antigravity)", name)
+		}
+		set[name] = true
+	}
+	if len(set) == 0 {
+		return nil, nil
+	}
+	return set, nil
+}
+
+// filterByHarness keeps only the discovered files whose harness, as classified
+// by cc.Harness, is in set.
+func filterByHarness(files []string, set map[string]bool) []string {
+	kept := files[:0]
+	for _, f := range files {
+		if set[cc.Harness(f)] {
+			kept = append(kept, f)
+		}
+	}
+	return kept
+}
+
 // selectInputs resolves the positional arguments into a list of session files
-// or a single stdin flag. With no arguments it discovers sessions.
-func selectInputs(ctx context.Context, args []string) (files []string, stdin bool, err error) {
+// or a single stdin flag. With no arguments it discovers sessions, post-filtered
+// by hset when non-nil. The harness filter applies only to discovery: explicit
+// file arguments and stdin are passed through untouched.
+func selectInputs(ctx context.Context, args []string, hset map[string]bool) (files []string, stdin bool, err error) {
 	for _, a := range args {
 		if a == "-" {
 			if len(args) != 1 {
@@ -198,6 +254,9 @@ func selectInputs(ctx context.Context, args []string) (files []string, stdin boo
 		files, err = cc.FindSessionFiles(ctx, since, *projectFlag)
 		if err != nil {
 			return nil, false, fmt.Errorf("discover sessions: %w", err)
+		}
+		if hset != nil {
+			files = filterByHarness(files, hset)
 		}
 		return files, false, nil
 	}
