@@ -88,6 +88,78 @@ func TestAggregateStatsContextPerCaller(t *testing.T) {
 	}
 }
 
+// TestAggregateStatsCachedWithinTTL verifies a repeated identical query within
+// aggregateTTL is served from the memo (same map identity, populated cache
+// entry) rather than re-running the expensive scan, while a distinct window is a
+// separate cache key.
+func TestAggregateStatsCachedWithinTTL(t *testing.T) {
+	svc := newStatsTestService(t, 50)
+	ctx := context.Background()
+
+	first, err := svc.AggregateStats(ctx, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("first AggregateStats: %v", err)
+	}
+
+	svc.statsMu.Lock()
+	n := len(svc.statsCache)
+	svc.statsMu.Unlock()
+	if n != 1 {
+		t.Fatalf("after first call: cache has %d entries, want 1", n)
+	}
+
+	second, err := svc.AggregateStats(ctx, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("second AggregateStats: %v", err)
+	}
+	// A cache hit returns the very same map value the first call stored.
+	if reflect.ValueOf(first).Pointer() != reflect.ValueOf(second).Pointer() {
+		t.Fatal("second call returned a different map; expected the cached one")
+	}
+
+	// A distinct window is a separate key and must not hit the all-time entry.
+	if _, err := svc.AggregateStats(ctx, time.Unix(1, 0), time.Time{}); err != nil {
+		t.Fatalf("windowed AggregateStats: %v", err)
+	}
+	svc.statsMu.Lock()
+	n = len(svc.statsCache)
+	svc.statsMu.Unlock()
+	if n != 2 {
+		t.Fatalf("after windowed call: cache has %d entries, want 2", n)
+	}
+}
+
+// TestAggregateStatsTTLExpiry verifies an entry older than aggregateTTL is
+// recomputed: backdating the stored entry forces the next call to re-scan and
+// refresh the timestamp.
+func TestAggregateStatsTTLExpiry(t *testing.T) {
+	svc := newStatsTestService(t, 20)
+	ctx := context.Background()
+
+	if _, err := svc.AggregateStats(ctx, time.Time{}, time.Time{}); err != nil {
+		t.Fatalf("first AggregateStats: %v", err)
+	}
+	key := time.Time{}.UTC().Format(time.RFC3339Nano) + "|" + time.Time{}.UTC().Format(time.RFC3339Nano)
+
+	svc.statsMu.Lock()
+	stale := svc.statsCache[key]
+	stale.at = stale.at.Add(-2 * aggregateTTL) // age past the TTL.
+	svc.statsCache[key] = stale
+	staleAt := stale.at
+	svc.statsMu.Unlock()
+
+	if _, err := svc.AggregateStats(ctx, time.Time{}, time.Time{}); err != nil {
+		t.Fatalf("second AggregateStats: %v", err)
+	}
+
+	svc.statsMu.Lock()
+	freshAt := svc.statsCache[key].at
+	svc.statsMu.Unlock()
+	if !freshAt.After(staleAt) {
+		t.Fatalf("entry not refreshed after TTL expiry: at=%v stale=%v", freshAt, staleAt)
+	}
+}
+
 // TestStatsIncludesAPIRequestCount verifies the basic stats contract carries
 // the request count that the UI surface now expects.
 func TestStatsIncludesAPIRequestCount(t *testing.T) {

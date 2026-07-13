@@ -44,6 +44,25 @@ type Service struct {
 	log        *slog.Logger
 	cache      *ParseCache
 	statsSF    singleflight.Group // coalesces concurrent identical AggregateStats queries.
+
+	statsMu    sync.Mutex                 // guards statsCache.
+	statsCache map[string]cachedAggregate // memoizes AggregateStats results by window, keyed as in AggregateStats.
+}
+
+// aggregateTTL bounds how long an AggregateStats result is served from
+// statsCache before the underlying scan is repeated. The query is a full-table
+// SUM over every session row (the single most expensive read in the API), so on
+// a large index it costs tens of seconds; a short TTL lets the common all-time
+// query — fired by several UI panels on every refresh — run at most once per
+// window per interval. Staleness is bounded to the TTL: sessions indexed within
+// the last few seconds may be absent from the totals, which is invisible in a
+// live-updating dashboard.
+const aggregateTTL = 30 * time.Second
+
+// cachedAggregate is a memoized AggregateStats result with its computation time.
+type cachedAggregate struct {
+	at    time.Time
+	stats map[string]any
 }
 
 // New creates a new service with the given configuration.
@@ -328,21 +347,43 @@ func (s *Service) Stats(ctx context.Context) (map[string]any, error) {
 	}, nil
 }
 
-// AggregateStats returns detailed aggregate statistics, optionally filtered by time range.
 // AggregateStats returns denormalized index-wide counters for the [after,
 // before] window. The query is a multi-column SUM over every session row, so it
 // is the single most expensive read in the API; the web UI fans out several
-// identical requests per refresh across panels. Concurrent calls for the same
-// window are coalesced through a singleflight group so only one query hits
-// SQLite and the rest share its result. Each caller still observes its own
-// context: a cancellation returns promptly without aborting the shared query
-// the other waiters depend on.
+// identical requests per refresh across panels.
+//
+// Two layers keep that cost down. A result memoized within aggregateTTL is
+// returned directly, so repeated refreshes of a stable window (the common
+// all-time query) run the scan at most once per interval. On a miss, concurrent
+// calls for the same window are coalesced through a singleflight group so only
+// one query hits SQLite and the rest share its result. Each caller still
+// observes its own context: a cancellation returns promptly without aborting the
+// shared query the other waiters depend on.
 func (s *Service) AggregateStats(ctx context.Context, after, before time.Time) (map[string]any, error) {
 	key := after.UTC().Format(time.RFC3339Nano) + "|" + before.UTC().Format(time.RFC3339Nano)
+
+	now := time.Now()
+	s.statsMu.Lock()
+	if c, ok := s.statsCache[key]; ok && now.Sub(c.at) < aggregateTTL {
+		s.statsMu.Unlock()
+		return c.stats, nil
+	}
+	s.statsMu.Unlock()
+
 	ch := s.statsSF.DoChan(key, func() (any, error) {
 		// Use a detached context so the shared query is not bound to the first
 		// caller's request lifetime; waiters select on their own ctx below.
-		return s.store.AggregateStats(context.WithoutCancel(ctx), after, before)
+		stats, err := s.store.AggregateStats(context.WithoutCancel(ctx), after, before)
+		if err != nil {
+			return nil, err
+		}
+		s.statsMu.Lock()
+		if s.statsCache == nil {
+			s.statsCache = make(map[string]cachedAggregate)
+		}
+		s.statsCache[key] = cachedAggregate{at: time.Now(), stats: stats}
+		s.statsMu.Unlock()
+		return stats, nil
 	})
 	select {
 	case <-ctx.Done():
