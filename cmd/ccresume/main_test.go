@@ -290,6 +290,44 @@ func TestCountOccurrences(t *testing.T) {
 	}
 }
 
+func TestFilterMatches(t *testing.T) {
+	root := t.TempDir()
+	codex := filepath.Join(root, ".codex")
+	claude := filepath.Join(root, ".claude")
+	t.Setenv("CODEX_HOME", codex)
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	dir := filepath.Join(root, "work")
+	other := filepath.Join(root, "other")
+	codexPath := filepath.Join(codex, "sessions", "2026", "07", "12", "rollout.jsonl")
+	claudePath := filepath.Join(claude, "projects", "work", "session.jsonl")
+	for _, path := range []string{codexPath, claudePath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeJSONL(t, codexPath, []map[string]any{{"type": "session_meta", "payload": map[string]any{"id": "codex-id", "cwd": dir}}})
+	writeJSONL(t, claudePath, []map[string]any{{"sessionId": "claude-id", "cwd": other}})
+
+	matches := []cc.IndexEntry{
+		{FullPath: codexPath, ProjectPath: filepath.Dir(codexPath)},
+		{FullPath: claudePath, ProjectPath: other},
+	}
+	got := filterMatches(matches, dir, "codex")
+	if len(got) != 1 || got[0].FullPath != codexPath {
+		t.Fatalf("filterMatches = %#v, want codex session", got)
+	}
+}
+
+func TestCleanHarness(t *testing.T) {
+	got, err := cleanHarness(" Codex ")
+	if err != nil || got != "codex" {
+		t.Fatalf("cleanHarness = %q, %v, want codex, nil", got, err)
+	}
+	if _, err := cleanHarness("vim"); err == nil {
+		t.Fatal("cleanHarness(vim) succeeded")
+	}
+}
+
 func TestFileHasToolMatchCommandAndResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	data := []byte(

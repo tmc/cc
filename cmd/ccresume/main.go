@@ -19,14 +19,16 @@ import (
 )
 
 var (
-	launchFlag = flag.Bool("l", false, "Launch claude instead of printing command")
-	sinceFlag  = flag.String("since", "7d", "Search sessions modified within duration")
-	oneFlag    = flag.Bool("1", false, "Show only the most recent match")
-	clipFlag   = flag.Bool("clip", true, "Use clipboard as search query (pbpaste)")
-	pathsFlag  = flag.Bool("paths", false, "Print raw session file paths instead of resume commands")
-	hasFlag    = flag.String("has", "", "Only include sessions whose transcript contains this literal text")
-	cmdFlag    = flag.String("cmd", "", "Only include sessions with a tool command containing this literal text")
-	resultFlag = flag.String("result", "", "Only include sessions with a tool result containing this literal text")
+	launchFlag  = flag.Bool("l", false, "Launch claude instead of printing command")
+	sinceFlag   = flag.String("since", "7d", "Search sessions modified within duration")
+	oneFlag     = flag.Bool("1", false, "Show only the most recent match")
+	clipFlag    = flag.Bool("clip", true, "Use clipboard as search query (pbpaste)")
+	pathsFlag   = flag.Bool("paths", false, "Print raw session file paths instead of resume commands")
+	hasFlag     = flag.String("has", "", "Only include sessions whose transcript contains this literal text")
+	cmdFlag     = flag.String("cmd", "", "Only include sessions with a tool command containing this literal text")
+	resultFlag  = flag.String("result", "", "Only include sessions with a tool result containing this literal text")
+	dirFlag     = flag.String("dir", "", "Only include sessions recorded in this directory")
+	harnessFlag = flag.String("harness", "", "Only include sessions from this harness")
 )
 
 func main() {
@@ -38,6 +40,14 @@ func main() {
 }
 
 func run() error {
+	dir, err := cleanDirectory(*dirFlag)
+	if err != nil {
+		return err
+	}
+	harness, err := cleanHarness(*harnessFlag)
+	if err != nil {
+		return err
+	}
 	query := strings.Join(flag.Args(), " ")
 	if query == "" && *clipFlag {
 		out, err := exec.Command("pbpaste").Output()
@@ -56,6 +66,9 @@ func run() error {
 	}
 	if query == "" && resultText != "" {
 		query = resultText
+	}
+	if query == "" && dir != "" {
+		query = dir
 	}
 	if query == "" {
 		return fmt.Errorf("no search query provided (use argument or clipboard)")
@@ -116,6 +129,7 @@ func run() error {
 			}
 		}
 	}
+	matches = filterMatches(matches, dir, harness)
 
 	if len(matches) == 0 {
 		return fmt.Errorf("no sessions found matching %q", query)
@@ -164,6 +178,72 @@ func run() error {
 		fmt.Println(renderResumeCommand(r.target, bin, args))
 	}
 	return nil
+}
+
+func cleanDirectory(dir string) (string, error) {
+	if dir == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve directory: %w", err)
+	}
+	return filepath.Clean(abs), nil
+}
+
+func cleanHarness(harness string) (string, error) {
+	harness = strings.ToLower(strings.TrimSpace(harness))
+	switch harness {
+	case "", "claude", "codex", "gemini", "opencode", "pi", "antigravity":
+		return harness, nil
+	default:
+		return "", fmt.Errorf("unknown harness %q", harness)
+	}
+}
+
+func filterMatches(matches []cc.IndexEntry, dir, harness string) []cc.IndexEntry {
+	out := matches[:0]
+	for _, m := range matches {
+		if harness != "" && cc.Harness(m.FullPath) != harness {
+			continue
+		}
+		if dir != "" && !matchDirectory(m, dir) {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func matchDirectory(m cc.IndexEntry, dir string) bool {
+	if sameDirectory(m.ProjectPath, dir) {
+		return true
+	}
+	entries, err := cc.ReadFile(context.Background(), m.FullPath)
+	if err != nil {
+		return false
+	}
+	s := cc.Summarize(m.FullPath, entries)
+	if sameDirectory(s.CWD, dir) {
+		return true
+	}
+	for _, cwd := range s.DistinctCWDs {
+		if sameDirectory(cwd, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameDirectory(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	aa, err := filepath.Abs(a)
+	if err != nil {
+		return false
+	}
+	return filepath.Clean(aa) == filepath.Clean(b)
 }
 
 func sortIndexMatches(query string, matches []cc.IndexEntry, curGitCommonDir string) {

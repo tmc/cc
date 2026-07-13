@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ var (
 	nFlag       = flag.Int("n", 50, "Max sessions to show")
 	verboseFlag = flag.Bool("v", false, "Show first user message")
 	indexFlag   = flag.Bool("index", false, "Use sessions-index.json (faster, less detail)")
+	dirFlag     = flag.String("dir", "", "Only show sessions recorded in this directory")
+	harnessFlag = flag.String("harness", "", "Only show sessions from this harness")
 )
 
 func main() {
@@ -32,6 +35,18 @@ func main() {
 }
 
 func run() error {
+	harness, err := cleanHarness(*harnessFlag)
+	if err != nil {
+		return err
+	}
+	*harnessFlag = harness
+	if *dirFlag != "" {
+		abs, err := filepath.Abs(*dirFlag)
+		if err != nil {
+			return fmt.Errorf("resolve directory: %w", err)
+		}
+		*dirFlag = filepath.Clean(abs)
+	}
 	since, err := ccpaths.ParseDuration(*sinceFlag)
 	if err != nil {
 		return fmt.Errorf("invalid duration %q: %w", *sinceFlag, err)
@@ -48,6 +63,7 @@ func runIndex(since time.Duration) error {
 	if err != nil {
 		return err
 	}
+	entries = filterIndexEntries(entries, *dirFlag, *harnessFlag)
 
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Modified > entries[j].Modified
@@ -97,6 +113,9 @@ func runFull(since time.Duration) error {
 
 	var sessions []cc.SessionSummary
 	for _, f := range files {
+		if *harnessFlag != "" && cc.Harness(f) != *harnessFlag {
+			continue
+		}
 		entries, err := cc.ReadFile(context.Background(), f)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", f, err)
@@ -104,6 +123,9 @@ func runFull(since time.Duration) error {
 		}
 		s := cc.Summarize(f, entries)
 		if s.TotalLines == 0 {
+			continue
+		}
+		if *dirFlag != "" && !summaryHasDirectory(s, *dirFlag) {
 			continue
 		}
 		sessions = append(sessions, s)
@@ -149,6 +171,42 @@ func runFull(since time.Duration) error {
 		}
 		return nil
 	}
+}
+
+func cleanHarness(harness string) (string, error) {
+	harness = strings.ToLower(strings.TrimSpace(harness))
+	switch harness {
+	case "", "claude", "codex", "gemini", "opencode", "pi", "antigravity":
+		return harness, nil
+	default:
+		return "", fmt.Errorf("unknown harness %q", harness)
+	}
+}
+
+func filterIndexEntries(entries []cc.IndexEntry, dir, harness string) []cc.IndexEntry {
+	out := entries[:0]
+	for _, e := range entries {
+		if harness != "" && cc.Harness(e.FullPath) != harness {
+			continue
+		}
+		if dir != "" && filepath.Clean(e.ProjectPath) != dir {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func summaryHasDirectory(s cc.SessionSummary, dir string) bool {
+	if filepath.Clean(s.CWD) == dir {
+		return true
+	}
+	for _, cwd := range s.DistinctCWDs {
+		if filepath.Clean(cwd) == dir {
+			return true
+		}
+	}
+	return false
 }
 
 func collapse(s string, max int) string {

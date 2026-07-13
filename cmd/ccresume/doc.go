@@ -20,6 +20,8 @@
 //	-has text    Only include sessions whose transcript contains text.
 //	-cmd text    Only include sessions with a tool command containing text.
 //	-result text Only include sessions with a tool result containing text.
+//	-dir path    Only include sessions recorded in this directory.
+//	-harness h   Only include sessions from h (for example, codex).
 //
 // # Examples
 //
