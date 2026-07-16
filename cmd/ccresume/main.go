@@ -736,7 +736,7 @@ func grepMatches(query string) ([]cc.IndexEntry, error) {
 		return nil, err
 	}
 
-	args := []string{"-l", query}
+	args := []string{"-l", "-F", "--", query}
 	for _, root := range roots {
 		args = append(args, root.dir)
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -315,6 +316,34 @@ func TestFilterMatches(t *testing.T) {
 	got := filterMatches(matches, dir, "codex")
 	if len(got) != 1 || got[0].FullPath != codexPath {
 		t.Fatalf("filterMatches = %#v, want codex session", got)
+	}
+}
+
+func TestGrepMatchesLiteralQuery(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+	root := t.TempDir()
+	t.Setenv("CLAUDE_HOME", filepath.Join(root, ".claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, ".codex"))
+	t.Setenv("GEMINI_HOME", filepath.Join(root, ".gemini"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, ".antigravity"))
+	t.Setenv("OPENCODE_HOME", filepath.Join(root, ".opencode"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, ".pi"))
+	path := filepath.Join(root, ".claude", "projects", "work", "session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Queries are plain text, not regexps: metacharacters like the unbalanced
+	// paren here must match literally instead of failing rg's regex parser.
+	const query = "code didn't compile (empirically reproduced"
+	writeJSONL(t, path, []map[string]any{{"sessionId": "test-id", "cwd": filepath.Join(root, "work"), "text": query}})
+	matches, err := grepMatches(query)
+	if err != nil {
+		t.Fatalf("grepMatches: %v", err)
+	}
+	if len(matches) != 1 || matches[0].FullPath != path {
+		t.Fatalf("grepMatches = %#v, want single match for %s", matches, path)
 	}
 }
 
