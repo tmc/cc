@@ -70,6 +70,28 @@ type SessionLink struct {
 	TeamName      string `json:"team_name,omitempty"` // Team name for team links.
 }
 
+// Artifact kinds classify a claude.ai link found in a session.
+const (
+	ArtifactKindArtifact = "artifact"        // claude.ai/code/artifact/<uuid>, published by the Artifact tool.
+	ArtifactKindPublic   = "public_artifact" // claude.ai/public/artifacts/<id>, a shared artifact.
+	ArtifactKindSession  = "session"         // claude.ai/code/session_<id>, a Claude Code session link.
+	ArtifactKindDesign   = "design"          // claude.ai/design/<slug>, a Claude design link.
+)
+
+// Artifact is a claude.ai resource referenced by a session: an artifact
+// published by the Artifact tool, or a session/design link mentioned in text,
+// a commit message, or a tool command. Path and Title are populated only for
+// artifacts published in this session (from the Artifact tool result).
+type Artifact struct {
+	Kind      string `json:"kind"`             // one of the ArtifactKind* constants.
+	URL       string `json:"url"`              // full claude.ai URL.
+	ID        string `json:"id,omitempty"`     // the artifact/session/design identifier from the URL.
+	Path      string `json:"path,omitempty"`   // local source file (published artifacts only).
+	Title     string `json:"title,omitempty"`  // artifact title (published artifacts only).
+	Source    string `json:"source,omitempty"` // where it was found: "tool_result", "text", or "command".
+	Timestamp string `json:"timestamp,omitempty"`
+}
+
 // GraphData holds combined node and link data for the session graph.
 type GraphData struct {
 	Nodes     []GraphNode   `json:"nodes"`

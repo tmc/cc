@@ -190,6 +190,7 @@ func (c *ClaudeCode) parseSession(ctx context.Context, config cass.ScanConfig, p
 
 	// Extract inter-session communication links and stats.
 	links := ExtractLinks(entries)
+	artifacts := ExtractArtifacts(entries)
 	stats := ExtractStats(entries)
 	skills := ExtractSkills(entries, "claude-code")
 	goals := ExtractClaudeGoals(entries)
@@ -245,6 +246,7 @@ func (c *ClaudeCode) parseSession(ctx context.Context, config cass.ScanConfig, p
 		Stats:        stats,
 		Metadata:     meta,
 		Workflows:    workflows,
+		Artifacts:    artifacts,
 		TeamName:     teamName,
 		AgentName:    agentName,
 		IsTeamLead:   isTeamLead,
@@ -396,7 +398,7 @@ func truncateTitle(title string) string {
 }
 
 // workspaceFromPath extracts the original workspace path from the encoded
-// Claude Code project directory name (e.g. "-Volumes-tmc-go-src-..." -> "/Volumes/tmc/go/src/...").
+// Claude Code project directory name (e.g. "-Volumes-example-go-src-..." -> "/Volumes/example/go/src/...").
 //
 // Claude Code encodes paths by replacing "/" with "-". This is ambiguous when
 // directory names contain literal dashes (e.g. "chrome-to-har"). We resolve

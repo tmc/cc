@@ -22,6 +22,7 @@ type Session struct {
 	Goals        []Goal         `json:"goals,omitempty"`
 	Skills       []SkillUse     `json:"skills,omitempty"`
 	Workflows    []WorkflowRun  `json:"workflows,omitempty"`
+	Artifacts    []Artifact     `json:"artifacts,omitempty"`
 	Stats        SessionStats   `json:"stats"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
 

@@ -27,6 +27,7 @@
 //   - [ExtractClaudeGoals]: goal-mode objectives
 //   - [ExtractLinks]: inter-session message/observation links
 //   - [ExtractTeamLinks]: team-membership links
+//   - [ExtractArtifacts]: claude.ai artifact/session/design links
 //   - [ExtractSkills]: skill invocations
 //   - [ExtractStats]: per-session aggregate statistics
 package collector
