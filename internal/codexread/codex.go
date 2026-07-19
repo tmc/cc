@@ -397,7 +397,7 @@ func isCodexSystemPreamble(blocks []ccmodel.ContentBlock) bool {
 	if len(text) > 200 {
 		text = text[:200]
 	}
-	return strings.HasPrefix(text, "# AGENTS.md instructions for ") ||
+	return strings.HasPrefix(text, "# AGENTS.md instructions") ||
 		strings.HasPrefix(text, "<permissions instructions>") ||
 		strings.HasPrefix(text, "<INSTRUCTIONS>") ||
 		strings.HasPrefix(text, "<environment_context>")

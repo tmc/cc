@@ -246,6 +246,54 @@ func TestReadFileCodexTokenCountUsage(t *testing.T) {
 	}
 }
 
+func TestReadFileCodexSkipsAgentsInstructionsPrompt(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "session.jsonl")
+	writeJSONL(t, path,
+		map[string]any{
+			"timestamp": "2026-07-19T10:00:00Z",
+			"type":      "session_meta",
+			"payload": map[string]any{
+				"id":  "sid-agents-instructions",
+				"cwd": "/tmp/project",
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-19T10:00:01Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "# AGENTS.md instructions\n\n# Agent Guidelines\n- write Go clearly"},
+				},
+			},
+		},
+		map[string]any{
+			"timestamp": "2026-07-19T10:00:02Z",
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "fix the artifact title"},
+				},
+			},
+		},
+	)
+
+	entries, err := ReadFile(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !entries[1].IsMeta {
+		t.Fatal("AGENTS.md instructions entry is not meta")
+	}
+	if got := Summarize(path, entries).FirstPrompt; got != "fix the artifact title" {
+		t.Errorf("FirstPrompt = %q, want real user prompt", got)
+	}
+}
+
 func TestReaderCodexTokenCountUsage(t *testing.T) {
 	const jsonl = `{"timestamp":"2026-02-25T10:00:00Z","type":"session_meta","payload":{"id":"sid-usage-123","cwd":"/tmp/myproj","originator":"codex_cli_rs","source":"cli"}}
 {"timestamp":"2026-02-25T10:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"working"}]}}
@@ -278,7 +326,7 @@ func TestReaderCodexTokenCountUsage(t *testing.T) {
 func TestReadFileCodexTurnContextCWD(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "session.jsonl")
-	const cwd = "/Users/tmc/go/src/github.com/tmc/appledocs"
+	const cwd = "/Users/example/go/src/github.com/tmc/appledocs"
 
 	writeJSONL(t, path,
 		map[string]any{
@@ -760,7 +808,7 @@ func TestFindSessionFilesIncludesCodexAndProjectFilterByCWD(t *testing.T) {
 			"type":      "session_meta",
 			"payload": map[string]any{
 				"id":          "sid-codex-proj",
-				"cwd":         "/Volumes/tmc/go/src/github.com/tmc/cc",
+				"cwd":         "/Volumes/example/go/src/github.com/tmc/cc",
 				"originator":  "Codex Desktop",
 				"source":      "vscode",
 				"cli_version": "0.104.0-alpha.1",
