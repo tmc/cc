@@ -369,6 +369,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 	gitCommonDir := fs.String("git-common-dir", "", "filter by resolved git common dir (stable across worktrees)")
 	goalStatus := fs.String("goal-status", "", "filter by goal status")
 	skill := fs.String("skill", "", "filter by used skill name or path substring")
+	producedArtifacts := fs.Bool("produced-artifacts", false, "filter to sessions with Artifact tool publications")
 	pwd := fs.Bool("pwd", false, "filter to current working directory")
 	since := fs.Duration("since", 0, "sessions within duration (e.g. 12h, 24h, 168h)")
 	after := fs.String("after", "", "sessions after date (RFC3339 or YYYY-MM-DD)")
@@ -397,11 +398,12 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 		Sort:  cass.SortMode(*sort),
 		Limit: *limit,
 		Filters: cass.Filters{
-			Agent:        *agent,
-			Workspace:    ws,
-			GitCommonDir: *gitCommonDir,
-			GoalStatus:   *goalStatus,
-			Skill:        *skill,
+			Agent:             *agent,
+			Workspace:         ws,
+			GitCommonDir:      *gitCommonDir,
+			GoalStatus:        *goalStatus,
+			Skill:             *skill,
+			ProducedArtifacts: *producedArtifacts,
 		},
 	}
 

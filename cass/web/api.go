@@ -27,11 +27,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	req := cass.SearchRequest{
 		Query: q.Get("q"),
 		Filters: cass.Filters{
-			Agent:      q.Get("agent"),
-			Workspace:  q.Get("workspace"),
-			Team:       q.Get("team"),
-			GoalStatus: q.Get("goal_status"),
-			Skill:      q.Get("skill"),
+			Agent:             q.Get("agent"),
+			Workspace:         q.Get("workspace"),
+			Team:              q.Get("team"),
+			GoalStatus:        q.Get("goal_status"),
+			Skill:             q.Get("skill"),
+			ProducedArtifacts: q.Get("produced_artifacts") == "true",
 		},
 	}
 

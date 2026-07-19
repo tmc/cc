@@ -759,6 +759,12 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		where = append(where, skillUseFilter("s.skills_json"))
 		args = append(args, "%"+req.Filters.Skill+"%", "%"+req.Filters.Skill+"%")
 	}
+	if req.Filters.ProducedArtifacts {
+		where = append(where, `EXISTS (
+			SELECT 1 FROM artifact_events ae
+			WHERE ae.session_id = s.id AND ae.kind = 'artifact' AND ae.source = 'tool_result'
+		)`)
+	}
 
 	whereClause := ""
 	if len(where) > 0 {
@@ -889,12 +895,50 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 			return nil, err
 		}
 	}
+	if err := s.attachArtifactEvents(ctx, hits); err != nil {
+		return nil, err
+	}
 
 	return &cass.SearchResult{
 		Hits:            hits,
 		TotalCount:      total,
 		TotalCountExact: totalExact,
 	}, nil
+}
+
+// ArtifactEvents returns publication events for one indexed session.
+func (s *DB) ArtifactEvents(ctx context.Context, sessionID string) ([]cass.Artifact, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT event_id, kind, artifact_id, url, path, title, source, timestamp
+		FROM artifact_events WHERE session_id = ? ORDER BY timestamp, event_id`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("query artifact events: %w", err)
+	}
+	defer rows.Close()
+	var events []cass.Artifact
+	for rows.Next() {
+		var event cass.Artifact
+		if err := rows.Scan(&event.EventID, &event.Kind, &event.ID, &event.URL, &event.Path, &event.Title, &event.Source, &event.Timestamp); err != nil {
+			return nil, fmt.Errorf("scan artifact event: %w", err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate artifact events: %w", err)
+	}
+	return events, nil
+}
+
+func (s *DB) attachArtifactEvents(ctx context.Context, hits []cass.Hit) error {
+	for i := range hits {
+		events, err := s.ArtifactEvents(ctx, hits[i].SessionID)
+		if err != nil {
+			return err
+		}
+		hits[i].Artifacts = events
+		hits[i].ArtifactCount = len(events)
+	}
+	return nil
 }
 
 func skillUseFilter(col string) string {
@@ -1293,6 +1337,9 @@ func (s *DB) Session(ctx context.Context, id string) (cass.Hit, error) {
 	// render the workflow tree. Empty query: attach only, no match badge.
 	hits := []cass.Hit{hit}
 	if err := s.foldWorkflows(ctx, hits, ""); err != nil {
+		return hit, nil // best-effort: the base hit is still useful.
+	}
+	if err := s.attachArtifactEvents(ctx, hits); err != nil {
 		return hit, nil // best-effort: the base hit is still useful.
 	}
 	return hits[0], nil

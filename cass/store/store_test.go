@@ -1532,6 +1532,13 @@ func TestArtifactEventsLifecycle(t *testing.T) {
 	if got != (struct{ EventID, Path, Title, Source string }{"entry-1", "/tmp/first.html", "First", "tool_result"}) {
 		t.Errorf("artifact event = %+v", got)
 	}
+	result, err := s.Search(ctx, cass.SearchRequest{Filters: cass.Filters{ProducedArtifacts: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].ArtifactCount != 1 || len(result.Hits[0].Artifacts) != 1 {
+		t.Errorf("produced artifact search = %+v", result.Hits)
+	}
 
 	first.Artifacts[0].EventID = "entry-2"
 	first.Artifacts[0].Path = "/tmp/second.html"

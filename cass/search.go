@@ -63,14 +63,15 @@ type SearchRequest struct {
 
 // Filters constrains search results.
 type Filters struct {
-	Agent        string    // Filter by agent slug.
-	Workspace    string    // Filter by workspace path.
-	GitCommonDir string    // Filter by resolved git common dir (stable across worktrees).
-	Team         string    // Filter by agent team name.
-	GoalStatus   string    // Filter by goal status.
-	Skill        string    // Filter by used skill name or path substring.
-	After        time.Time // Sessions started after this time.
-	Before       time.Time // Sessions started before this time.
+	Agent             string    // Filter by agent slug.
+	Workspace         string    // Filter by workspace path.
+	GitCommonDir      string    // Filter by resolved git common dir (stable across worktrees).
+	Team              string    // Filter by agent team name.
+	GoalStatus        string    // Filter by goal status.
+	Skill             string    // Filter by used skill name or path substring.
+	ProducedArtifacts bool      // Filter to sessions with Artifact tool publications.
+	After             time.Time // Sessions started after this time.
+	Before            time.Time // Sessions started before this time.
 }
 
 // SearchResult holds search results.
@@ -82,17 +83,19 @@ type SearchResult struct {
 
 // Hit is a single search result.
 type Hit struct {
-	SessionID    string  `json:"session_id"`
-	Agent        string  `json:"agent"`
-	Title        string  `json:"title"`
-	Snippet      string  `json:"snippet"`
-	Score        float64 `json:"score"`
-	Workspace    string  `json:"workspace,omitempty"`
-	GitCommonDir string  `json:"git_common_dir,omitempty"`
-	Branch       string  `json:"branch,omitempty"`
-	SourcePath   string  `json:"source_path,omitempty"`
-	StartedAt    string  `json:"started_at,omitempty"`
-	EndedAt      string  `json:"ended_at,omitempty"`
+	SessionID     string     `json:"session_id"`
+	Agent         string     `json:"agent"`
+	Title         string     `json:"title"`
+	Snippet       string     `json:"snippet"`
+	Score         float64    `json:"score"`
+	Workspace     string     `json:"workspace,omitempty"`
+	GitCommonDir  string     `json:"git_common_dir,omitempty"`
+	Branch        string     `json:"branch,omitempty"`
+	SourcePath    string     `json:"source_path,omitempty"`
+	StartedAt     string     `json:"started_at,omitempty"`
+	EndedAt       string     `json:"ended_at,omitempty"`
+	Artifacts     []Artifact `json:"artifacts,omitempty"`
+	ArtifactCount int        `json:"artifact_count,omitempty"`
 
 	// Stats summary (populated when available).
 	ToolCalls                int    `json:"tool_calls,omitempty"`
