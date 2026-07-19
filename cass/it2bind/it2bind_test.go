@@ -196,6 +196,34 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// TestSessionsForSID: a pane that hosted several sessions over time yields them
+// most-recently-bound first, deduped, and matches through the wNtNpN: prefix.
+func TestSessionsForSID(t *testing.T) {
+	events := []Event{
+		mustEvent(startup("sess-old", "startup", "PANE-A", "boot-1", "2026-07-19T09:00:00Z")),
+		mustEvent(startup("sess-new", "startup", "PANE-A", "boot-1", "2026-07-19T12:00:00Z")),
+		mustEvent(startup("sess-new", "resume", "PANE-A", "boot-1", "2026-07-19T13:00:00Z")),
+		mustEvent(startup("sess-other", "startup", "PANE-B", "boot-1", "2026-07-19T10:00:00Z")),
+	}
+	ivs := Intervals(events)
+
+	// Query with the wNtNpN: prefix must still match pane A.
+	got := SessionsForSID(ivs, "w0t0p1:PANE-A")
+	want := []string{"sess-new", "sess-old"} // most-recently-bound first.
+	if len(got) != len(want) {
+		t.Fatalf("SessionsForSID = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("SessionsForSID[%d] = %q, want %q (order: recent first)", i, got[i], want[i])
+		}
+	}
+
+	if got := SessionsForSID(ivs, "PANE-NONE"); got != nil {
+		t.Errorf("SessionsForSID for unknown pane = %v, want nil", got)
+	}
+}
+
 func mustEvent(line string) Event {
 	e, err := parseEventLine(line)
 	if err != nil {

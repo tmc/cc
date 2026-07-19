@@ -232,3 +232,42 @@ func CurrentSID(intervals []Interval, sessionID, bootID string) (string, bool) {
 	}
 	return latest.It2SID, true
 }
+
+// SessionsForSID returns the harness session IDs bound to the given iTerm2
+// session ID (in any boot), most recently bound first. The input SID may carry
+// the wNtNpN: prefix; it is canonicalized before matching. A pane that hosted
+// several sessions over time (via /clear + resume) yields several IDs.
+func SessionsForSID(intervals []Interval, it2sid string) []string {
+	want := CanonicalSID(it2sid)
+	matched := make([]Interval, 0)
+	for _, iv := range intervals {
+		if iv.It2SID == want {
+			matched = append(matched, iv)
+		}
+	}
+	sort.SliceStable(matched, func(i, j int) bool { return matched[i].End > matched[j].End })
+	var out []string
+	seen := make(map[string]bool)
+	for _, iv := range matched {
+		if seen[iv.SessionID] {
+			continue
+		}
+		seen[iv.SessionID] = true
+		out = append(out, iv.SessionID)
+	}
+	return out
+}
+
+// DefaultRoot returns the per-pane sessions directory. It uses IT2_HOME (the
+// .it2 base directory) if set, otherwise defaults to ~/.it2. It reports false
+// only if neither is available.
+func DefaultRoot() (string, bool) {
+	if base := os.Getenv("IT2_HOME"); base != "" {
+		return filepath.Join(base, "sessions"), true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(home, ".it2", "sessions"), true
+}

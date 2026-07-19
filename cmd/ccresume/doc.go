@@ -11,6 +11,12 @@
 // session that created the artifact. The same holds for code/session and design
 // links.
 //
+// An iTerm2 session ID is also accepted as the query (a pane UUID, with or
+// without the wNtNpN: prefix that $ITERM_SESSION_ID carries). It resolves to the
+// harness session most recently bound to that pane, using the per-pane binding
+// events a SessionStart hook records under ~/.it2/sessions. When no binding
+// exists, the query is searched as ordinary text.
+//
 // # Usage
 //
 //	ccresume [flags] [query...]
@@ -49,4 +55,8 @@
 // Resume the session that created an artifact, from its claude.ai URL:
 //
 //	ccresume -1 "https://claude.ai/code/artifact/00000010-1000-4000-8000-000000000002?org=..."
+//
+// Resume the session that ran in an iTerm2 pane, from its session ID:
+//
+//	ccresume "$ITERM_SESSION_ID"
 package main

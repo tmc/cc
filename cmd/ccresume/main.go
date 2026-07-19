@@ -10,11 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/cass/it2bind"
 	"github.com/tmc/cc/ccgit"
 	"github.com/tmc/cc/ccpaths"
 )
@@ -80,6 +82,10 @@ func run() error {
 	// session that published it, so the content search resolves the resume
 	// command for that session.
 	query = normalizeClaudeURL(query)
+	// An iTerm2 session ID (a pane UUID, optionally with the wNtNpN: prefix) is
+	// resolved to the harness session most recently bound to that pane, so
+	// pasting a pane ID resumes the session that ran there.
+	query = resolveIt2SID(query)
 
 	since, err := ccpaths.ParseDuration(*sinceFlag)
 	if err != nil {
@@ -435,6 +441,33 @@ func normalizeClaudeURL(query string) string {
 		return segs[1]
 	case len(segs) >= 2 && segs[0] == "design":
 		return segs[1]
+	}
+	return query
+}
+
+// it2SIDPattern matches an iTerm2 session ID: a bare UUID, or the wNtNpN:UUID
+// form that $ITERM_SESSION_ID carries.
+var it2SIDPattern = regexp.MustCompile(`^(?:w\d+t\d+p\d+:)?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
+
+// resolveIt2SID rewrites an iTerm2 session ID query to the harness session most
+// recently bound to that pane, using the per-pane binding events under
+// ~/.it2/sessions. If the query is not an it2 SID, or no binding exists (e.g.
+// the SessionStart hook never ran for that pane), the query passes through
+// unchanged so the normal content search still applies.
+func resolveIt2SID(query string) string {
+	if !it2SIDPattern.MatchString(query) {
+		return query
+	}
+	root, ok := it2bind.DefaultRoot()
+	if !ok {
+		return query
+	}
+	intervals, err := it2bind.Load(root)
+	if err != nil {
+		return query
+	}
+	if sessions := it2bind.SessionsForSID(intervals, query); len(sessions) > 0 {
+		return sessions[0]
 	}
 	return query
 }

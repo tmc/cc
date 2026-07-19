@@ -348,6 +348,42 @@ func TestNormalizeClaudeURL(t *testing.T) {
 	}
 }
 
+func TestResolveIt2SID(t *testing.T) {
+	// Fixture: pane PANE resolves to sess-new (most recent) over sess-old.
+	const pane = "AAAAAAAA-1111-2222-3333-444444444444"
+	root := t.TempDir()
+	t.Setenv("IT2_HOME", root)
+	dir := filepath.Join(root, "sessions", pane, "artifacts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := func(sess, ts string) string {
+		return `{"session_id":"` + sess + `","source":"startup","hook_event_name":"SessionStart",` +
+			`"_it2":{"it2_sid":"` + pane + `","boot_id":"boot-1","ts":"` + ts + `"}}`
+	}
+	events := line("sess-old", "2026-07-19T09:00:00Z") + "\n" + line("sess-new", "2026-07-19T12:00:00Z") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude-code-events.ndjson"), []byte(events), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name, query, want string
+	}{
+		{"bare it2 sid resolves to newest session", pane, "sess-new"},
+		{"prefixed it2 sid resolves too", "w0t0p4:" + pane, "sess-new"},
+		{"unknown pane passes through", "BBBBBBBB-1111-2222-3333-444444444444", "BBBBBBBB-1111-2222-3333-444444444444"},
+		{"non-sid query passes through", "kafka rebalance", "kafka rebalance"},
+		{"artifact uuid-shaped but not a bound pane passes through", "00000010-1000-4000-8000-000000000002", "00000010-1000-4000-8000-000000000002"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveIt2SID(tt.query); got != tt.want {
+				t.Errorf("resolveIt2SID(%q) = %q, want %q", tt.query, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFilterMatches(t *testing.T) {
 	root := t.TempDir()
 	codex := filepath.Join(root, ".codex")
