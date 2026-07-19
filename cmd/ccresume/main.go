@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,6 +74,12 @@ func run() error {
 	if query == "" {
 		return fmt.Errorf("no search query provided (use argument or clipboard)")
 	}
+	// A claude.ai artifact/session/design URL (e.g. copied from the web app,
+	// query string and all) is reduced to the bare identifier so it matches the
+	// creating session's transcript. The artifact UUID appears verbatim in the
+	// session that published it, so the content search resolves the resume
+	// command for that session.
+	query = normalizeClaudeURL(query)
 
 	since, err := ccpaths.ParseDuration(*sinceFlag)
 	if err != nil {
@@ -247,18 +254,29 @@ func sameDirectory(a, b string) bool {
 }
 
 func sortIndexMatches(query string, matches []cc.IndexEntry, curGitCommonDir string) {
+	// Count occurrences once per match: transcript content when the query is
+	// only found there (e.g. an artifact URL, which appears in the creating
+	// session's tool results but in no index field), otherwise the cheaper
+	// index-metadata count. This keeps the -1/--paths ordering consistent with
+	// the default sort, which ranks by occurrences before the cwd tiebreaker.
+	occ := make(map[string]int, len(matches))
+	for _, m := range matches {
+		n := countIndexOccurrences(query, m)
+		if n == 0 {
+			n = countFileOccurrences(query, m.FullPath)
+		}
+		occ[m.FullPath] = n
+	}
 	sort.SliceStable(matches, func(i, j int) bool {
+		if oi, oj := occ[matches[i].FullPath], occ[matches[j].FullPath]; oi != oj {
+			return oi > oj
+		}
 		if curGitCommonDir != "" {
 			ic := matches[i].ProjectPath == curGitCommonDir
 			jc := matches[j].ProjectPath == curGitCommonDir
 			if ic != jc {
 				return ic
 			}
-		}
-		io := countIndexOccurrences(query, matches[i])
-		jo := countIndexOccurrences(query, matches[j])
-		if io != jo {
-			return io > jo
 		}
 		return matches[i].ModifiedTime().After(matches[j].ModifiedTime())
 	})
@@ -390,6 +408,35 @@ func countOccurrences(query, text string) int {
 
 func jsonCWDField(path string) string {
 	return `"cwd":"` + strings.ReplaceAll(path, `"`, `\"`) + `"`
+}
+
+// normalizeClaudeURL reduces a claude.ai URL to the bare identifier a session
+// transcript contains. An artifact URL yields its UUID, a session link yields
+// session_<id>, and a design link yields its slug; the query string and
+// fragment are discarded. Any other query passes through unchanged.
+func normalizeClaudeURL(query string) string {
+	if !strings.HasPrefix(query, "https://claude.ai/") && !strings.HasPrefix(query, "http://claude.ai/") {
+		return query
+	}
+	u, err := url.Parse(query)
+	if err != nil || u.Host != "claude.ai" {
+		return query
+	}
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	// The identifier is the last path segment for the known forms:
+	//   /code/artifact/<uuid>, /public/artifacts/<uuid>,
+	//   /code/session_<id>, /design/<slug>.
+	switch {
+	case len(segs) >= 3 && segs[0] == "code" && segs[1] == "artifact":
+		return segs[2]
+	case len(segs) >= 3 && segs[0] == "public" && segs[1] == "artifacts":
+		return segs[2]
+	case len(segs) >= 2 && segs[0] == "code" && strings.HasPrefix(segs[1], "session_"):
+		return segs[1]
+	case len(segs) >= 2 && segs[0] == "design":
+		return segs[1]
+	}
+	return query
 }
 
 func filterContentMatches(matches []cc.IndexEntry, contains string) ([]cc.IndexEntry, error) {

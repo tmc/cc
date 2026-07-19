@@ -291,6 +291,63 @@ func TestCountOccurrences(t *testing.T) {
 	}
 }
 
+func TestNormalizeClaudeURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{
+			name:  "artifact url with org query",
+			query: "https://claude.ai/code/artifact/00000010-1000-4000-8000-000000000002?org=8c103e58-d2b3-4b6b-acce-a980aff9815e",
+			want:  "00000010-1000-4000-8000-000000000002",
+		},
+		{
+			name:  "artifact url with fragment",
+			query: "https://claude.ai/code/artifact/abc123#top",
+			want:  "abc123",
+		},
+		{
+			name:  "session url",
+			query: "https://claude.ai/code/session_011vNeoaAt8eZGAi7MWbQtnn",
+			want:  "session_011vNeoaAt8eZGAi7MWbQtnn",
+		},
+		{
+			name:  "public artifact url",
+			query: "https://claude.ai/public/artifacts/4ad70609-2540-4a34-bd81-8f151278ecf4",
+			want:  "4ad70609-2540-4a34-bd81-8f151278ecf4",
+		},
+		{
+			name:  "design url",
+			query: "https://claude.ai/design/my-slug",
+			want:  "my-slug",
+		},
+		{
+			name:  "bare id passes through",
+			query: "00000010-1000-4000-8000-000000000002",
+			want:  "00000010-1000-4000-8000-000000000002",
+		},
+		{
+			name:  "non-claude url passes through",
+			query: "https://example.com/code/artifact/abc",
+			want:  "https://example.com/code/artifact/abc",
+		},
+		{
+			name:  "unrecognized claude path passes through",
+			query: "https://claude.ai/login",
+			want:  "https://claude.ai/login",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeClaudeURL(tt.query); got != tt.want {
+				t.Fatalf("normalizeClaudeURL(%q) = %q, want %q", tt.query, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFilterMatches(t *testing.T) {
 	root := t.TempDir()
 	codex := filepath.Join(root, ".codex")

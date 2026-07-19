@@ -6,6 +6,11 @@
 // form for codex, gemini, opencode, pi, and antigravity sessions). With -l the
 // resume is launched directly. Sessions for the current worktree are prioritized.
 //
+// A claude.ai URL is accepted as the query and reduced to its identifier before
+// searching, so pasting an artifact link (query string and all) resolves the
+// session that created the artifact. The same holds for code/session and design
+// links.
+//
 // # Usage
 //
 //	ccresume [flags] [query...]
@@ -40,4 +45,8 @@
 // Find sessions that ran a command and captured a particular result:
 //
 //	ccresume -cmd "it2 session current" -result 052AB527
+//
+// Resume the session that created an artifact, from its claude.ai URL:
+//
+//	ccresume -1 "https://claude.ai/code/artifact/00000010-1000-4000-8000-000000000002?org=..."
 package main
