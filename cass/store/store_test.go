@@ -888,7 +888,7 @@ func TestSkillsRoundTrip(t *testing.T) {
 		Skills: []cass.SkillUse{
 			{
 				Name:      "notebooklm-assisted-prompting",
-				Path:      "/Users/tmc/go/src/github.com/tmc/skills/skills/notebooklm-assisted-prompting/SKILL.md",
+				Path:      "/Users/example/go/src/github.com/tmc/skills/skills/notebooklm-assisted-prompting/SKILL.md",
 				Source:    "claude-code",
 				Kind:      "loaded",
 				Count:     1,
@@ -1009,21 +1009,21 @@ func TestSearchSummaryKeepsUsedSkillBadges(t *testing.T) {
 				Name:     "imagegen",
 				Kind:     "available",
 				Count:    1,
-				Path:     "/Users/tmc/.codex/skills/.system/imagegen/SKILL.md",
+				Path:     "/Users/example/.codex/skills/.system/imagegen/SKILL.md",
 				Evidence: []string{"available skills list"},
 			},
 			{
 				Name:     "imagegen",
 				Kind:     "loaded",
 				Count:    1,
-				Path:     "/Users/tmc/.codex/skills/.system/imagegen/SKILL.md",
+				Path:     "/Users/example/.codex/skills/.system/imagegen/SKILL.md",
 				Evidence: []string{"skill-expanded prompt context"},
 			},
 			{
 				Name:     "go-team-history-audit",
 				Kind:     "selected",
 				Count:    1,
-				Path:     "/Users/tmc/.codex/skills/go-team-history-audit/SKILL.md",
+				Path:     "/Users/example/.codex/skills/go-team-history-audit/SKILL.md",
 				Evidence: []string{"Skill tool invocation"},
 			},
 		},
@@ -1440,5 +1440,51 @@ func TestPurgeSubagentSessions(t *testing.T) {
 	// Idempotent: a second purge is a no-op.
 	if err := s.purgeSubagentSessions(ctx); err != nil {
 		t.Fatalf("second purge: %v", err)
+	}
+}
+
+func TestArtifactsSearchable(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sess := cass.Session{
+		ID:        "art-1",
+		Agent:     "claude-code",
+		Title:     "Artifact session",
+		Workspace: "/home/user/project",
+		StartedAt: time.Unix(100, 0),
+		EndedAt:   time.Unix(200, 0),
+		Messages: []cass.Message{
+			{Role: "user", Content: "ordinary prompt"},
+		},
+		Artifacts: []cass.Artifact{
+			{
+				Kind:  cass.ArtifactKindArtifact,
+				URL:   "https://claude.ai/code/artifact/00000010-1000-4000-8000-000000000002",
+				ID:    "00000010-1000-4000-8000-000000000002",
+				Title: "Release Dependency Graph",
+			},
+		},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Searchable by the artifact UUID even though it appears in no message text.
+	result, err := s.Search(ctx, cass.SearchRequest{Query: "00000010", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("uuid search hits = %d, want 1", len(result.Hits))
+	}
+
+	// Searchable by the artifact title.
+	result, err = s.Search(ctx, cass.SearchRequest{Query: "Release Dependency Graph", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("title search hits = %d, want 1", len(result.Hits))
 	}
 }

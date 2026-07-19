@@ -2929,6 +2929,20 @@ func buildContent(sess cass.Session) string {
 		}
 		b.WriteByte('\n')
 	}
+	for _, art := range sess.Artifacts {
+		if art.URL == "" {
+			continue
+		}
+		b.WriteString("artifact ")
+		b.WriteString(art.Kind)
+		b.WriteByte(' ')
+		b.WriteString(art.URL)
+		if art.Title != "" {
+			b.WriteByte(' ')
+			b.WriteString(art.Title)
+		}
+		b.WriteByte('\n')
+	}
 	for _, msg := range sess.Messages {
 		if msg.Content == "" {
 			continue
