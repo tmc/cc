@@ -214,6 +214,13 @@ type ToolUseResult struct {
 	TranscriptDir string `json:"transcriptDir,omitempty"`
 	ScriptPath    string `json:"scriptPath,omitempty"`
 
+	// Artifact fields returned by Claude Code's Artifact tool. URL is the
+	// published claude.ai artifact link, Path the local source file, and
+	// Title the artifact's title.
+	URL   string `json:"url,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Title string `json:"title,omitempty"`
+
 	// Usage for subagent results.
 	Usage             *Usage  `json:"usage,omitempty"`
 	DurationMs        float64 `json:"durationMs,omitempty"`
