@@ -20,6 +20,12 @@ type DB struct {
 	db *sql.DB
 }
 
+// SessionSource identifies an indexed session transcript.
+type SessionSource struct {
+	SessionID  string
+	SourcePath string
+}
+
 const hitStatsCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goals_json, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count`
 
 const hitSummaryCols = `ended_at, tool_calls, turns, input_tokens, output_tokens, files_edited, lines_written, duration_secs, sparkline, subagent_spawns, it2_sends, it2_screens, it2_splits, stats_json, team_name, agent_name, is_team_lead, git_common_dir, branch, goal_count, active_goal_count, completed_goal_count, skills_json, skill_count, selected_skill_count, loaded_skill_count, workflow_runs, workflow_agent_runs, workflow_task_ops`
@@ -1208,6 +1214,71 @@ func (s *DB) SourcePath(ctx context.Context, id string) (string, error) {
 	var path string
 	err := s.db.QueryRowContext(ctx, `SELECT source_path FROM sessions WHERE id = ?`, id).Scan(&path)
 	return path, err
+}
+
+// ClaudeSessionSources returns indexed Claude Code session transcripts. When
+// ids is non-empty, it restricts the result to those session IDs.
+func (s *DB) ClaudeSessionSources(ctx context.Context, ids []string) ([]SessionSource, error) {
+	where := "WHERE agent = 'claude-code'"
+	args := make([]any, 0, len(ids))
+	if len(ids) > 0 {
+		where += " AND id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + ")"
+		for _, id := range ids {
+			args = append(args, id)
+		}
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, source_path FROM sessions `+where+` ORDER BY id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query Claude session sources: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []SessionSource
+	for rows.Next() {
+		var source SessionSource
+		if err := rows.Scan(&source.SessionID, &source.SourcePath); err != nil {
+			return nil, fmt.Errorf("scan Claude session source: %w", err)
+		}
+		sources = append(sources, source)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate Claude session sources: %w", err)
+	}
+	return sources, nil
+}
+
+// BackfillArtifactEvents replaces one session's publication events without
+// changing the session row or its full-text index.
+func (s *DB) BackfillArtifactEvents(ctx context.Context, sessionID string, artifacts []cass.Artifact) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin artifact event backfill: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "DELETE FROM artifact_events WHERE session_id = ?", sessionID); err != nil {
+		return fmt.Errorf("clear artifact events %s: %w", sessionID, err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO artifact_events (
+			session_id, event_id, kind, artifact_id, url, path, title, source, timestamp
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare artifact event backfill: %w", err)
+	}
+	defer stmt.Close()
+	for _, art := range artifacts {
+		if art.Source != "tool_result" || art.EventID == "" {
+			continue
+		}
+		if _, err := stmt.ExecContext(ctx, sessionID, art.EventID, art.Kind, art.ID, art.URL, art.Path, art.Title, art.Source, art.Timestamp); err != nil {
+			return fmt.Errorf("insert artifact event %s/%s: %w", sessionID, art.EventID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit artifact event backfill: %w", err)
+	}
+	return nil
 }
 
 // Session returns indexed metadata for a single session.

@@ -1575,3 +1575,55 @@ func TestArtifactEventsLifecycle(t *testing.T) {
 		t.Errorf("artifact events after delete by agent = %d, want 0", count)
 	}
 }
+
+func TestBackfillArtifactEventsDoesNotRewriteSession(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess := cass.Session{
+		ID:         "backfill-artifacts",
+		Agent:      "claude-code",
+		Title:      "Backfill artifacts",
+		SourcePath: "/tmp/session.jsonl",
+		Messages:   []cass.Message{{Role: "assistant", Content: "keep this FTS content"}},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+
+	sources, err := s.ClaudeSessionSources(ctx, []string{sess.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].SourcePath != sess.SourcePath {
+		t.Fatalf("ClaudeSessionSources = %+v", sources)
+	}
+
+	events := []cass.Artifact{{
+		EventID:   "entry-1",
+		Kind:      cass.ArtifactKindArtifact,
+		ID:        "artifact-1",
+		URL:       "https://claude.ai/code/artifact/artifact-1",
+		Path:      "/tmp/report.html",
+		Title:     "Report",
+		Source:    "tool_result",
+		Timestamp: "2025-01-15T10:30:00Z",
+	}}
+	if err := s.BackfillArtifactEvents(ctx, sess.ID, events); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.Search(ctx, cass.SearchRequest{Query: "keep this FTS content"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].SessionID != sess.ID {
+		t.Errorf("search after backfill = %+v", result.Hits)
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM artifact_events WHERE session_id = ?`, sess.ID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("artifact events after backfill = %d, want 1", count)
+	}
+}

@@ -13,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/cass/collector"
 	"github.com/tmc/cc/cass/service"
 	"github.com/tmc/cc/cass/store"
 	"github.com/tmc/cc/cass/web"
@@ -42,6 +44,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "commands:")
 		fmt.Fprintln(os.Stderr, "  detect     detect installed AI coding agents")
 		fmt.Fprintln(os.Stderr, "  index      index sessions from detected agents")
+		fmt.Fprintln(os.Stderr, "  backfill-artifacts  backfill artifact publication events from Claude transcripts")
 		fmt.Fprintln(os.Stderr, "  search     search indexed sessions")
 		fmt.Fprintln(os.Stderr, "  resume     search and resume a session interactively")
 		fmt.Fprintln(os.Stderr, "  goals      list goal-mode objectives")
@@ -68,6 +71,9 @@ func run() error {
 	// Detect doesn't need the store.
 	if cmd == "detect" {
 		return runDetect(ctx, *jsonOutput, logger)
+	}
+	if cmd == "backfill-artifacts" {
+		return runBackfillArtifacts(ctx, *dbPath, args[1:], *jsonOutput)
 	}
 
 	svc, err := service.New(service.Config{
@@ -107,6 +113,98 @@ func run() error {
 	default:
 		return fmt.Errorf("unknown command: %s", cmd)
 	}
+}
+
+func runBackfillArtifacts(ctx context.Context, dbPath string, args []string, jsonOut bool) error {
+	fs := flag.NewFlagSet("backfill-artifacts", flag.ContinueOnError)
+	all := fs.Bool("all", false, "backfill all indexed Claude Code sessions")
+	ids := fs.String("session", "", "comma-separated session IDs to backfill")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if dbPath == "" {
+		return fmt.Errorf("backfill-artifacts requires -db pointing to a database copy")
+	}
+	if isLiveCassDB(dbPath) {
+		return fmt.Errorf("refusing to backfill the live database; use a copy")
+	}
+	if !*all && *ids == "" {
+		return fmt.Errorf("specify -all or -session")
+	}
+
+	var sessionIDs []string
+	if *ids != "" {
+		for _, id := range strings.Split(*ids, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				sessionIDs = append(sessionIDs, id)
+			}
+		}
+	}
+	db, err := store.New(dbPath)
+	if err != nil {
+		return fmt.Errorf("open backfill database: %w", err)
+	}
+	defer db.Close()
+	sources, err := db.ClaudeSessionSources(ctx, sessionIDs)
+	if err != nil {
+		return err
+	}
+	if len(sources) == 0 {
+		return fmt.Errorf("no indexed Claude Code sessions matched")
+	}
+
+	type backfill struct {
+		sessionID string
+		artifacts []cass.Artifact
+	}
+	backfills := make([]backfill, 0, len(sources))
+	for _, source := range sources {
+		entries, err := cc.ReadFile(ctx, source.SourcePath)
+		if err != nil {
+			return fmt.Errorf("read transcript %s: %w", source.SourcePath, err)
+		}
+		backfills = append(backfills, backfill{
+			sessionID: source.SessionID,
+			artifacts: collector.ExtractArtifacts(entries),
+		})
+	}
+
+	events := 0
+	for _, backfill := range backfills {
+		if err := db.BackfillArtifactEvents(ctx, backfill.sessionID, backfill.artifacts); err != nil {
+			return err
+		}
+		for _, art := range backfill.artifacts {
+			if art.Source == "tool_result" && art.EventID != "" {
+				events++
+			}
+		}
+	}
+	if jsonOut {
+		return json.NewEncoder(os.Stdout).Encode(map[string]int{
+			"sessions": len(backfills),
+			"events":   events,
+		})
+	}
+	fmt.Printf("backfilled %d artifact events from %d sessions\n", events, len(backfills))
+	return nil
+}
+
+func isLiveCassDB(path string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	live := filepath.Join(home, ".cache", "cass", "index.db")
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	live, err = filepath.Abs(live)
+	if err != nil {
+		return false
+	}
+	return path == live
 }
 
 func runDetect(ctx context.Context, jsonOut bool, logger *slog.Logger) error {
