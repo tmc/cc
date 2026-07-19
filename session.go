@@ -28,3 +28,7 @@ const initialBufferSize = ccmodel.InitialBufferSize
 
 // ExtractAnyText returns text from string, block-array, or nested JSON values.
 var ExtractAnyText = ccmodel.ExtractAnyText
+
+// IsHarnessPreamble reports whether text is harness-supplied context rather
+// than a prompt written by the user.
+func IsHarnessPreamble(text string) bool { return ccmodel.IsHarnessPreamble(text) }

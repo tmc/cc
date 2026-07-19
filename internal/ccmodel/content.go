@@ -20,6 +20,36 @@ func (m *Message) TextContent() string {
 	return ExtractAnyText(m.Content)
 }
 
+// IsHarnessPreamble reports whether text is harness-supplied context rather
+// than a prompt written by the user. It recognizes instruction envelopes and
+// Markdown instruction-file headers used by coding-agent harnesses.
+func IsHarnessPreamble(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	firstLine, _, _ := strings.Cut(text, "\n")
+	firstLine = strings.TrimSpace(firstLine)
+	words := strings.Fields(firstLine)
+	if len(words) >= 3 && words[0] == "#" && strings.HasSuffix(strings.ToLower(words[1]), ".md") && strings.EqualFold(words[2], "instructions") {
+		return true
+	}
+	for _, prefix := range []string{
+		"<permissions instructions>",
+		"<instructions>",
+		"<environment_context>",
+		"<user_instructions>",
+		"<skills_instructions>",
+		"<apps_instructions>",
+		"<plugins_instructions>",
+	} {
+		if strings.HasPrefix(strings.ToLower(firstLine), prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // ToolUses returns only the tool_use blocks from message content.
 func (m *Message) ToolUses() []ContentBlock {
 	var uses []ContentBlock

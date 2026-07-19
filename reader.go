@@ -477,7 +477,7 @@ func Summarize(file string, entries []Entry) SessionSummary {
 					break
 				}
 				s.UserMessages++
-				if s.FirstPrompt == "" && !e.IsMeta {
+				if s.FirstPrompt == "" && !e.IsMeta && !IsHarnessPreamble(e.Message.TextContent()) {
 					s.FirstPrompt = ExtractText(e.Message.Content)
 				}
 				if s.Model == "" && e.Message.Model != "" {

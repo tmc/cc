@@ -41,7 +41,7 @@ type Options struct {
 	// DropCommands removes harness noise from user turns: slash-command
 	// expansions and system/instruction/context preambles that a reader did not
 	// already mark IsMeta. A turn is dropped only when its text begins with a
-	// known wrapper tag (see noisePrefixes); a prompt that merely mentions such
+	// known wrapper form; a prompt that merely mentions such
 	// a tag mid-text is kept. IsMeta and non-message entries are always dropped
 	// regardless of this option.
 	DropCommands bool
@@ -243,25 +243,18 @@ func toolResultTurn(m *cc.Message) (Turn, bool) {
 	return Turn{Role: RoleUser, Blocks: blocks}, true
 }
 
-// noisePrefixes are the leading wrapper tags that mark a user turn as harness
-// noise rather than a human prompt: slash-command expansions and
-// instruction/context preambles that a reader did not already mark IsMeta. A
-// turn is dropped only when its text (after trimming leading whitespace) begins
-// with one of these exact markers, so a prompt that merely mentions a tag
-// mid-text is never affected. The markers are matched literally (no
-// lowercasing).
+// noisePrefixes are slash-command wrappers that mark a user turn as harness
+// noise rather than a human prompt. Instruction and context preambles use the
+// shared cc.IsHarnessPreamble classifier.
 var noisePrefixes = []string{
-	"<command-name>",           // claude slash-command expansion
-	"<command-message>",        // claude slash-command expansion
-	"<command-args>",           // claude slash-command expansion
-	"<local-command-stdout>",   // claude local command output echo
-	"<environment_context>",    // codex/others context preamble (when not IsMeta)
-	"<user_instructions>",      // codex/others instruction preamble (when not IsMeta)
-	"# AGENTS.md instructions", // AGENTS.md preamble (when not IsMeta)
+	"<command-name>",         // claude slash-command expansion
+	"<command-message>",      // claude slash-command expansion
+	"<command-args>",         // claude slash-command expansion
+	"<local-command-stdout>", // claude local command output echo
 }
 
 // userTurn renders a human user message into a Turn. It reports false for
-// harness noise (when opts.DropCommands; see noisePrefixes) and for empty
+// harness noise (when opts.DropCommands) and for empty
 // turns.
 func userTurn(m *cc.Message, opts Options) (Turn, bool) {
 	text := m.TextContent()
@@ -274,10 +267,13 @@ func userTurn(m *cc.Message, opts Options) (Turn, bool) {
 	return Turn{Role: RoleUser, Blocks: []Block{{Kind: KindText, Text: text}}}, true
 }
 
-// isNoisePrefix reports whether text begins with a known harness wrapper tag,
-// after trimming leading whitespace. It matches a prefix only, so a prompt that
-// merely mentions a tag mid-sentence is never dropped.
+// isNoisePrefix reports whether text is a shared harness preamble or begins
+// with a slash-command wrapper. A prompt that merely mentions a wrapper
+// mid-sentence is never dropped.
 func isNoisePrefix(text string) bool {
+	if cc.IsHarnessPreamble(text) {
+		return true
+	}
 	t := strings.TrimLeft(text, " \t\r\n")
 	for _, p := range noisePrefixes {
 		if strings.HasPrefix(t, p) {

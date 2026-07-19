@@ -40,6 +40,16 @@ func TestSummarizeTracksLatestAndDistinctCWDs(t *testing.T) {
 	}
 }
 
+func TestSummarizeSkipsHarnessPreamble(t *testing.T) {
+	entries := []Entry{
+		{Message: &Message{Role: "user", Content: json.RawMessage(`"# Project.md instructions\nUse tabs."`)}},
+		{Message: &Message{Role: "user", Content: json.RawMessage(`"fix the session title"`)}},
+	}
+	if got := Summarize("session.jsonl", entries).FirstPrompt; got != "fix the session title" {
+		t.Errorf("FirstPrompt = %q, want real user prompt", got)
+	}
+}
+
 // TestSummaryGitContextJSON guards the wire format: the embedded ccgit.GitContext
 // must still flatten its fields into the top level of SessionSummary JSON after
 // the move to a separate package.

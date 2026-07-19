@@ -212,7 +212,7 @@ func decodeCodexResponseItem(env codexEnvelope) (ccmodel.Entry, bool) {
 				Content: content,
 			},
 		}
-		if payload.Role == "developer" || payload.Role == "user" && isCodexSystemPreamble(blocks) {
+		if payload.Role == "developer" || payload.Role == "user" && ccmodel.IsHarnessPreamble(blocks[0].Text) {
 			entry.IsMeta = true
 		}
 		return entry, true
@@ -385,22 +385,6 @@ func decodeCodexEventMsg(env codexEnvelope) (ccmodel.Entry, bool) {
 		Timestamp: env.Timestamp,
 		Usage:     u,
 	}, true
-}
-
-// isCodexSystemPreamble detects codex user messages that contain injected
-// system instructions (AGENTS.md, permissions, etc.) rather than actual user input.
-func isCodexSystemPreamble(blocks []ccmodel.ContentBlock) bool {
-	if len(blocks) == 0 {
-		return false
-	}
-	text := blocks[0].Text
-	if len(text) > 200 {
-		text = text[:200]
-	}
-	return strings.HasPrefix(text, "# AGENTS.md instructions") ||
-		strings.HasPrefix(text, "<permissions instructions>") ||
-		strings.HasPrefix(text, "<INSTRUCTIONS>") ||
-		strings.HasPrefix(text, "<environment_context>")
 }
 
 func codexTextBlocks(raw json.RawMessage) []ccmodel.ContentBlock {
