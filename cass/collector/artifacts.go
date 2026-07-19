@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -24,13 +25,13 @@ var claudeLinkPattern = regexp.MustCompile(
 //   - claude.ai links mentioned in assistant text or Bash commands, such as
 //     session and design links pasted into commit messages or PR bodies.
 //
-// Artifacts are deduplicated by URL; the first occurrence wins, so a published
-// artifact (with its path and title) is preferred over a bare link mention.
+// Each Artifact tool result is a publication event and is retained. Incidental
+// text and command references are deduplicated by URL.
 func ExtractArtifacts(entries []cc.Entry) []cass.Artifact {
 	var artifacts []cass.Artifact
 	seen := make(map[string]bool)
 
-	add := func(a cass.Artifact) {
+	addReference := func(a cass.Artifact) {
 		if a.URL == "" || seen[a.URL] {
 			return
 		}
@@ -38,7 +39,7 @@ func ExtractArtifacts(entries []cc.Entry) []cass.Artifact {
 		artifacts = append(artifacts, a)
 	}
 
-	for _, e := range entries {
+	for i, e := range entries {
 		ts := ""
 		if !e.Timestamp.IsZero() {
 			ts = e.Timestamp.Format(tsFormat)
@@ -47,7 +48,8 @@ func ExtractArtifacts(entries []cc.Entry) []cass.Artifact {
 		// Artifact tool result: the canonical, fully-populated source.
 		if r := e.ToolUseResult; r != nil {
 			if kind := classifyArtifact(r.URL); kind != "" {
-				add(cass.Artifact{
+				artifacts = append(artifacts, cass.Artifact{
+					EventID:   artifactEventID(e.UUID, i),
 					Kind:      kind,
 					URL:       r.URL,
 					ID:        artifactID(r.URL),
@@ -71,13 +73,20 @@ func ExtractArtifacts(entries []cc.Entry) []cass.Artifact {
 		for _, b := range e.Message.ContentBlocks() {
 			switch {
 			case b.Type == "text":
-				addLinks(add, b.Text, "text", ts)
+				addLinks(addReference, b.Text, "text", ts)
 			case b.Type == "tool_use" && b.Name == "Bash":
-				addLinks(add, extractBashCommand(b.Input), "command", ts)
+				addLinks(addReference, extractBashCommand(b.Input), "command", ts)
 			}
 		}
 	}
 	return artifacts
+}
+
+func artifactEventID(uuid string, ordinal int) string {
+	if uuid != "" {
+		return uuid
+	}
+	return fmt.Sprintf("entry-%d", ordinal)
 }
 
 // addLinks finds claude.ai links in text and passes each to add.

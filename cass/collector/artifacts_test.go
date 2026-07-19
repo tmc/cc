@@ -142,12 +142,58 @@ Claude-Session: `+sessionURL+`"`, ts),
 				artifactResultEntry(artifactURL, "/tmp/r.html", "Report", ts),
 				assistantTextEntry("Reminder: "+artifactURL, ts.Add(time.Minute)),
 			},
-			wantCount: 1,
+			wantCount: 2,
 			check: func(t *testing.T, arts []cass.Artifact) {
 				if arts[0].Source != "tool_result" || arts[0].Path == "" {
-					t.Errorf("expected tool_result with path to win, got %+v", arts[0])
+					t.Errorf("first artifact = %+v, want tool result", arts[0])
+				}
+				if arts[1].Source != "text" {
+					t.Errorf("second artifact = %+v, want text reference", arts[1])
 				}
 			},
+		},
+		{
+			name: "tool result preferred over earlier text mention",
+			entries: []cc.Entry{
+				assistantTextEntry("Published at "+artifactURL, ts),
+				artifactResultEntry(artifactURL, "/tmp/r.html", "Report", ts.Add(time.Minute)),
+			},
+			wantCount: 2,
+			check: func(t *testing.T, arts []cass.Artifact) {
+				if arts[0].Source != "text" {
+					t.Errorf("first artifact = %+v, want text reference", arts[0])
+				}
+				if arts[1].Source != "tool_result" || arts[1].Path != "/tmp/r.html" || arts[1].Title != "Report" {
+					t.Errorf("second artifact = %+v, want tool result", arts[1])
+				}
+			},
+		},
+		{
+			name: "publication events retain redeploys",
+			entries: []cc.Entry{
+				artifactResultEntry(artifactURL, "/tmp/first.html", "First", ts),
+				artifactResultEntry(artifactURL, "/tmp/second.html", "Second", ts.Add(time.Minute)),
+			},
+			wantCount: 2,
+			check: func(t *testing.T, arts []cass.Artifact) {
+				if arts[0].Source != "tool_result" || arts[1].Source != "tool_result" {
+					t.Errorf("artifacts = %+v, want two publication events", arts)
+				}
+				if arts[0].Path != "/tmp/first.html" || arts[1].Path != "/tmp/second.html" {
+					t.Errorf("artifacts = %+v, want path snapshots", arts)
+				}
+				if arts[0].EventID == "" || arts[1].EventID == "" || arts[0].EventID == arts[1].EventID {
+					t.Errorf("event IDs = %q, %q, want distinct non-empty IDs", arts[0].EventID, arts[1].EventID)
+				}
+			},
+		},
+		{
+			name: "incidental references are deduplicated",
+			entries: []cc.Entry{
+				assistantTextEntry("Published at "+artifactURL, ts),
+				assistantTextEntry("Again: "+artifactURL, ts.Add(time.Minute)),
+			},
+			wantCount: 1,
 		},
 		{
 			name: "user text mentions are ignored",

@@ -83,12 +83,13 @@ const (
 // a commit message, or a tool command. Path and Title are populated only for
 // artifacts published in this session (from the Artifact tool result).
 type Artifact struct {
-	Kind      string `json:"kind"`             // one of the ArtifactKind* constants.
-	URL       string `json:"url"`              // full claude.ai URL.
-	ID        string `json:"id,omitempty"`     // the artifact/session/design identifier from the URL.
-	Path      string `json:"path,omitempty"`   // local source file (published artifacts only).
-	Title     string `json:"title,omitempty"`  // artifact title (published artifacts only).
-	Source    string `json:"source,omitempty"` // where it was found: "tool_result", "text", or "command".
+	EventID   string `json:"event_id,omitempty"` // source entry UUID, or its transcript ordinal.
+	Kind      string `json:"kind"`               // one of the ArtifactKind* constants.
+	URL       string `json:"url"`                // full claude.ai URL.
+	ID        string `json:"id,omitempty"`       // the artifact/session/design identifier from the URL.
+	Path      string `json:"path,omitempty"`     // local source file (published artifacts only).
+	Title     string `json:"title,omitempty"`    // artifact title (published artifacts only).
+	Source    string `json:"source,omitempty"`   // where it was found: "tool_result", "text", or "command".
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
