@@ -17,6 +17,11 @@
 // events a SessionStart hook records under ~/.it2/sessions. When no binding
 // exists, the query is searched as ordinary text.
 //
+// A copied it2 log line ([it2:send-text src=… dst=…], also send-key and other
+// [it2:…] forms) or a collab-msg header (<collab-msg src=…>) is accepted too:
+// the pane ID is extracted and resolved as above. By default the src pane (the
+// sender) is used; -sid-side=dst selects the recipient instead.
+//
 // # Usage
 //
 //	ccresume [flags] [query...]
@@ -33,6 +38,7 @@
 //	-result text Only include sessions with a tool result containing text.
 //	-dir path    Only include sessions recorded in this directory.
 //	-harness h   Only include sessions from h (for example, codex).
+//	-sid-side s  For an it2 send-text line query, resume the src (default) or dst pane.
 //
 // # Examples
 //
@@ -59,4 +65,8 @@
 // Resume the session that ran in an iTerm2 pane, from its session ID:
 //
 //	ccresume "$ITERM_SESSION_ID"
+//
+// Resume a pane's session from a copied it2 log line (resolves the src pane):
+//
+//	ccresume "[it2:send-text src=A5B2B529 dst=481499F5]"
 package main

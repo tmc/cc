@@ -348,6 +348,35 @@ func TestNormalizeClaudeURL(t *testing.T) {
 	}
 }
 
+func TestExtractIt2SID(t *testing.T) {
+	const (
+		fullUUID = "A28AB5E5-B849-4F2B-8CD4-45E0AA377AB4"
+		sendLine = "[it2:send-text src=A5B2B529 dst=481499F5]"
+	)
+	tests := []struct {
+		name, query, side, want string
+	}{
+		{"send-text src default", sendLine, "src", "A5B2B529"},
+		{"send-text dst override", sendLine, "dst", "481499F5"},
+		{"send-key src", "[it2:send-key src=AABBCCDD dst=11223344]", "src", "AABBCCDD"},
+		{"collab-msg src", `<collab-msg src="` + fullUUID + `">`, "src", fullUUID},
+		{"collab-msg dst falls back to src", `<collab-msg src="` + fullUUID + `">`, "dst", fullUUID},
+		{"wNtNpN prefix on src stripped-tolerated", "[it2:send-text src=w0t0p4:AABBCCDD dst=11223344]", "src", "AABBCCDD"},
+		{"wNtNpN prefix on dst", "[it2:send-text src=AABBCCDD dst=w1t2p3:11223344]", "dst", "11223344"},
+		{"two markers: first only", sendLine + " then [it2:send-text src=99999999 dst=88888888]", "src", "A5B2B529"},
+		{"no marker: plain text unchanged", "kafka rebalance", "src", "kafka rebalance"},
+		{"no marker: claude url unchanged", "https://claude.ai/code/artifact/abc123", "src", "https://claude.ai/code/artifact/abc123"},
+		{"no marker: bare sid unchanged (idempotent)", fullUUID, "src", fullUUID},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractIt2SID(tt.query, tt.side); got != tt.want {
+				t.Errorf("extractIt2SID(%q, %q) = %q, want %q", tt.query, tt.side, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveIt2SID(t *testing.T) {
 	// Fixture: pane PANE resolves to sess-new (most recent) over sess-old.
 	const pane = "AAAAAAAA-1111-2222-3333-444444444444"
@@ -405,6 +434,36 @@ func TestResolveIt2SIDCrossBoot(t *testing.T) {
 	}
 	if got := resolveIt2SID(pane); got != "sess-restored" {
 		t.Errorf("resolveIt2SID(%q) = %q, want sess-restored (binding continuous across boots)", pane, got)
+	}
+}
+
+// TestExtractThenResolveIt2SID exercises the pipeline order: a copied send-text
+// line whose src pane has a binding resolves through extractIt2SID ->
+// resolveIt2SID to the bound session; with no binding it falls through to the
+// bare SID for content search rather than erroring.
+func TestExtractThenResolveIt2SID(t *testing.T) {
+	const pane = "DDDDDDDD-1111-2222-3333-444444444444"
+	root := t.TempDir()
+	t.Setenv("IT2_HOME", root)
+	dir := filepath.Join(root, "sessions", pane, "artifacts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"session_id":"sess-bound","source":"startup","hook_event_name":"SessionStart",` +
+		`"_it2":{"it2_sid":"` + pane + `","boot_id":"boot-1","ts":"2026-07-19T10:00:00Z"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude-code-events.ndjson"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A send-text line whose src is the bound pane resolves to its session.
+	marker := "[it2:send-text src=" + pane + " dst=99999999-1111-2222-3333-444444444444]"
+	if got := resolveIt2SID(extractIt2SID(marker, "src")); got != "sess-bound" {
+		t.Errorf("pipeline(%q) = %q, want sess-bound", marker, got)
+	}
+	// An unbound pane in the marker falls through to the bare SID (for content search).
+	unbound := "[it2:send-text src=EEEEEEEE-1111-2222-3333-444444444444 dst=" + pane + "]"
+	if got := resolveIt2SID(extractIt2SID(unbound, "src")); got != "EEEEEEEE-1111-2222-3333-444444444444" {
+		t.Errorf("pipeline(%q) = %q, want the bare src SID for content search", unbound, got)
 	}
 }
 

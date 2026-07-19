@@ -32,6 +32,7 @@ var (
 	resultFlag  = flag.String("result", "", "Only include sessions with a tool result containing this literal text")
 	dirFlag     = flag.String("dir", "", "Only include sessions recorded in this directory")
 	harnessFlag = flag.String("harness", "", "Only include sessions from this harness")
+	sidSideFlag = flag.String("sid-side", "src", "When a query is an it2 send-text line, resume the src or dst pane")
 )
 
 func main() {
@@ -82,6 +83,10 @@ func run() error {
 	// session that published it, so the content search resolves the resume
 	// command for that session.
 	query = normalizeClaudeURL(query)
+	// A copied it2 log line ([it2:send-text src=X dst=Y]) or collab-msg header
+	// (<collab-msg src="X">) is reduced to the bare pane ID for the chosen side,
+	// so pasting one of those lines resolves the pane's session too.
+	query = extractIt2SID(query, *sidSideFlag)
 	// An iTerm2 session ID (a pane UUID, optionally with the wNtNpN: prefix) is
 	// resolved to the harness session most recently bound to that pane, so
 	// pasting a pane ID resumes the session that ran there.
@@ -448,6 +453,36 @@ func normalizeClaudeURL(query string) string {
 // it2SIDPattern matches an iTerm2 session ID: a bare UUID, or the wNtNpN:UUID
 // form that $ITERM_SESSION_ID carries.
 var it2SIDPattern = regexp.MustCompile(`^(?:w\d+t\d+p\d+:)?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
+
+// it2 pane-ID markers as they appear in transcripts and terminals:
+//   - a tool-result bracket, [it2:send-text src=X dst=Y] (also send-key, etc.)
+//   - a collab-msg header, <collab-msg src="X">
+//
+// The SID is a short 8-hex prefix or a full UUID, optionally wNtNpN:-prefixed;
+// it2bind.SessionsForSID tolerates all three forms.
+var (
+	it2SrcRe = regexp.MustCompile(`(?:\[it2:[^\]]*\bsrc=|<collab-msg[^>]*\bsrc=")(w\d+t\d+p\d+:)?([0-9A-Fa-f-]{8,36})`)
+	it2DstRe = regexp.MustCompile(`\[it2:[^\]]*\bdst=(w\d+t\d+p\d+:)?([0-9A-Fa-f-]{8,36})`)
+)
+
+// extractIt2SID reduces a copied it2 log line or collab-msg header to the bare
+// pane ID for the chosen side ("src" or "dst"), which resolveIt2SID then turns
+// into a session. Only the first marker in the query is used. A dst request
+// with no dst present falls back to src. A query with no recognized marker
+// (a URL, plain text, or an already-bare SID) is returned unchanged, so this is
+// safe to run before resolveIt2SID regardless of input.
+func extractIt2SID(query, side string) string {
+	if side == "dst" {
+		if m := it2DstRe.FindStringSubmatch(query); m != nil {
+			return m[2]
+		}
+		// No dst (e.g. a collab-msg header); fall back to the sender.
+	}
+	if m := it2SrcRe.FindStringSubmatch(query); m != nil {
+		return m[2]
+	}
+	return query
+}
 
 // resolveIt2SID rewrites an iTerm2 session ID query to the harness session most
 // recently bound to that pane, using the per-pane binding events under
