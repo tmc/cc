@@ -1488,3 +1488,90 @@ func TestArtifactsSearchable(t *testing.T) {
 		t.Fatalf("title search hits = %d, want 1", len(result.Hits))
 	}
 }
+
+func TestArtifactEventsLifecycle(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	first := cass.Session{
+		ID:        "artifact-events",
+		Agent:     "claude-code",
+		Title:     "Artifact events",
+		Workspace: "/work",
+		Artifacts: []cass.Artifact{
+			{
+				EventID:   "entry-1",
+				Kind:      cass.ArtifactKindArtifact,
+				ID:        "artifact-1",
+				URL:       "https://claude.ai/code/artifact/artifact-1",
+				Path:      "/tmp/first.html",
+				Title:     "First",
+				Source:    "tool_result",
+				Timestamp: "2025-01-15T10:30:00Z",
+			},
+			{
+				Kind:   cass.ArtifactKindArtifact,
+				ID:     "artifact-1",
+				URL:    "https://claude.ai/code/artifact/artifact-1",
+				Source: "text",
+			},
+		},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{first}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got struct {
+		EventID, Path, Title, Source string
+	}
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT event_id, path, title, source FROM artifact_events WHERE session_id = ?`, first.ID,
+	).Scan(&got.EventID, &got.Path, &got.Title, &got.Source); err != nil {
+		t.Fatal(err)
+	}
+	if got != (struct{ EventID, Path, Title, Source string }{"entry-1", "/tmp/first.html", "First", "tool_result"}) {
+		t.Errorf("artifact event = %+v", got)
+	}
+
+	first.Artifacts[0].EventID = "entry-2"
+	first.Artifacts[0].Path = "/tmp/second.html"
+	if err := s.BatchIndex(ctx, []cass.Session{first}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM artifact_events WHERE session_id = ?`, first.ID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("artifact event count after reindex = %d, want 1", count)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT event_id FROM artifact_events WHERE session_id = ?`, first.ID).Scan(&got.EventID); err != nil {
+		t.Fatal(err)
+	}
+	if got.EventID != "entry-2" {
+		t.Errorf("event ID after reindex = %q, want entry-2", got.EventID)
+	}
+
+	if err := s.Delete(ctx, cass.DeleteFilter{IDs: []string{first.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM artifact_events`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("artifact events after delete by ID = %d, want 0", count)
+	}
+
+	if err := s.BatchIndex(ctx, []cass.Session{first}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(ctx, cass.DeleteFilter{Agent: "claude-code"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM artifact_events`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("artifact events after delete by agent = %d, want 0", count)
+	}
+}

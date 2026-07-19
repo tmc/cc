@@ -196,6 +196,23 @@ func (s *DB) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_links_session ON session_links(session_id);
 		CREATE INDEX IF NOT EXISTS idx_links_target ON session_links(target_session);
 
+		CREATE TABLE IF NOT EXISTS artifact_events (
+			session_id TEXT NOT NULL,
+			event_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			artifact_id TEXT NOT NULL,
+			url TEXT NOT NULL,
+			path TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL,
+			timestamp TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (session_id, event_id),
+			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_artifact_events_session ON artifact_events(session_id);
+		CREATE INDEX IF NOT EXISTS idx_artifact_events_artifact ON artifact_events(kind, artifact_id, timestamp);
+
 		CREATE TABLE IF NOT EXISTS session_mapping (
 			iterm_session TEXT NOT NULL,
 			claude_session TEXT NOT NULL,
@@ -456,6 +473,16 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 	}
 	defer linkStmt.Close()
 
+	artifactStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO artifact_events (
+			session_id, event_id, kind, artifact_id, url, path, title, source, timestamp
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare artifact events: %w", err)
+	}
+	defer artifactStmt.Close()
+
 	runStmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO subagent_runs (
 			parent_session_id, agent_id, parent_claude_sid, workspace, git_common_dir,
@@ -545,6 +572,21 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		)
 		if err != nil {
 			return fmt.Errorf("insert %s: %w", sess.ID, err)
+		}
+
+		// Artifact publication events: clear and reinsert for this session.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM artifact_events WHERE session_id = ?", sess.ID); err != nil {
+			return fmt.Errorf("clear artifact events %s: %w", sess.ID, err)
+		}
+		for _, art := range sess.Artifacts {
+			if art.Source != "tool_result" || art.EventID == "" {
+				continue
+			}
+			if _, err := artifactStmt.ExecContext(ctx,
+				sess.ID, art.EventID, art.Kind, art.ID, art.URL, art.Path, art.Title, art.Source, art.Timestamp,
+			); err != nil {
+				return fmt.Errorf("insert artifact event %s/%s: %w", sess.ID, art.EventID, err)
+			}
 		}
 
 		// Subagent runs: clear and reinsert for this session.
@@ -1091,6 +1133,9 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM workflows WHERE parent_session_id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete workflows by id: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM artifact_events WHERE session_id IN (%s)", placeholders), args...); err != nil {
+			return fmt.Errorf("delete artifact events by id: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM sessions WHERE id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete by id: %w", err)
 		}
@@ -1108,6 +1153,12 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 			agentFilterArgs(filter.Agent)...,
 		); err != nil {
 			return fmt.Errorf("delete workflows by agent: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM artifact_events WHERE session_id IN (SELECT id FROM sessions WHERE "+agentFilter("agent")+")",
+			agentFilterArgs(filter.Agent)...,
+		); err != nil {
+			return fmt.Errorf("delete artifact events by agent: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE "+agentFilter("agent"), agentFilterArgs(filter.Agent)...); err != nil {
 			return fmt.Errorf("delete by agent: %w", err)
