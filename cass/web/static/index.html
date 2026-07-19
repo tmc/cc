@@ -1441,6 +1441,41 @@ function skillKindLabel(kind) {
   return kind || 'skill';
 }
 
+function artifactEventLabel(event) {
+  return event?.title || event?.id || 'published artifact';
+}
+
+function ArtifactBadge({ events, count }) {
+  const [open, setOpen] = useState(false);
+  const items = events || [];
+  const total = count || items.length;
+  if (total === 0) return null;
+  const label = total + ' artifact ' + (total === 1 ? 'publish' : 'publishes');
+  return html`
+    <span class="hit-artifact-wrap ${open ? 'open' : ''}" onClick=${e => e.stopPropagation()}>
+      <button class="hit-artifact-badge" type="button" aria-expanded=${open}
+        title=${label} onClick=${() => setOpen(v => !v)}>
+        ◈ ${total}
+      </button>
+      <div class="artifact-popover" role="tooltip">
+          <div class="artifact-popover-head">${label}</div>
+          ${items.length === 0 && html`<div class="artifact-popover-empty">Event details load with the session.</div>`}
+          ${items.slice(0, 4).map((event, i) => html`
+            <a class="artifact-popover-event" key=${event.event_id || i} href=${event.url}
+              target="_blank" rel="noreferrer" onClick=${e => e.stopPropagation()}>
+              <span class="artifact-popover-dot"></span>
+              <span class="artifact-popover-text">
+                <strong>${artifactEventLabel(event)}</strong>
+                <small title=${event.path || ''}>${event.path ? shortPath(event.path) : event.id}${event.timestamp ? ' · ' + relTime(event.timestamp) : ''}</small>
+              </span>
+            </a>
+          `)}
+          ${total > items.length && html`<div class="artifact-popover-more">Open the session for all ${total} events.</div>`}
+      </div>
+    </span>
+  `;
+}
+
 function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onToolClick }) {
   const stats = [];
   if (h.tool_calls) stats.push(h.tool_calls + ' Tools');
@@ -1513,6 +1548,7 @@ function HitItem({ hit: h, num, onClick, isSelected, isFocused, onTeamClick, onT
             ${primarySkill.name}
           </span>
         `}
+        <${ArtifactBadge} events=${h.artifacts} count=${h.artifact_count} />
         ${h.collapsed_children && (h.matched_workflow_ids || []).length > 0 && html`
           <span class="hit-match-badge"
             title=${[
@@ -3225,6 +3261,35 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
     `;
   }
 
+  function renderArtifactsPanel() {
+    const events = hit?.artifacts || [];
+    const total = hit?.artifact_count || events.length;
+    if (total === 0) return null;
+    return html`
+      <details class="detail-artifacts" open>
+        <summary>
+          <span>Artifact publications</span>
+          <strong>${total}</strong>
+        </summary>
+        <div class="detail-artifact-timeline">
+          ${events.map((event, i) => html`
+            <a class="detail-artifact-event" key=${event.event_id || i} href=${event.url} target="_blank" rel="noreferrer">
+              <span class="detail-artifact-dot"></span>
+              <span class="detail-artifact-event-body">
+                <strong>${artifactEventLabel(event)}</strong>
+                <span class="detail-artifact-event-meta">
+                  ${event.timestamp ? relTime(event.timestamp) : 'time unavailable'}
+                  ${event.path ? ' · ' + event.path : ''}
+                </span>
+              </span>
+              <span class="detail-artifact-open">↗</span>
+            </a>
+          `)}
+        </div>
+      </details>
+    `;
+  }
+
   return html`
     <div class="detail-panel ${hit ? 'open' : ''}" role="complementary" aria-label="Session detail" onWheel=${onDetailWheel}>
       ${hit && html`
@@ -3332,6 +3397,7 @@ function SessionDetailPanel({ hit, onClose, initialFilter, initialTab, workflowA
         `}
         <div class="detail-body" ref=${bodyRef}>
           ${renderContextPanel()}
+          ${renderArtifactsPanel()}
           ${hasRequests && html`
             <details class="detail-skill-section detail-requests-section" open=${showRequests}
                      onToggle=${e => setShowRequests(e.currentTarget.open)}>
