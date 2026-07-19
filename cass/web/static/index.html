@@ -853,6 +853,7 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const selectedHit = useRef(null);
   const [headerStats, setHeaderStats] = useState(null);
   const [busy, setBusy] = useState(false);
   const searchRef = useRef(null);
@@ -1006,7 +1007,7 @@ function App() {
             role="tab" aria-selected=${tab === t}>${({ search: 'Search', graph: 'Graph', map: 'Map', teams: 'Teams', stats: 'Stats', usage: 'Usage' })[t]}</button>
         `)}
       </div>
-      ${tab === 'search' && html`<${SearchPanel} searchRef=${searchRef} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} onNavigate=${setTab} />`}
+      ${tab === 'search' && html`<${SearchPanel} searchRef=${searchRef} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} onNavigate=${setTab} onSelectedHitChange=${hit => { selectedHit.current = hit; }} />`}
       ${tab === 'graph' && html`<${GraphPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} onNavigate=${setTab} />`}
       ${tab === 'map' && html`<${MapPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
       ${tab === 'teams' && html`<${TeamsPanel} urlParams=${urlParams} updateParams=${updateParams} navVersion=${navVersion} />`}
@@ -1019,14 +1020,25 @@ function App() {
 
       <${CommandPalette} open=${paletteOpen} onClose=${() => setPaletteOpen(false)}
         onNavigate=${(id) => { setTab(id, {}); setPaletteOpen(false); }}
-        onFocusSearch=${() => { setTab('search', urlParams); setPaletteOpen(false); setTimeout(() => searchRef.current?.focus(), 50); }} />
+        onFocusSearch=${() => { setTab('search', urlParams); setPaletteOpen(false); setTimeout(() => searchRef.current?.focus(), 50); }}
+        onCopyResume=${async () => {
+          const command = resumeCommand(selectedHit.current);
+          if (!command) {
+            showToast('Select a session first');
+            setPaletteOpen(false);
+            return;
+          }
+          await copyText(command);
+          showToast('Copied resume command');
+          setPaletteOpen(false);
+        }} />
     </div>
   `;
 }
 
 // --- Command Palette ---
 
-function CommandPalette({ open, onClose, onNavigate, onFocusSearch }) {
+function CommandPalette({ open, onClose, onNavigate, onFocusSearch, onCopyResume }) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(0);
   const inputRef = useRef(null);
@@ -1037,6 +1049,7 @@ function CommandPalette({ open, onClose, onNavigate, onFocusSearch }) {
 
   const actions = [
     { label: 'Search sessions', hint: '/', action: onFocusSearch },
+    { label: 'Copy resume command', hint: 'selected session', action: onCopyResume },
     { label: 'View graph', hint: '', action: () => onNavigate('graph') },
     { label: 'View map', hint: '', action: () => onNavigate('map') },
     { label: 'View teams', hint: '', action: () => onNavigate('teams') },
@@ -1075,7 +1088,7 @@ function CommandPalette({ open, onClose, onNavigate, onFocusSearch }) {
 
 // --- Search Panel ---
 
-function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigate }) {
+function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigate, onSelectedHitChange }) {
   const [query, setQueryRaw] = useState(urlParams.q || '');
   const [agent, setAgentRaw] = useState(urlParams.agent || '');
   const [workspace, setWorkspaceRaw] = useState(urlParams.workspace || '');
@@ -1109,6 +1122,10 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
     document.body.classList.toggle('detail-open', !!selected);
     return () => document.body.classList.remove('detail-open');
   }, [selected]);
+
+  useEffect(() => {
+    onSelectedHitChange?.(selected);
+  }, [selected, onSelectedHitChange]);
 
   // Push URL on state changes (debounced with the search).
   const urlRef = useRef(null);
@@ -1243,11 +1260,12 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
       else if (e.key === 'Enter' && selectedIdx >= 0) {
         e.preventDefault();
         setSelected(hits[selectedIdx]);
+        onSelectedHitChange?.(hits[selectedIdx]);
         setToolFilter('');
         setDetailTab('conversation');
         setWorkflowAgentFocus('');
       }
-      else if (e.key === 'Escape' && selected) { e.preventDefault(); setSelected(null); }
+      else if (e.key === 'Escape' && selected) { e.preventDefault(); setSelected(null); onSelectedHitChange?.(null); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1312,9 +1330,9 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
             <${HitItem} key=${h.session_id} hit=${h} num=${i + 1}
               isSelected=${selected?.session_id === h.session_id}
               isFocused=${i === selectedIdx}
-              onClick=${() => { setSelected(h); setSelectedIdx(i); setToolFilter(''); setDetailTab('conversation'); setWorkflowAgentFocus(''); }}
+              onClick=${() => { setSelected(h); onSelectedHitChange?.(h); setSelectedIdx(i); setToolFilter(''); setDetailTab('conversation'); setWorkflowAgentFocus(''); }}
               onTeamClick=${onNavigate ? (name) => onNavigate('teams', { name }) : null}
-              onToolClick=${(toolName) => { setSelected(h); setSelectedIdx(i); setToolFilter(toolName); setDetailTab('conversation'); setWorkflowAgentFocus(''); }} />
+              onToolClick=${(toolName) => { setSelected(h); onSelectedHitChange?.(h); setSelectedIdx(i); setToolFilter(toolName); setDetailTab('conversation'); setWorkflowAgentFocus(''); }} />
           `)}
         </ul>
       `}
@@ -1323,10 +1341,10 @@ function SearchPanel({ searchRef, urlParams, updateParams, navVersion, onNavigat
       `}
 
       </section>
-      <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => { setSelected(null); setToolFilter(''); setDetailTab('conversation'); setWorkflowAgentFocus(''); }}></div>
+      <div class="detail-overlay ${selected ? 'open' : ''}" onClick=${() => { setSelected(null); onSelectedHitChange?.(null); setToolFilter(''); setDetailTab('conversation'); setWorkflowAgentFocus(''); }}></div>
       <${SessionDetailPanel}
         hit=${selected}
-        onClose=${() => { setSelected(null); setToolFilter(''); setDetailTab('conversation'); setWorkflowAgentFocus(''); }}
+        onClose=${() => { setSelected(null); onSelectedHitChange?.(null); setToolFilter(''); setDetailTab('conversation'); setWorkflowAgentFocus(''); }}
         initialFilter=${toolFilter}
         initialTab=${detailTab}
         workflowAgentFocus=${workflowAgentFocus}
