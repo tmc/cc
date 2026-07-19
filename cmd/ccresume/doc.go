@@ -39,6 +39,8 @@
 //	-dir path    Only include sessions recorded in this directory.
 //	-harness h   Only include sessions from h (for example, codex).
 //	-sid-side s  For an it2 send-text line query, resume the src (default) or dst pane.
+//	-info        Annotate each resume line with session size and an occurrence sparkline.
+//	-no-color    Disable ANSI color in -info annotations (also honors NO_COLOR).
 //
 // # Examples
 //
@@ -69,4 +71,21 @@
 // Resume a pane's session from a copied it2 log line (resolves the src pane):
 //
 //	ccresume "[it2:send-text src=A5B2B529 dst=481499F5]"
+//
+// Annotate each match with size and an occurrence sparkline to spot the
+// substantive session without resuming each:
+//
+//	ccresume -info "kafka rebalance"
+//
+// The annotation is a compact trailing shell comment (# 482× 1.2kL 3@ 8% ▁▁▂▁▅█
+// 2h — messages, lines, hits, density, sparkline, last-active age; ×/L/@ mark
+// counts so the trailing age is never read as one), so the line stays safe to
+// pipe into sh and fits on one row. The "N%" token is the share of
+// the session's timestamped lines that mention the query (central vs
+// incidental), and the sparkline reads left (oldest) to right (newest) within
+// that one session: ▁▁▁▁▁▁▁█ means the query only matched at the end (recent
+// work), █▁▁▁▁▁▁▁ an early mention since dropped. Both are shown only for content
+// queries; a query that resolved to a specific session (a claude.ai URL or an
+// it2 SID) shows size and age only. On a terminal the comment is dimmed; piped
+// output stays byte-clean (honors NO_COLOR/-no-color).
 package main

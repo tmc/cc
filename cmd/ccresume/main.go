@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,7 +34,28 @@ var (
 	dirFlag     = flag.String("dir", "", "Only include sessions recorded in this directory")
 	harnessFlag = flag.String("harness", "", "Only include sessions from this harness")
 	sidSideFlag = flag.String("sid-side", "src", "When a query is an it2 send-text line, resume the src or dst pane")
+	infoFlag    = flag.Bool("info", false, "Annotate each resume line with session size and an occurrence sparkline")
+	noColorFlag = flag.Bool("no-color", false, "Disable ANSI color in -info annotations")
 )
+
+const (
+	ansiDim   = "\033[2m"
+	ansiReset = "\033[0m"
+)
+
+// useColor reports whether ANSI styling should be written to f: only when f is a
+// terminal, NO_COLOR is unset, and -no-color was not passed. This mirrors the
+// convention in cmd/cass.
+func useColor(f *os.File) bool {
+	if *noColorFlag || os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
 
 func main() {
 	flag.Parse()
@@ -82,6 +104,11 @@ func run() error {
 	// creating session's transcript. The artifact UUID appears verbatim in the
 	// session that published it, so the content search resolves the resume
 	// command for that session.
+	// A URL or it2 marker resolves to a specific session id rather than being a
+	// content search. When that happens, the -info sparkline (occurrences over
+	// the session's timeline) is meaningless, so remember whether the query was
+	// rewritten by the resolution pipeline below.
+	rawQuery := query
 	query = normalizeClaudeURL(query)
 	// A copied it2 log line ([it2:send-text src=X dst=Y]) or collab-msg header
 	// (<collab-msg src="X">) is reduced to the bare pane ID for the chosen side,
@@ -91,6 +118,7 @@ func run() error {
 	// resolved to the harness session most recently bound to that pane, so
 	// pasting a pane ID resumes the session that ran there.
 	query = resolveIt2SID(query)
+	isIDResolution := query != rawQuery
 
 	since, err := ccpaths.ParseDuration(*sinceFlag)
 	if err != nil {
@@ -166,6 +194,11 @@ func run() error {
 		sortIndexMatches(query, matches, curGitCommonDir)
 		for _, m := range matches {
 			fmt.Println(m.FullPath)
+			if *infoFlag {
+				// Paths stay bare on stdout; the annotation goes to stderr.
+				ann := infoAnnotation(query, resolveMatch(query, m), isIDResolution)
+				fmt.Fprintln(os.Stderr, dim(ann, useColor(os.Stderr)))
+			}
 		}
 		return nil
 	}
@@ -191,9 +224,22 @@ func run() error {
 	for _, r := range resolved {
 		bin, args := resumeInvocation(r.entry)
 		if *launchFlag {
+			if *infoFlag {
+				// The command is exec'd directly, so keep the launch clean and
+				// log the annotation to stderr instead of appending a comment.
+				ann := infoAnnotation(query, r, isIDResolution)
+				fmt.Fprintln(os.Stderr, dim(ann, useColor(os.Stderr)))
+			}
 			return launchAgent(bin, args, r.target)
 		}
-		fmt.Println(renderResumeCommand(r.target, bin, args))
+		line := renderResumeCommand(r.target, bin, args)
+		if *infoFlag {
+			// A trailing shell comment keeps the line pipe/copy-safe: sh ignores
+			// everything after '#'. The comment is reference, not payload, so it
+			// is dimmed on a terminal; piped output stays byte-clean.
+			line += "   " + dim("# "+infoAnnotation(query, r, isIDResolution), useColor(os.Stdout))
+		}
+		fmt.Println(line)
 	}
 	return nil
 }
@@ -398,6 +444,174 @@ func countFileOccurrences(query, path string) int {
 		return 0
 	}
 	return countOccurrences(query, string(data))
+}
+
+// infoAnnotation builds the -info comment for a match: session size, and — for a
+// content query — the occurrence count and a sparkline of when the query matched
+// across the session's timeline, then the last-active time. An id-resolution (a
+// claude.ai URL or it2 SID that resolved to a specific session) has no
+// meaningful occurrences-over-time, so it shows size and time only.
+func infoAnnotation(query string, r resolvedMatch, isIDResolution bool) string {
+	// MessageCount is free from the index, but the grep fallback builds entries
+	// without it; fall back to the summary, which is read anyway.
+	msgs := r.entry.MessageCount
+	if msgs == 0 {
+		msgs = r.summary.UserMessages + r.summary.AsstMessages
+	}
+	// Compact, space-separated tokens so the annotation fits on one line after
+	// the (already long) resume command: <msgs>× <lines>L <hits>@ <dense>%
+	// <spark> <age>. Counts use distinct markers (× messages, L lines, @ hits)
+	// so the trailing relative age (3h, 40m) is never confused with a count.
+	// Numbers are humanized (2123 -> 2.1k).
+	parts := []string{humanize(msgs) + "×"}
+	if r.summary.TotalLines > 0 {
+		parts = append(parts, humanize(r.summary.TotalLines)+"L")
+	}
+	if !isIDResolution && r.occurrences > 0 {
+		spark, densePct := occurrenceInfo(query, r.entry.FullPath, 8)
+		// hits, then density adjacent to the sparkline: together density+spark
+		// are the "shape of relevance" — central vs incidental, and when.
+		parts = append(parts, humanize(r.occurrences)+"@", fmt.Sprintf("%d%% %s", densePct, spark))
+	}
+	parts = append(parts, relAge(r.entry.ModifiedTime()))
+	return strings.Join(parts, " ")
+}
+
+// relAge renders how long ago t was, compactly: "20m", "3h", "2d", "5w". A zero
+// or future time renders "now".
+func relAge(t time.Time) string {
+	if t.IsZero() {
+		return "?"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return strconv.Itoa(int(d.Minutes())) + "m"
+	case d < 24*time.Hour:
+		return strconv.Itoa(int(d.Hours())) + "h"
+	case d < 7*24*time.Hour:
+		return strconv.Itoa(int(d.Hours()/24)) + "d"
+	default:
+		return strconv.Itoa(int(d.Hours()/(24*7))) + "w"
+	}
+}
+
+// humanize renders a count compactly: 896 -> "896", 2123 -> "2.1k",
+// 79853 -> "80k", 1_200_000 -> "1.2M".
+func humanize(n int) string {
+	switch {
+	case n < 1000:
+		return strconv.Itoa(n)
+	case n < 10000:
+		return strconv.FormatFloat(float64(n)/1000, 'f', 1, 64) + "k"
+	case n < 1_000_000:
+		return strconv.Itoa((n+500)/1000) + "k"
+	case n < 10_000_000:
+		return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
+	default:
+		return strconv.Itoa((n+500_000)/1_000_000) + "M"
+	}
+}
+
+// dim wraps s in ANSI dim styling when on is true, leaving it plain otherwise.
+func dim(s string, on bool) string {
+	if !on {
+		return s
+	}
+	return ansiDim + s + ansiReset
+}
+
+var sparkGlyphs = []rune("▁▂▃▄▅▆▇█")
+
+// tsPattern extracts the leading RFC3339 timestamp string from a transcript
+// line without a full JSON unmarshal.
+var tsPattern = regexp.MustCompile(`"timestamp":"([^"]+)"`)
+
+// occurrenceInfo reads the transcript once and returns a buckets-wide sparkline
+// of query match density over the session's [first,last] timestamp span, plus
+// the density: the percentage of timestamped lines that contain at least one
+// match. Bucketing is by time (not line) so idle gaps read correctly: a burst in
+// the last minutes of a long session lands in the rightmost bucket. Lines
+// without a parseable timestamp are skipped. When there are no matches it
+// returns an empty sparkline and zero density.
+func occurrenceInfo(query, path string, buckets int) (spark string, densePct int) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0
+	}
+	type lineHit struct {
+		ts   time.Time
+		hits int
+	}
+	var hits []lineHit
+	var first, last time.Time
+	totalLines, hitLines := 0, 0
+	// The session span is defined by every timestamped line, not only matched
+	// ones, so a match at the very end renders in the last bucket even when it is
+	// the sole match. Density is over timestamped lines, the sparkline's own
+	// denominator.
+	for _, line := range strings.Split(string(data), "\n") {
+		m := tsPattern.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339Nano, m[1])
+		if err != nil {
+			continue
+		}
+		totalLines++
+		if first.IsZero() || ts.Before(first) {
+			first = ts
+		}
+		if ts.After(last) {
+			last = ts
+		}
+		if n := countOccurrences(query, line); n > 0 {
+			hitLines++
+			hits = append(hits, lineHit{ts: ts, hits: n})
+		}
+	}
+	if len(hits) == 0 {
+		return "", 0
+	}
+	if totalLines > 0 {
+		densePct = (100*hitLines + totalLines/2) / totalLines // rounded
+	}
+	counts := make([]int, buckets)
+	span := last.Sub(first)
+	for _, h := range hits {
+		b := 0
+		if span > 0 {
+			b = int(h.ts.Sub(first) * time.Duration(buckets) / span)
+			if b >= buckets {
+				b = buckets - 1
+			}
+		}
+		counts[b] += h.hits
+	}
+	return renderSpark(counts), densePct
+}
+
+// renderSpark maps bucket counts to block glyphs, scaled to the max bucket.
+func renderSpark(counts []int) string {
+	max := 0
+	for _, c := range counts {
+		if c > max {
+			max = c
+		}
+	}
+	var b strings.Builder
+	for _, c := range counts {
+		if max == 0 {
+			b.WriteRune(sparkGlyphs[0])
+			continue
+		}
+		idx := c * (len(sparkGlyphs) - 1) / max
+		b.WriteRune(sparkGlyphs[idx])
+	}
+	return b.String()
 }
 
 func countOccurrences(query, text string) int {
@@ -1101,9 +1315,11 @@ func decodePath(encoded string) string {
 }
 
 // validSessionID reports whether a session ID is a valid resume target.
-// Compacted sessions (agent-acompact-*) are internal and cannot be resumed.
+// Subagent transcripts (agent-<id>, including the agent-acompact-* compaction
+// runs) are spawned by a parent session and cannot be resumed on their own, so
+// they are never offered as results.
 func validSessionID(id string) bool {
-	return !strings.HasPrefix(id, "agent-acompact-")
+	return !strings.HasPrefix(id, "agent-")
 }
 
 func containsAny(query string, fields ...string) bool {
@@ -1160,7 +1376,24 @@ func renderResumeCommand(projectPath, bin string, args []string) string {
 	if projectPath == "" {
 		return cmd
 	}
-	return fmt.Sprintf("cd %s; %s", shellQuote(projectPath), cmd)
+	return fmt.Sprintf("cd %s; %s", homeQuote(projectPath), cmd)
+}
+
+// homeQuote renders a directory for a cd command, abbreviating a leading $HOME
+// to ~ (which the shell still expands) and shell-quoting the remainder. The ~
+// stays outside the quotes so it is not treated literally: cd ~/'a b' expands
+// to $HOME/a b.
+func homeQuote(dir string) string {
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		if dir == home {
+			return "~"
+		}
+		if rest, ok := strings.CutPrefix(dir, home+string(os.PathSeparator)); ok {
+			return "~/" + shellQuote(rest)
+		}
+	}
+	return shellQuote(dir)
 }
 
 // shellQuote wraps s in single quotes for POSIX shells when it contains any

@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tmc/cc"
 )
@@ -629,5 +632,297 @@ func writeTextFile(t *testing.T, path, text string) {
 	}
 	if err := os.WriteFile(path, []byte(text), 0o666); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRenderSpark(t *testing.T) {
+	tests := []struct {
+		name   string
+		counts []int
+		want   string
+	}{
+		{"all zero", []int{0, 0, 0, 0}, "▁▁▁▁"},
+		{"single nonzero bucket", []int{0, 0, 5, 0}, "▁▁█▁"},
+		{"monotonic ramp", []int{0, 1, 2, 3, 4, 5, 6, 7}, "▁▂▃▄▅▆▇█"},
+		{"scaling: max 10, mid 5", []int{10, 5, 0}, "█▄▁"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := renderSpark(tt.counts); got != tt.want {
+				t.Errorf("renderSpark(%v) = %q, want %q", tt.counts, got, tt.want)
+			}
+		})
+	}
+}
+
+// tsLine builds one transcript line with a timestamp and body text.
+func tsLine(ts, body string) string {
+	return `{"timestamp":"` + ts + `","text":"` + body + `"}`
+}
+
+func TestOccurrenceSparkline(t *testing.T) {
+	// A span of 09:00 -> 17:00 (8h) with 8 buckets => 1h per bucket.
+	base := "2026-07-19T"
+	writeTranscript := func(t *testing.T, lines ...string) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "s.jsonl")
+		if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	t.Run("early only", func(t *testing.T) {
+		// Match at the very start and a bare span-end anchor with no match.
+		p := writeTranscript(t,
+			tsLine(base+"09:00:00Z", "widget here"),
+			tsLine(base+"17:00:00Z", "nothing"),
+		)
+		got, _ := occurrenceInfo("widget", p, 8)
+		if !strings.HasPrefix(got, "█") || got[len("█"):] != strings.Repeat("▁", 7) {
+			t.Errorf("early-only = %q, want █ then 7×▁", got)
+		}
+	})
+
+	t.Run("late only", func(t *testing.T) {
+		p := writeTranscript(t,
+			tsLine(base+"09:00:00Z", "nothing"),
+			tsLine(base+"17:00:00Z", "widget here"),
+		)
+		got, _ := occurrenceInfo("widget", p, 8)
+		want := strings.Repeat("▁", 7) + "█"
+		if got != want {
+			t.Errorf("late-only = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("idle gap: two clusters, empty middle", func(t *testing.T) {
+		// Cluster at start, cluster at end, long empty gap => middle buckets ▁.
+		p := writeTranscript(t,
+			tsLine(base+"09:00:00Z", "widget"),
+			tsLine(base+"09:01:00Z", "widget"),
+			tsLine(base+"17:00:00Z", "widget"),
+		)
+		got, _ := occurrenceInfo("widget", p, 8)
+		r := []rune(got)
+		if len(r) != 8 {
+			t.Fatalf("want 8 glyphs, got %d (%q)", len(r), got)
+		}
+		if r[0] != '█' || r[7] == '▁' {
+			t.Errorf("clusters = %q, want first bucket full and last bucket non-empty", got)
+		}
+		for i := 2; i <= 6; i++ {
+			if r[i] != '▁' {
+				t.Errorf("middle bucket %d = %q, want ▁ (idle gap), full=%q", i, string(r[i]), got)
+			}
+		}
+	})
+
+	t.Run("lines without timestamp are skipped", func(t *testing.T) {
+		p := writeTranscript(t,
+			`{"text":"widget with no timestamp"}`,
+			tsLine(base+"09:00:00Z", "widget"),
+			`garbage not json widget`,
+			tsLine(base+"17:00:00Z", "widget"),
+		)
+		// Should not crash; only the two timestamped matches bucket.
+		got, _ := occurrenceInfo("widget", p, 8)
+		if len([]rune(got)) != 8 {
+			t.Errorf("got %q, want 8 glyphs (untimed lines skipped, no crash)", got)
+		}
+	})
+
+	t.Run("no match returns empty", func(t *testing.T) {
+		p := writeTranscript(t, tsLine(base+"09:00:00Z", "nothing here"))
+		if got, _ := occurrenceInfo("widget", p, 8); got != "" {
+			t.Errorf("no-match = %q, want empty", got)
+		}
+	})
+}
+
+func TestInfoAnnotationIDResolutionHasNoSparkline(t *testing.T) {
+	// Build a match with occurrences but flag it as an id-resolution: no hits/sparkline.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	if err := os.WriteFile(p, []byte(tsLine("2026-07-19T09:00:00Z", "widget")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := resolvedMatch{
+		entry:       cc.IndexEntry{FullPath: p, MessageCount: 42, Modified: "2026-07-19T13:54:00Z"},
+		summary:     cc.SessionSummary{TotalLines: 100},
+		occurrences: 3,
+	}
+	got := infoAnnotation("widget", r, true)
+	if strings.ContainsAny(got, "▁▂▃▄▅▆▇█") || strings.Contains(got, "%") || strings.Contains(got, "@") {
+		t.Errorf("id-resolution annotation = %q, want no sparkline/density/hits", got)
+	}
+	if !strings.Contains(got, "42×") {
+		t.Errorf("annotation = %q, want size (42×) present", got)
+	}
+	// A content query on the same match DOES get a sparkline + density.
+	got2 := infoAnnotation("widget", r, false)
+	if !strings.Contains(got2, "%") || !strings.ContainsAny(got2, "▁▂▃▄▅▆▇█") {
+		t.Errorf("content annotation = %q, want density + sparkline", got2)
+	}
+}
+
+func TestOccurrenceInfoDensity(t *testing.T) {
+	base := "2026-07-19T"
+	write := func(t *testing.T, lines ...string) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "s.jsonl")
+		if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	t.Run("every line matches: 100 percent", func(t *testing.T) {
+		p := write(t,
+			tsLine(base+"09:00:00Z", "widget"),
+			tsLine(base+"10:00:00Z", "widget again"),
+		)
+		_, dense := occurrenceInfo("widget", p, 8)
+		if dense != 100 {
+			t.Errorf("dense = %d, want 100", dense)
+		}
+	})
+
+	t.Run("one hit-line of 100: 1 percent", func(t *testing.T) {
+		lines := make([]string, 100)
+		for i := range lines {
+			body := "nothing"
+			if i == 42 {
+				body = "widget"
+			}
+			// spread timestamps across the hour so all are distinct-ish
+			lines[i] = tsLine(base+fmt.Sprintf("09:%02d:00Z", i%60), body)
+		}
+		p := write(t, lines...)
+		_, dense := occurrenceInfo("widget", p, 8)
+		if dense != 1 {
+			t.Errorf("dense = %d, want 1", dense)
+		}
+	})
+
+	t.Run("no match: zero", func(t *testing.T) {
+		p := write(t, tsLine(base+"09:00:00Z", "nothing"))
+		spark, dense := occurrenceInfo("widget", p, 8)
+		if spark != "" || dense != 0 {
+			t.Errorf("no-match = (%q, %d), want (\"\", 0)", spark, dense)
+		}
+	})
+}
+
+func TestDimGating(t *testing.T) {
+	s := "# 10 msgs · 3 hits"
+	if got := dim(s, false); got != s {
+		t.Errorf("dim off = %q, want unchanged (byte-clean, no ESC)", got)
+	}
+	if strings.ContainsRune(dim(s, false), '\033') {
+		t.Error("dim off must contain no ESC bytes (pipe/copy safe)")
+	}
+	on := dim(s, true)
+	if !strings.HasPrefix(on, ansiDim) || !strings.HasSuffix(on, ansiReset) {
+		t.Errorf("dim on = %q, want wrapped in dim/reset", on)
+	}
+}
+
+func TestInfoAnnotationHasDensityToken(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	// 2 timestamped lines, 1 matches -> 50% dense.
+	body := tsLine("2026-07-19T09:00:00Z", "widget") + "\n" + tsLine("2026-07-19T10:00:00Z", "nothing") + "\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := resolvedMatch{
+		entry:       cc.IndexEntry{FullPath: p, MessageCount: 2, Modified: "2026-07-19T13:54:00Z"},
+		summary:     cc.SessionSummary{TotalLines: 2},
+		occurrences: 1,
+	}
+	got := infoAnnotation("widget", r, false)
+	if !strings.Contains(got, "50%") {
+		t.Errorf("annotation = %q, want a '50%%' density token", got)
+	}
+	// id-resolution: no density token.
+	if id := infoAnnotation("widget", r, true); strings.Contains(id, "%") {
+		t.Errorf("id-resolution annotation = %q, want no density token", id)
+	}
+}
+
+func TestHumanize(t *testing.T) {
+	tests := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"}, {42, "42"}, {896, "896"}, {999, "999"},
+		{2123, "2.1k"}, {9999, "10.0k"}, {10000, "10k"},
+		{79853, "80k"}, {999999, "1000k"},
+		{1_200_000, "1.2M"}, {12_925_000, "13M"},
+	}
+	for _, tt := range tests {
+		if got := humanize(tt.n); got != tt.want {
+			t.Errorf("humanize(%d) = %q, want %q", tt.n, got, tt.want)
+		}
+	}
+}
+
+func TestRelAge(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "now"},
+		{5 * time.Minute, "5m"},
+		{3 * time.Hour, "3h"},
+		{2 * 24 * time.Hour, "2d"},
+		{3 * 7 * 24 * time.Hour, "3w"},
+	}
+	for _, tt := range tests {
+		if got := relAge(now.Add(-tt.d)); got != tt.want {
+			t.Errorf("relAge(-%s) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+	if got := relAge(time.Time{}); got != "?" {
+		t.Errorf("relAge(zero) = %q, want ?", got)
+	}
+}
+
+func TestValidSessionID(t *testing.T) {
+	tests := []struct {
+		id   string
+		want bool
+	}{
+		{"df77efb9-9817-4c6e-aacf-86118b39ec38", true}, // a normal UUID session
+		{"019f440c-1234-7abc-def0-112233445566", true}, // codex rollout id
+		{"agent-a702817e4f621e755", false},             // subagent transcript
+		{"agent-a613c4e5f6c498f32", false},             // subagent transcript
+		{"agent-acompact-abc123", false},               // compaction subagent
+	}
+	for _, tt := range tests {
+		if got := validSessionID(tt.id); got != tt.want {
+			t.Errorf("validSessionID(%q) = %v, want %v", tt.id, got, tt.want)
+		}
+	}
+}
+
+func TestHomeQuote(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	tests := []struct {
+		dir  string
+		want string
+	}{
+		{home, "~"},
+		{filepath.Join(home, "go", "src", "x"), "~/go/src/x"},
+		{filepath.Join(home, "a b"), "~/'a b'"}, // metachars in the rest stay quoted
+		{"/opt/other", "/opt/other"},            // not under home: unchanged
+	}
+	for _, tt := range tests {
+		if got := homeQuote(tt.dir); got != tt.want {
+			t.Errorf("homeQuote(%q) = %q, want %q", tt.dir, got, tt.want)
+		}
 	}
 }
