@@ -106,7 +106,7 @@ func TestReadEvents(t *testing.T) {
 		``,           // blank line skipped.
 		`{not json}`, // malformed skipped.
 		`{"_it2":{"it2_sid":"AAAAAAAA-1111-2222-3333-444444444444","boot_id":"boot-x","ts":"t"}}`, // no session_id → dropped.
-		`{"session_id":"sess-2","_it2":{"it2_sid":"x","ts":"t"}}`,                                 // no boot_id → dropped.
+		`{"session_id":"sess-2","_it2":{"boot_id":"boot-x","ts":"t"}}`,                            // no it2_sid → dropped.
 		startup("sess-1", "resume", "AAAAAAAA-1111-2222-3333-444444444444", "boot-x", "2026-07-19T11:00:00Z"),
 	)
 	evs, err := ReadEvents(filepath.Join(root, dir, "artifacts", "claude-code-events.ndjson"))
@@ -126,7 +126,8 @@ func TestReadEvents(t *testing.T) {
 }
 
 // TestResumeInDifferentPane is the load-bearing case: one harness session bound
-// to two different panes over time within one boot → two intervals, latest wins.
+// to two different panes over time → two intervals (the it2_sid change is the
+// boundary), and the latest binding wins as the current pane.
 func TestResumeInDifferentPane(t *testing.T) {
 	events := []Event{
 		mustEvent(startup("sess-1", "startup", "PANE-A", "boot-1", "2026-07-19T10:00:00Z")),
@@ -134,42 +135,42 @@ func TestResumeInDifferentPane(t *testing.T) {
 		mustEvent(startup("sess-1", "resume", "PANE-B", "boot-1", "2026-07-19T12:00:00Z")),
 	}
 	ivs := Intervals(events)
-	// Same (session_id, boot_id) → grouped into ONE interval; latest event's
-	// pane wins as the current binding.
-	if len(ivs) != 1 {
-		t.Fatalf("got %d intervals, want 1: %+v", len(ivs), ivs)
-	}
-	if ivs[0].It2SID != "PANE-B" {
-		t.Errorf("interval It2SID = %q, want PANE-B (latest)", ivs[0].It2SID)
-	}
-	if ivs[0].Start != "2026-07-19T10:00:00Z" || ivs[0].End != "2026-07-19T12:00:00Z" {
-		t.Errorf("interval span = [%s, %s]", ivs[0].Start, ivs[0].End)
+	// Two distinct (session_id, it2_sid) pairs → two intervals.
+	if len(ivs) != 2 {
+		t.Fatalf("got %d intervals, want 2 (pane changed): %+v", len(ivs), ivs)
 	}
 
-	sid, ok := CurrentSID(ivs, "sess-1", "boot-1")
+	sid, ok := CurrentSID(ivs, "sess-1")
 	if !ok || sid != "PANE-B" {
-		t.Errorf("CurrentSID = %q, %v; want PANE-B, true", sid, ok)
+		t.Errorf("CurrentSID = %q, %v; want PANE-B, true (latest binding)", sid, ok)
 	}
-	// A different boot has no binding — prior SIDs are dead cross-boot.
-	if _, ok := CurrentSID(ivs, "sess-1", "boot-2"); ok {
-		t.Error("CurrentSID for a different boot should report no binding")
+	if _, ok := CurrentSID(ivs, "sess-unknown"); ok {
+		t.Error("CurrentSID for an unknown session should report no binding")
 	}
 }
 
-// TestBootPartition: same session, same pane, DIFFERENT boots → separate
-// intervals (it2 SIDs are only comparable within a boot).
-func TestBootPartition(t *testing.T) {
+// TestRestoredPaneAcrossBoots: same session, same pane, DIFFERENT boots. Because
+// iTerm2 restores a pane keeping its session ID, this is ONE continuous binding,
+// not an interval boundary. The boots appear as metadata.
+func TestRestoredPaneAcrossBoots(t *testing.T) {
 	events := []Event{
 		mustEvent(startup("sess-1", "startup", "PANE-A", "boot-1", "2026-07-19T10:00:00Z")),
 		mustEvent(startup("sess-1", "resume", "PANE-A", "boot-2", "2026-07-20T10:00:00Z")),
 	}
 	ivs := Intervals(events)
-	if len(ivs) != 2 {
-		t.Fatalf("got %d intervals, want 2 (one per boot): %+v", len(ivs), ivs)
+	if len(ivs) != 1 {
+		t.Fatalf("got %d intervals, want 1 (restored pane is continuous): %+v", len(ivs), ivs)
 	}
-	// Sorted by start: boot-1 first.
-	if ivs[0].BootID != "boot-1" || ivs[1].BootID != "boot-2" {
-		t.Errorf("boots = %q, %q; want boot-1, boot-2", ivs[0].BootID, ivs[1].BootID)
+	if ivs[0].Start != "2026-07-19T10:00:00Z" || ivs[0].End != "2026-07-20T10:00:00Z" {
+		t.Errorf("interval span = [%s, %s]; want the full cross-boot span", ivs[0].Start, ivs[0].End)
+	}
+	// Both boots recorded as metadata, in first-seen order.
+	if len(ivs[0].BootIDs) != 2 || ivs[0].BootIDs[0] != "boot-1" || ivs[0].BootIDs[1] != "boot-2" {
+		t.Errorf("BootIDs = %v, want [boot-1 boot-2] as metadata", ivs[0].BootIDs)
+	}
+	// The binding is still resolvable with no boot argument.
+	if sid, ok := CurrentSID(ivs, "sess-1"); !ok || sid != "PANE-A" {
+		t.Errorf("CurrentSID = %q, %v; want PANE-A, true", sid, ok)
 	}
 }
 

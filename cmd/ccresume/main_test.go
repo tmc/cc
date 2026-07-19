@@ -384,6 +384,30 @@ func TestResolveIt2SID(t *testing.T) {
 	}
 }
 
+// TestResolveIt2SIDCrossBoot: a pane whose binding to one session spans a reboot
+// (two boot_ids, same session_id + it2_sid) is a single continuous binding, so
+// the pane still resolves to that session. Guards the boot-metadata fix.
+func TestResolveIt2SIDCrossBoot(t *testing.T) {
+	const pane = "CCCCCCCC-1111-2222-3333-444444444444"
+	root := t.TempDir()
+	t.Setenv("IT2_HOME", root)
+	dir := filepath.Join(root, "sessions", pane, "artifacts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := func(boot, ts string) string {
+		return `{"session_id":"sess-restored","source":"resume","hook_event_name":"SessionStart",` +
+			`"_it2":{"it2_sid":"` + pane + `","boot_id":"` + boot + `","ts":"` + ts + `"}}`
+	}
+	events := line("boot-1", "2026-07-19T09:00:00Z") + "\n" + line("boot-2", "2026-07-20T09:00:00Z") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude-code-events.ndjson"), []byte(events), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveIt2SID(pane); got != "sess-restored" {
+		t.Errorf("resolveIt2SID(%q) = %q, want sess-restored (binding continuous across boots)", pane, got)
+	}
+}
+
 func TestFilterMatches(t *testing.T) {
 	root := t.TempDir()
 	codex := filepath.Join(root, ".codex")

@@ -53,14 +53,16 @@ func (e Event) BootID() string { return e.It2.BootID }
 // Ts returns the writer-stamped ISO-8601 timestamp.
 func (e Event) Ts() string { return e.It2.Ts }
 
-// Interval is a contiguous binding of one harness session to one iTerm2 pane
-// within a single boot. Start is the first event's timestamp; End is the last
-// event's timestamp in the same (SessionID, BootID) group (open if the session
-// is still bound to this pane).
+// Interval is a contiguous binding of one harness session to one iTerm2 pane.
+// A pane restored across a reboot keeps its iTerm2 session ID, so a binding can
+// legitimately span multiple boots — boot is metadata (BootIDs), not a boundary.
+// A binding ends only when the pane's session id changes or the session moves to
+// a different pane. Start is the first event's timestamp; End is the last (open
+// if the session is still bound to this pane).
 type Interval struct {
 	SessionID string
-	It2SID    string // canonical (bare UUID)
-	BootID    string
+	It2SID    string   // canonical (bare UUID)
+	BootIDs   []string // every boot this binding was seen in, in first-seen order
 	Cwd       string
 	Start     string
 	End       string
@@ -132,8 +134,8 @@ func ReadEvents(path string) ([]Event, error) {
 
 // parseEventLine parses one NDJSON binding line, canonicalizing the it2 session
 // ID. It returns an error for blank, malformed, or ungroupable lines — those
-// missing a session id or boot id (including the writer's {raw, _it2} wrapper
-// for non-object hook payloads).
+// missing a session id or an it2 session id (including the writer's {raw, _it2}
+// wrapper for non-object hook payloads). boot_id is metadata and may be absent.
 func parseEventLine(line string) (Event, error) {
 	var e Event
 	line = strings.TrimSpace(line)
@@ -143,10 +145,10 @@ func parseEventLine(line string) (Event, error) {
 	if err := json.Unmarshal([]byte(line), &e); err != nil {
 		return e, err
 	}
-	if e.SessionID == "" || e.BootID() == "" {
+	e.It2.It2SID = CanonicalSID(e.It2.It2SID)
+	if e.SessionID == "" || e.It2SID() == "" {
 		return e, errSkip
 	}
-	e.It2.It2SID = CanonicalSID(e.It2.It2SID)
 	return e, nil
 }
 
@@ -157,27 +159,38 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-// Intervals folds a set of binding events into per-(session_id, boot_id)
-// intervals, sorted by start time. Events within a group are ordered by
+// Intervals folds a set of binding events into per-(session_id, it2_sid)
+// intervals, sorted by start time. A binding is the pair of a harness session
+// and an iTerm2 pane; it is not split by boot, since a restored pane keeps its
+// session ID across reboots. Every boot the binding was seen in is recorded in
+// BootIDs (first-seen order) as metadata. Events within a group are ordered by
 // timestamp; Start and End bracket the group.
 func Intervals(events []Event) []Interval {
-	type key struct{ session, boot string }
+	type key struct{ session, it2sid string }
 	groups := make(map[key][]Event)
 	for _, e := range events {
-		k := key{e.SessionID, e.BootID()}
+		k := key{e.SessionID, e.It2SID()}
 		groups[k] = append(groups[k], e)
 	}
 
 	var out []Interval
 	for k, evs := range groups {
 		sort.SliceStable(evs, func(i, j int) bool { return evs[i].Ts() < evs[j].Ts() })
+		var boots []string
+		seenBoot := make(map[string]bool)
+		for _, e := range evs {
+			if b := e.BootID(); b != "" && !seenBoot[b] {
+				seenBoot[b] = true
+				boots = append(boots, b)
+			}
+		}
 		iv := Interval{
 			SessionID: k.session,
-			BootID:    k.boot,
+			It2SID:    k.it2sid,
+			BootIDs:   boots,
 			Events:    evs,
 			Start:     evs[0].Ts(),
 			End:       evs[len(evs)-1].Ts(),
-			It2SID:    evs[len(evs)-1].It2SID(),
 			Cwd:       evs[0].Cwd,
 		}
 		out = append(out, iv)
@@ -213,14 +226,14 @@ func Load(root string) ([]Interval, error) {
 }
 
 // CurrentSID returns the iTerm2 session ID currently bound to the given harness
-// session within the given boot: the It2SID of the latest interval for that
-// (session_id, boot_id). It reports false if no binding exists. Callers on a
-// different boot should treat all prior bindings as dead.
-func CurrentSID(intervals []Interval, sessionID, bootID string) (string, bool) {
+// session: the It2SID of the latest interval for that session. It reports false
+// if no binding exists. Bindings are not boot-scoped — a pane restored across a
+// reboot keeps its session ID — so no boot argument is needed.
+func CurrentSID(intervals []Interval, sessionID string) (string, bool) {
 	var latest *Interval
 	for i := range intervals {
 		iv := &intervals[i]
-		if iv.SessionID != sessionID || iv.BootID != bootID {
+		if iv.SessionID != sessionID {
 			continue
 		}
 		if latest == nil || iv.End > latest.End {

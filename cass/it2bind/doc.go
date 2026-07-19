@@ -14,12 +14,14 @@
 //
 //	~/.it2/sessions/<it2_sid>/artifacts/claude-code-events.ndjson
 //
-// Because a harness session may be resumed in a different pane (a new window, a
-// reboot, a different machine), the mapping is one harness session to many
-// iTerm2 session IDs, ordered over time — a sequence of bindings, not a 1:1
-// key. iTerm2 session IDs are only comparable within a single boot, so each
-// binding carries a boot_id (kern.bootsessionuuid); bindings are grouped by
-// (session_id, boot_id) into time intervals.
+// Because a harness session may be resumed in a different pane (a new window or
+// a different machine), the mapping is one harness session to many iTerm2
+// session IDs, ordered over time — a sequence of bindings, not a 1:1 key.
+// Bindings are grouped by (session_id, it2_sid) into time intervals: a binding
+// ends only when the pane's session changes or the session moves to a different
+// pane. iTerm2 restores a pane across a reboot keeping its session ID, so a
+// binding can span multiple boots; each event still carries a boot_id
+// (kern.bootsessionuuid), retained as interval metadata but not a boundary.
 //
 // This package reads and canonicalizes the per-pane directories and folds their
 // binding events into [Interval] records. The on-disk directory layout and
