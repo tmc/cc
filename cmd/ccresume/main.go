@@ -35,6 +35,7 @@ var (
 	harnessFlag = flag.String("harness", "", "Only include sessions from this harness")
 	sidSideFlag = flag.String("sid-side", "src", "When a query is an it2 send-text line, resume the src or dst pane")
 	infoFlag    = flag.Bool("info", false, "Annotate each resume line with session size and an occurrence sparkline")
+	runningFlag = flag.Bool("show-is-running", false, "Annotate each resume line whose session is already running as a process")
 	noColorFlag = flag.Bool("no-color", false, "Disable ANSI color in -info annotations")
 )
 
@@ -186,6 +187,14 @@ func run() error {
 		curGitCommonDir = cur.GitCommonDir
 	}
 
+	// -running scans the process table once so every line is annotated against a
+	// single consistent snapshot; a nil slice (ps failed or flag unset) simply
+	// annotates nothing.
+	var procs []runningProc
+	if *runningFlag {
+		procs = scanProcesses()
+	}
+
 	if *oneFlag {
 		sortIndexMatches(query, matches, curGitCommonDir)
 		matches = matches[:1]
@@ -194,10 +203,13 @@ func run() error {
 		sortIndexMatches(query, matches, curGitCommonDir)
 		for _, m := range matches {
 			fmt.Println(m.FullPath)
-			if *infoFlag {
+			if *infoFlag || *runningFlag {
 				// Paths stay bare on stdout; the annotation goes to stderr.
-				ann := infoAnnotation(query, resolveMatch(query, m), isIDResolution)
-				fmt.Fprintln(os.Stderr, dim(ann, useColor(os.Stderr)))
+				r := resolveMatch(query, m)
+				bin, args := resumeInvocation(m)
+				if ann := annotationStderr(query, r, isIDResolution, procs, bin, args); ann != "" {
+					fmt.Fprintln(os.Stderr, dim(ann, useColor(os.Stderr)))
+				}
 			}
 		}
 		return nil
@@ -224,21 +236,20 @@ func run() error {
 	for _, r := range resolved {
 		bin, args := resumeInvocation(r.entry)
 		if *launchFlag {
-			if *infoFlag {
+			if *infoFlag || *runningFlag {
 				// The command is exec'd directly, so keep the launch clean and
 				// log the annotation to stderr instead of appending a comment.
-				ann := infoAnnotation(query, r, isIDResolution)
-				fmt.Fprintln(os.Stderr, dim(ann, useColor(os.Stderr)))
+				if ann := annotationStderr(query, r, isIDResolution, procs, bin, args); ann != "" {
+					fmt.Fprintln(os.Stderr, dim(ann, useColor(os.Stderr)))
+				}
 			}
 			return launchAgent(bin, args, r.target)
 		}
+		// A trailing shell comment keeps the line pipe/copy-safe: sh ignores
+		// everything after '#'. The comment is reference, not payload, so it is
+		// dimmed on a terminal; piped output stays byte-clean.
 		line := renderResumeCommand(r.target, bin, args)
-		if *infoFlag {
-			// A trailing shell comment keeps the line pipe/copy-safe: sh ignores
-			// everything after '#'. The comment is reference, not payload, so it
-			// is dimmed on a terminal; piped output stays byte-clean.
-			line += "   " + dim("# "+infoAnnotation(query, r, isIDResolution), useColor(os.Stdout))
-		}
+		line = annotateLine(line, query, r, isIDResolution, procs, bin, args, useColor(os.Stdout))
 		fmt.Println(line)
 	}
 	return nil
@@ -444,6 +455,42 @@ func countFileOccurrences(query, path string) int {
 		return 0
 	}
 	return countOccurrences(query, string(data))
+}
+
+// annotateLine appends the enabled annotations to a rendered resume command as
+// trailing shell comments: first the -info size/occurrence detail, then — at the
+// very end of the line — a "# RUNNING" comment for any match whose session is
+// already open in a running process. Both are comments, so the line stays safe
+// to pipe into sh (everything after the first '#' is ignored). on selects ANSI
+// dimming. bin and args are the resume invocation, used both to match the session
+// against running processes and, via resumeToken, as the identifier to look for.
+func annotateLine(line, query string, r resolvedMatch, isIDResolution bool, procs []runningProc, bin string, args []string, on bool) string {
+	if *infoFlag {
+		line += "   " + dim("# "+infoAnnotation(query, r, isIDResolution), on)
+	}
+	if *runningFlag {
+		if m := runningMarker(procs, bin, args); m != "" {
+			line += "   " + dim("# "+m, on)
+		}
+	}
+	return line
+}
+
+// annotationStderr builds the annotation text logged to stderr in -paths and -l
+// modes, where it cannot ride on the command line. It mirrors annotateLine's
+// ordering (info detail, then RUNNING) but joins the parts into one line and
+// returns "" when nothing applies.
+func annotationStderr(query string, r resolvedMatch, isIDResolution bool, procs []runningProc, bin string, args []string) string {
+	var parts []string
+	if *infoFlag {
+		parts = append(parts, infoAnnotation(query, r, isIDResolution))
+	}
+	if *runningFlag {
+		if m := runningMarker(procs, bin, args); m != "" {
+			parts = append(parts, m)
+		}
+	}
+	return strings.Join(parts, "   ")
 }
 
 // infoAnnotation builds the -info comment for a match: session size, and — for a

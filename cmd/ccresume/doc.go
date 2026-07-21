@@ -39,8 +39,9 @@
 //	-dir path    Only include sessions recorded in this directory.
 //	-harness h   Only include sessions from h (for example, codex).
 //	-sid-side s  For an it2 send-text line query, resume the src (default) or dst pane.
-//	-info        Annotate each resume line with session size and an occurrence sparkline.
-//	-no-color    Disable ANSI color in -info annotations (also honors NO_COLOR).
+//	-info            Annotate each resume line with session size and an occurrence sparkline.
+//	-show-is-running Annotate each resume line whose session is already open in a running process.
+//	-no-color        Disable ANSI color in -info annotations (also honors NO_COLOR).
 //
 // # Examples
 //
@@ -77,6 +78,11 @@
 //
 //	ccresume -info "kafka rebalance"
 //
+// Mark which matches are already open in a running process, so you attach to the
+// live one rather than starting a second copy:
+//
+//	ccresume -show-is-running "kafka rebalance"
+//
 // The annotation is a compact trailing shell comment (# 482× 1.2kL 3@ 8% ▁▁▂▁▅█
 // 2h — messages, lines, hits, density, sparkline, last-active age; ×/L/@ mark
 // counts so the trailing age is never read as one), so the line stays safe to
@@ -88,4 +94,12 @@
 // queries; a query that resolved to a specific session (a claude.ai URL or an
 // it2 SID) shows size and age only. On a terminal the comment is dimmed; piped
 // output stays byte-clean (honors NO_COLOR/-no-color).
+//
+// With -show-is-running a "# RUNNING" comment is appended at the very end of any
+// line whose session is currently open, found by matching the session identifier
+// (the last part of the resume command) against the running process table; when
+// several processes share the session it reads "# RUNNING ×N". It composes with
+// -info — the size/occurrence detail comes first, the RUNNING marker sits last so
+// it is easy to scan for down the right edge. A fresh session started without an
+// identifier cannot be attributed to a match and is never marked.
 package main
