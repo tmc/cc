@@ -2,6 +2,8 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 )
 
@@ -129,6 +132,149 @@ func TestAntigravityScanSinceFilter(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("Scan with Since returned %d sessions, want 0", len(got))
+	}
+}
+
+func TestAntigravityTitleSkipsWrapperTags(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{
+			input: "<USER_REQUEST>\nBuild the browser\n</USER_REQUEST>",
+			want:  "Build the browser",
+		},
+		{
+			input: "<USER_REQUEST>Build single line</USER_REQUEST>",
+			want:  "Build single line",
+		},
+		{
+			input: "<user_information>\nOS: mac\nWorking directory: /path\n</user_information>\n<USER_REQUEST>\nFix the bug\n</USER_REQUEST>",
+			want:  "Fix the bug",
+		},
+	}
+
+	for _, tt := range tests {
+		content, _ := json.Marshal([]cc.ContentBlock{{Type: "text", Text: tt.input}})
+		entries := []cc.Entry{{Message: &cc.Message{Role: "user", Content: content}}}
+		if got := antigravityTitle(entries, "fallback"); got != tt.want {
+			t.Errorf("antigravityTitle(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestAntigravitySessionIDPrefixing(t *testing.T) {
+	c := &Antigravity{}
+
+	sessionDir := filepath.Join(t.TempDir(), "brain-12345")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(sessionDir, "task.md"), "Task content")
+
+	session, err := c.parseBrainSession(sessionDir)
+	if err != nil {
+		t.Fatalf("parseBrainSession failed: %v", err)
+	}
+
+	if session.ID != "ag-brain-12345" {
+		t.Errorf("session ID = %q, want ag-brain-12345", session.ID)
+	}
+}
+
+func TestAntigravityRootsDiscovery(t *testing.T) {
+	c := &Antigravity{}
+	roots, err := c.roots()
+	if err != nil {
+		t.Fatalf("roots() failed: %v", err)
+	}
+	if len(roots) < 1 {
+		t.Fatalf("expected at least 1 root, got %d", len(roots))
+	}
+	// When ANTIGRAVITY_HOME is unset, should return 2 roots (~/.gemini/antigravity and ~/.gemini/antigravity-cli)
+	if os.Getenv("ANTIGRAVITY_HOME") == "" && len(roots) != 2 {
+		t.Errorf("expected 2 roots when ANTIGRAVITY_HOME is unset, got %d: %v", len(roots), roots)
+	}
+}
+
+func TestAntigravitySubagentDiscovery(t *testing.T) {
+	brainDir := filepath.Join(t.TempDir(), "brain")
+	sessionDir := filepath.Join(brainDir, "parent-session")
+	logDir := filepath.Join(sessionDir, ".system_generated", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	childID := "ee853370-c2b1-4a06-9c54-b8502c263ece"
+	childLogDir := filepath.Join(brainDir, childID, ".system_generated", "logs")
+	if err := os.MkdirAll(childLogDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subagentJSONL := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-06-12T03:22:47Z","content":"Child task"}
+`
+	childTranscript := filepath.Join(childLogDir, "transcript.jsonl")
+	writeFile(t, childTranscript, subagentJSONL)
+
+	subagents := `[{"Model":"inherit","Prompt":"Search codebase","Role":"Artifact Verifier","TypeName":"research"}]`
+	result := fmt.Sprintf("Created the following subagents:\n{\n  \"conversationId\": %q,\n  \"logAbsoluteUri\": %q,\n  \"workspaceUris\": [\"file:///Volumes/example/go/src/github.com/tmc/cc\"]\n}", childID, "file://"+childTranscript)
+	transcriptJSONL := fmt.Sprintf(`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-06-12T03:22:47Z","content":"Start main task"}
+{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-06-12T03:22:48Z","thinking":"Spawn subagent","tool_calls":[{"name":"invoke_subagent","args":{"Subagents":%q}}]}
+{"step_index":2,"source":"MODEL","type":"INVOKE_SUBAGENT","status":"DONE","created_at":"2026-06-12T03:22:50Z","content":%q}
+`, subagents, result)
+	writeFile(t, filepath.Join(logDir, "transcript.jsonl"), transcriptJSONL)
+
+	c := &Antigravity{}
+	s, err := c.parseBrainSession(sessionDir)
+	if err != nil {
+		t.Fatalf("parseBrainSession: %v", err)
+	}
+	if len(s.Subagents) != 1 {
+		t.Fatalf("expected 1 subagent run, got %d", len(s.Subagents))
+	}
+
+	sub := s.Subagents[0]
+	if sub.AgentID != childID {
+		t.Errorf("Subagent AgentID = %q, want %s", sub.AgentID, childID)
+	}
+	if sub.AgentType != "research" {
+		t.Errorf("Subagent AgentType = %q, want research", sub.AgentType)
+	}
+	if sub.Description != "Search codebase" {
+		t.Errorf("Subagent Description = %q, want Search codebase", sub.Description)
+	}
+	if sub.Status != "unknown" {
+		t.Errorf("Subagent Status = %q, want unknown", sub.Status)
+	}
+	if sub.SourcePath != childTranscript {
+		t.Errorf("Subagent SourcePath = %q, want %q", sub.SourcePath, childTranscript)
+	}
+	if sub.Workspace != "/Volumes/example/go/src/github.com/tmc/cc" {
+		t.Errorf("Subagent Workspace = %q", sub.Workspace)
+	}
+	if s.Stats.SubagentSpawns != 1 {
+		t.Errorf("Stats.SubagentSpawns = %d, want 1", s.Stats.SubagentSpawns)
+	}
+}
+
+func TestAntigravityScanEdgeCasesMissingFullAndCorrupted(t *testing.T) {
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, "brain", "session-corrupted-files")
+	logDir := filepath.Join(sessionDir, ".system_generated", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, filepath.Join(logDir, "transcript.jsonl"), "corrupted content line\n{\"type\":\"USER_INPUT\",\"content\":\"hi\"}\n")
+
+	c := &Antigravity{Root: root}
+	out := make(chan cass.Session, 1)
+	if err := c.Scan(context.Background(), cass.ScanConfig{}, out); err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	s := <-out
+	if s.ID != "ag-session-corrupted-files" {
+		t.Errorf("session ID = %q, want ag-session-corrupted-files", s.ID)
 	}
 }
 
