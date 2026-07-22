@@ -1,0 +1,5 @@
+{"type":"user","uuid":"old","timestamp":"2026-04-10T21:03:53Z","message":{"role":"user","content":"old discarded history"}}
+{"type":"assistant","uuid":"keep","timestamp":"2026-04-10T21:03:54Z","message":{"role":"assistant","content":"recent retained message"}}
+{"type":"system","subtype":"compact_boundary","timestamp":"2026-04-10T21:03:55Z","compactMetadata":{"trigger":"manual","preTokens":50000,"preservedMessages":{"uuids":["keep"]}}}
+{"type":"user","uuid":"summary","timestamp":"2026-04-10T21:03:56Z","isCompactSummary":true,"message":{"role":"user","content":"summary of earlier work"}}
+{"type":"assistant","uuid":"after","timestamp":"2026-04-10T21:03:57Z","message":{"role":"assistant","content":"continued after compaction"}}
