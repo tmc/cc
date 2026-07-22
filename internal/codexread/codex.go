@@ -29,6 +29,12 @@ func Decode(line []byte) (entry ccmodel.Entry, isCodex, ok bool) {
 	if !isCodexEnvelopeType(env.Type) {
 		return ccmodel.Entry{}, false, false
 	}
+	// Normalized entries can use names such as session_meta too. A Codex
+	// envelope always carries its data in payload; without one, let the caller
+	// decode the line as a plain ccmodel.Entry.
+	if len(env.Payload) == 0 {
+		return ccmodel.Entry{}, false, false
+	}
 	switch env.Type {
 	case "session_meta":
 		e, ok := decodeCodexSessionMeta(env)
