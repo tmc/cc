@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,14 +52,15 @@ func IsSessionPath(path string) bool {
 }
 
 type agStep struct {
-	StepIndex int             `json:"step_index"`
-	Source    string          `json:"source"`
-	Type      string          `json:"type"`
-	Status    string          `json:"status"`
-	CreatedAt string          `json:"created_at"`
-	Content   string          `json:"content,omitempty"`
-	Thinking  string          `json:"thinking,omitempty"`
-	ToolCalls []agToolCall    `json:"tool_calls,omitempty"`
+	StepIndex       int          `json:"step_index"`
+	Source          string       `json:"source"`
+	Type            string       `json:"type"`
+	Status          string       `json:"status"`
+	CreatedAt       string       `json:"created_at"`
+	Content         string       `json:"content,omitempty"`
+	Thinking        string       `json:"thinking,omitempty"`
+	ToolCalls       []agToolCall `json:"tool_calls,omitempty"`
+	TruncatedFields []string     `json:"truncated_fields,omitempty"`
 }
 
 type agToolCall struct {
@@ -109,12 +111,7 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, ccmodel.InitialBufferSize), ccmodel.MaxLineSize)
 
-	var entries []ccmodel.Entry
-	var pendingToolCalls []pendingToolCall
-
-	// Determine CWD and workspace if available.
-	cwd := antigravityWorkspace(sessionDir)
-
+	var steps []agStep
 	for sc.Scan() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -128,6 +125,37 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 		if err := json.Unmarshal(line, &step); err != nil {
 			continue
 		}
+		steps = append(steps, step)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+
+	var fullSteps map[string][]agStep
+	fullPath := filepath.Join(filepath.Dir(path), "transcript_full.jsonl")
+	if path != fullPath {
+		if fInfo, err := os.Stat(fullPath); err == nil && !fInfo.IsDir() {
+			fullSteps, err = readFullSteps(ctx, fullPath)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	restoreTruncatedFields(steps, fullSteps)
+
+	cwd := antigravityWorkspace(sessionDir)
+	if cwd == "" {
+		cwd = extractFallbackCWD(steps)
+	}
+
+	var entries []ccmodel.Entry
+	var pendingToolCalls []pendingToolCall
+	sessionID = antigravitySessionID(sessionID)
+
+	for stepNumber, step := range steps {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 
 		parsedTime := parseTime(step.CreatedAt)
 
@@ -136,14 +164,21 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 			entries = append(entries, ccmodel.Entry{
 				Type:      "session_meta",
 				Subtype:   "session_meta",
-				SessionID: "ag-" + sessionID,
+				SessionID: sessionID,
 				Timestamp: parsedTime,
 				CWD:       cwd,
 				Source:    "antigravity",
 			})
 		}
 
-		switch step.Type {
+		if len(pendingToolCalls) > 0 && isToolResultStep(step.Type, pendingToolCalls[0].name) {
+			tc := pendingToolCalls[0]
+			pendingToolCalls = pendingToolCalls[1:]
+			entries = append(entries, antigravityToolResult(sessionID, cwd, parsedTime, tc.id, step.Content))
+			continue
+		}
+
+		switch strings.ToUpper(step.Type) {
 		case "USER_INPUT":
 			msgContent, _ := json.Marshal([]ccmodel.ContentBlock{
 				{
@@ -153,7 +188,7 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 			})
 			entries = append(entries, ccmodel.Entry{
 				Type:      "user",
-				SessionID: "ag-" + sessionID,
+				SessionID: sessionID,
 				Timestamp: parsedTime,
 				Source:    "antigravity",
 				CWD:       cwd,
@@ -167,12 +202,15 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 			var blocks []ccmodel.ContentBlock
 			if step.Thinking != "" {
 				blocks = append(blocks, ccmodel.ContentBlock{
-					Type: "text",
+					Type: "thinking",
 					Text: step.Thinking,
 				})
 			}
+			if len(step.ToolCalls) > 0 {
+				pendingToolCalls = pendingToolCalls[:0]
+			}
 			for i, tc := range step.ToolCalls {
-				toolUseID := fmt.Sprintf("ag-tc-%d-%d", step.StepIndex, i)
+				toolUseID := fmt.Sprintf("ag-tc-%d-%d", stepNumber, i)
 				pendingToolCalls = append(pendingToolCalls, pendingToolCall{
 					id:   toolUseID,
 					name: tc.Name,
@@ -187,7 +225,7 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 			msgContent, _ := json.Marshal(blocks)
 			entries = append(entries, ccmodel.Entry{
 				Type:      "assistant",
-				SessionID: "ag-" + sessionID,
+				SessionID: sessionID,
 				Timestamp: parsedTime,
 				Source:    "antigravity",
 				CWD:       cwd,
@@ -197,59 +235,13 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 				},
 			})
 
-		case "RUN_COMMAND", "VIEW_FILE", "LIST_DIRECTORY", "GREP_SEARCH", "SEARCH_WEB", "CODE_ACTION":
-			var toolUseID string
-			if len(pendingToolCalls) > 0 {
-				tc := pendingToolCalls[0]
-				pendingToolCalls = pendingToolCalls[1:]
-				toolUseID = tc.id
-			}
-
-			content, exitCode, success := cleanAntigravityOutput(step.Content)
-
-			msgContent, _ := json.Marshal([]ccmodel.ContentBlock{
-				{
-					Type:      "tool_result",
-					ToolUseID: toolUseID,
-					Content:   content,
-					IsError:   !success,
-				},
-			})
-
-			res := &ccmodel.ToolUseResult{
-				Type:    "tool_result",
-				Stdout:  content,
-				Success: success,
-			}
-			if !success {
-				res.Error = content
-			}
-			if exitCode != nil {
-				res.Task = &ccmodel.TaskResult{
-					ExitCode: exitCode,
-				}
-			}
-
-			entries = append(entries, ccmodel.Entry{
-				Type:          "user",
-				SessionID:     "ag-" + sessionID,
-				Timestamp:     parsedTime,
-				Source:        "antigravity",
-				CWD:           cwd,
-				Message: &ccmodel.Message{
-					Role:    "user",
-					Content: msgContent,
-				},
-				ToolUseResult: res,
-			})
-
 		default:
 			// CONVERSATION_HISTORY, SYSTEM_MESSAGE, ERROR_MESSAGE, etc.
 			if step.Content != "" {
 				entries = append(entries, ccmodel.Entry{
 					Type:      "system",
 					Subtype:   strings.ToLower(step.Type),
-					SessionID: "ag-" + sessionID,
+					SessionID: sessionID,
 					Timestamp: parsedTime,
 					Source:    "antigravity",
 					IsMeta:    true,
@@ -260,7 +252,111 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 		}
 	}
 
-	return entries, sc.Err()
+	return entries, nil
+}
+
+func readFullSteps(ctx context.Context, path string) (map[string][]agStep, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, ccmodel.InitialBufferSize), ccmodel.MaxLineSize)
+
+	fullSteps := make(map[string][]agStep)
+	for sc.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		line := sc.Bytes()
+		if len(strings.TrimSpace(string(line))) == 0 {
+			continue
+		}
+		var step agStep
+		if err := json.Unmarshal(line, &step); err == nil {
+			key := antigravityStepKey(step)
+			fullSteps[key] = append(fullSteps[key], step)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return fullSteps, nil
+}
+
+func antigravityStepKey(step agStep) string {
+	return fmt.Sprintf("%d:%s:%s", step.StepIndex, step.Type, step.CreatedAt)
+}
+
+func restoreTruncatedFields(steps []agStep, fullSteps map[string][]agStep) {
+	for i := range steps {
+		matches := fullSteps[antigravityStepKey(steps[i])]
+		if len(matches) == 0 {
+			continue
+		}
+		fullSteps[antigravityStepKey(steps[i])] = matches[1:]
+		if len(steps[i].TruncatedFields) == 0 {
+			continue
+		}
+		full := matches[0]
+		for _, field := range steps[i].TruncatedFields {
+			switch strings.ToLower(field) {
+			case "content":
+				steps[i].Content = full.Content
+			case "thinking":
+				steps[i].Thinking = full.Thinking
+			case "tool_calls":
+				steps[i].ToolCalls = full.ToolCalls
+			}
+		}
+	}
+}
+
+func antigravityToolResult(sessionID, cwd string, timestamp time.Time, toolUseID, output string) ccmodel.Entry {
+	content, exitCode, success := cleanAntigravityOutput(output)
+	msgContent, _ := json.Marshal([]ccmodel.ContentBlock{{
+		Type:      "tool_result",
+		ToolUseID: toolUseID,
+		Content:   content,
+		IsError:   !success,
+	}})
+	res := &ccmodel.ToolUseResult{Type: "tool_result", Stdout: content, Success: success}
+	if !success {
+		res.Error = content
+	}
+	if exitCode != nil {
+		res.Task = &ccmodel.TaskResult{ExitCode: exitCode}
+	}
+	return ccmodel.Entry{
+		Type:          "user",
+		SessionID:     sessionID,
+		Timestamp:     timestamp,
+		Source:        "antigravity",
+		CWD:           cwd,
+		Message:       &ccmodel.Message{Role: "user", Content: msgContent},
+		ToolUseResult: res,
+	}
+}
+
+func isToolResultStep(stepType, toolName string) bool {
+	if strings.EqualFold(stepType, toolName) || normalizeToolName(stepType) == normalizeToolName(toolName) {
+		return true
+	}
+	switch strings.ToUpper(stepType) {
+	case "SYSTEM_MESSAGE", "CHECKPOINT", "USER_INPUT", "PLANNER_RESPONSE", "CONVERSATION_HISTORY":
+		return false
+	default:
+		return true
+	}
+}
+
+func antigravitySessionID(id string) string {
+	if strings.HasPrefix(id, "ag-") {
+		return id
+	}
+	return "ag-" + id
 }
 
 func parseTime(s string) time.Time {
@@ -283,14 +379,22 @@ func normalizeToolName(name string) string {
 		return "Bash"
 	case "view_file":
 		return "View"
-	case "replace_file_content", "write_to_file":
+	case "replace_file_content", "multi_replace_file_content", "write_to_file":
 		return "Write"
-	case "list_dir":
+	case "list_dir", "list_directory":
 		return "LS"
 	case "grep_search":
 		return "Grep"
 	case "search_web":
 		return "WebSearch"
+	case "read_url_content":
+		return "WebFetch"
+	case "invoke_subagent":
+		return "Task"
+	case "ask_question", "ask_permission":
+		return "Interaction"
+	case "call_mcp_tool":
+		return "MCP"
 	default:
 		return name
 	}
@@ -377,8 +481,18 @@ func readLegacySession(ctx context.Context, dir string) ([]ccmodel.Entry, error)
 		return nil, fmt.Errorf("empty antigravity brain session: %s", dir)
 	}
 
-	id := filepath.Base(dir)
+	id := antigravitySessionID(filepath.Base(dir))
 	cwd := antigravityWorkspace(dir)
+	if cwd == "" {
+		for _, file := range files {
+			if data, err := os.ReadFile(file.path); err == nil {
+				if foundCwd := extractCWDFromText(string(data)); foundCwd != "" {
+					cwd = foundCwd
+					break
+				}
+			}
+		}
+	}
 
 	var entries []ccmodel.Entry
 	var firstTime time.Time
@@ -416,7 +530,7 @@ func readLegacySession(ctx context.Context, dir string) ([]ccmodel.Entry, error)
 
 		entries = append(entries, ccmodel.Entry{
 			Type:      role,
-			SessionID: "ag-" + id,
+			SessionID: id,
 			UUID:      id + ":" + file.name,
 			Timestamp: t,
 			CWD:       cwd,
@@ -434,7 +548,7 @@ func readLegacySession(ctx context.Context, dir string) ([]ccmodel.Entry, error)
 		metaEntry := ccmodel.Entry{
 			Type:      "session_meta",
 			Subtype:   "session_meta",
-			SessionID: "ag-" + id,
+			SessionID: id,
 			Timestamp: firstTime,
 			CWD:       cwd,
 			Source:    "antigravity",
@@ -549,6 +663,11 @@ func antigravityWorkspace(dir string) string {
 }
 
 func cleanAntigravityWorkspacePath(base, path string) string {
+	path = strings.TrimRight(strings.TrimSpace(path), ".,;:")
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
 	if path == "~" {
 		if home, err := os.UserHomeDir(); err == nil {
 			path = home
@@ -559,10 +678,131 @@ func cleanAntigravityWorkspacePath(base, path string) string {
 		}
 	}
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(base, path)
+		if base != "" {
+			path = filepath.Join(base, path)
+		} else {
+			return ""
+		}
 	}
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
 	return filepath.Clean(path)
+}
+
+var (
+	userInfoBlockRE      = regexp.MustCompile(`(?is)<user_information>(.*?)</user_information>`)
+	userInfoMappingRE    = regexp.MustCompile(`(?m)^\s*([^\n\r]+?)\s+->`)
+	userInfoWorkingDirRE = regexp.MustCompile(`(?i)(?:Working directory|CWD|Workspace):\s*([^\n\r]+)`)
+	toolArgCwdRE         = regexp.MustCompile(`"(?:Cwd|cwd)"\s*:\s*"([^"]+)"`)
+)
+
+func extractFallbackCWD(steps []agStep) string {
+	for _, step := range steps {
+		if strings.EqualFold(step.Type, "USER_INPUT") && step.Content != "" {
+			if cwd := extractCWDFromText(step.Content); cwd != "" {
+				return cwd
+			}
+		}
+	}
+	for _, step := range steps {
+		for _, tc := range step.ToolCalls {
+			if len(tc.Args) == 0 {
+				continue
+			}
+			if cwd := extractCWDFromArgs(tc.Args); cwd != "" {
+				return cwd
+			}
+		}
+	}
+	return ""
+}
+
+func extractCWDFromText(text string) string {
+	for _, match := range userInfoBlockRE.FindAllStringSubmatch(text, -1) {
+		if len(match) > 1 {
+			block := match[1]
+			if m := userInfoMappingRE.FindStringSubmatch(block); len(m) > 1 {
+				p := strings.TrimRight(strings.TrimSpace(m[1]), ".,;:")
+				if path := cleanAntigravityWorkspacePath("", p); path != "" && filepath.IsAbs(path) {
+					return path
+				}
+			}
+			if m := userInfoWorkingDirRE.FindStringSubmatch(block); len(m) > 1 {
+				p := strings.TrimRight(strings.TrimSpace(m[1]), ".,;:")
+				if path := cleanAntigravityWorkspacePath("", p); path != "" && filepath.IsAbs(path) {
+					return path
+				}
+			}
+		}
+	}
+	if m := userInfoMappingRE.FindStringSubmatch(text); len(m) > 1 {
+		p := strings.TrimRight(strings.TrimSpace(m[1]), ".,;:")
+		if path := cleanAntigravityWorkspacePath("", p); path != "" && filepath.IsAbs(path) {
+			return path
+		}
+	}
+	if m := userInfoWorkingDirRE.FindStringSubmatch(text); len(m) > 1 {
+		p := strings.TrimRight(strings.TrimSpace(m[1]), ".,;:")
+		if path := cleanAntigravityWorkspacePath("", p); path != "" && filepath.IsAbs(path) {
+			return path
+		}
+	}
+	return ""
+}
+
+func extractCWDFromArgs(raw json.RawMessage) string {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err == nil {
+		for k, v := range m {
+			if strings.EqualFold(k, "cwd") {
+				if s, ok := v.(string); ok && s != "" {
+					s = cleanAntigravityString(s)
+					if path := cleanAntigravityWorkspacePath("", s); path != "" && filepath.IsAbs(path) {
+						return path
+					}
+				}
+			}
+		}
+	}
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		str = cleanAntigravityString(str)
+		var m2 map[string]any
+		if err := json.Unmarshal([]byte(str), &m2); err == nil {
+			for k, v := range m2 {
+				if strings.EqualFold(k, "cwd") {
+					if s, ok := v.(string); ok && s != "" {
+						s = cleanAntigravityString(s)
+						if path := cleanAntigravityWorkspacePath("", s); path != "" && filepath.IsAbs(path) {
+							return path
+						}
+					}
+				}
+			}
+		}
+		if m := toolArgCwdRE.FindStringSubmatch(str); len(m) > 1 {
+			if path := cleanAntigravityWorkspacePath("", m[1]); path != "" && filepath.IsAbs(path) {
+				return path
+			}
+		}
+	}
+	if m := toolArgCwdRE.FindStringSubmatch(string(raw)); len(m) > 1 {
+		if path := cleanAntigravityWorkspacePath("", m[1]); path != "" && filepath.IsAbs(path) {
+			return path
+		}
+	}
+	return ""
+}
+
+func cleanAntigravityString(s string) string {
+	s = strings.TrimSpace(s)
+	for range 2 {
+		var unquoted string
+		if err := json.Unmarshal([]byte(s), &unquoted); err != nil {
+			break
+		}
+		s = strings.TrimSpace(unquoted)
+	}
+	return s
 }
