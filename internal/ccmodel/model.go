@@ -133,6 +133,28 @@ func (a *Attachment) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON restores fields retained in Raw and overlays the typed fields.
+// This preserves attachment variants that this version does not yet know.
+func (a Attachment) MarshalJSON() ([]byte, error) {
+	type alias Attachment
+	typed, err := json.Marshal(alias(a))
+	if err != nil || len(a.Raw) == 0 {
+		return typed, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(a.Raw, &fields); err != nil {
+		return nil, err
+	}
+	var known map[string]json.RawMessage
+	if err := json.Unmarshal(typed, &known); err != nil {
+		return nil, err
+	}
+	for name, value := range known {
+		fields[name] = value
+	}
+	return json.Marshal(fields)
+}
+
 // Message is the core message object with role and content.
 type Message struct {
 	ID         string          `json:"id,omitempty"`

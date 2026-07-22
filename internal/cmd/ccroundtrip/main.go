@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tmc/cc"
 )
@@ -168,7 +169,7 @@ func checkFile(ctx context.Context, path string, strict bool) report {
 		return r
 	}
 	for i := range entries {
-		if !reflect.DeepEqual(got[i], entries[i]) {
+		if !equalNormalized(entries[i], got[i]) {
 			r.Error = fmt.Sprintf("normalized entry %d changed", i)
 			return r
 		}
@@ -215,6 +216,86 @@ func checkFile(ctx context.Context, path string, strict bool) report {
 		}
 	}
 	return r
+}
+
+var (
+	rawMessageType = reflect.TypeOf(json.RawMessage(nil))
+	timeType       = reflect.TypeOf(time.Time{})
+)
+
+// equalNormalized compares normalized entries while treating RawMessage
+// values as JSON rather than as their original byte spelling. Encoding may
+// legitimately rewrite insignificant whitespace or escapes such as "<" and
+// "\u003c".
+func equalNormalized(a, b cc.Entry) bool {
+	return equalValue(reflect.ValueOf(a), reflect.ValueOf(b))
+}
+
+func equalValue(a, b reflect.Value) bool {
+	if !a.IsValid() || !b.IsValid() {
+		return a.IsValid() == b.IsValid()
+	}
+	if a.Type() != b.Type() {
+		return false
+	}
+	if a.Type() == rawMessageType {
+		return equalJSON(a.Bytes(), b.Bytes())
+	}
+
+	switch a.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		if a.IsNil() || b.IsNil() {
+			return a.IsNil() == b.IsNil()
+		}
+		return equalValue(a.Elem(), b.Elem())
+	case reflect.Struct:
+		if a.Type() == timeType {
+			return a.Interface().(time.Time).Equal(b.Interface().(time.Time))
+		}
+		for i := 0; i < a.NumField(); i++ {
+			if !equalValue(a.Field(i), b.Field(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Slice, reflect.Array:
+		if a.Kind() == reflect.Slice && (a.IsNil() != b.IsNil()) {
+			return false
+		}
+		if a.Len() != b.Len() {
+			return false
+		}
+		for i := 0; i < a.Len(); i++ {
+			if !equalValue(a.Index(i), b.Index(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map:
+		if a.IsNil() != b.IsNil() || a.Len() != b.Len() {
+			return false
+		}
+		for _, key := range a.MapKeys() {
+			bv := b.MapIndex(key)
+			if !bv.IsValid() || !equalValue(a.MapIndex(key), bv) {
+				return false
+			}
+		}
+		return true
+	default:
+		return reflect.DeepEqual(a.Interface(), b.Interface())
+	}
+}
+
+func equalJSON(a, b []byte) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	var av, bv any
+	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
+		return bytes.Equal(a, b)
+	}
+	return reflect.DeepEqual(av, bv)
 }
 
 type rawStep struct {

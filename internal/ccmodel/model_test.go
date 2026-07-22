@@ -153,3 +153,25 @@ func TestEntryToolUseResultShapes(t *testing.T) {
 		}
 	}
 }
+
+func TestAttachmentRoundTripUnknownFields(t *testing.T) {
+	input := []byte(`{"type":"future_event","future":{"enabled":true}}`)
+	var attachment Attachment
+	if err := json.Unmarshal(input, &attachment); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(attachment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["type"] != "future_event" {
+		t.Fatalf("type = %v, want future_event", got["type"])
+	}
+	if future, ok := got["future"].(map[string]any); !ok || future["enabled"] != true {
+		t.Fatalf("future = %#v, want enabled field", got["future"])
+	}
+}

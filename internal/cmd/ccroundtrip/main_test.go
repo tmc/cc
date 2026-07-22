@@ -4,10 +4,101 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmc/cc"
 )
+
+func TestEqualNormalizedJSONSpelling(t *testing.T) {
+	a := cc.Entry{Message: &cc.Message{Role: "user", Content: json.RawMessage(`"<collab-msg>"`)}}
+	b := cc.Entry{Message: &cc.Message{Role: "user", Content: json.RawMessage(`"\u003ccollab-msg\u003e"`)}}
+	if !equalNormalized(a, b) {
+		t.Fatal("equivalent JSON escapes compare unequal")
+	}
+	b.Message.Content = json.RawMessage(`"different"`)
+	if equalNormalized(a, b) {
+		t.Fatal("different JSON values compare equal")
+	}
+}
+
+func TestRunAllHarnesses(t *testing.T) {
+	root := t.TempDir()
+	claudeHome := filepath.Join(root, "claude")
+	geminiHome := filepath.Join(root, "gemini")
+	codexHome := filepath.Join(root, "codex")
+	t.Setenv("CLAUDE_HOME", claudeHome)
+	t.Setenv("GEMINI_HOME", geminiHome)
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "antigravity"))
+
+	claude := filepath.Join(claudeHome, "projects", "-project", "session.jsonl")
+	gemini := filepath.Join(geminiHome, "projects", "-project", "session.jsonl")
+	codex := filepath.Join(codexHome, "sessions", "2026", "07", "22", "rollout.jsonl")
+	copyFixture(t, filepath.Join("..", "..", "..", "cmd", "ccfmt", "testdata", "claude-compaction.jsonl"), claude)
+	copyFixture(t, filepath.Join("..", "..", "..", "cmd", "ccfmt", "testdata", "claude-compaction.jsonl"), gemini)
+	copyFixture(t, filepath.Join("..", "..", "..", "testdata", "sample-session.jsonl"), codex)
+
+	paths := []string{
+		claude,
+		codex,
+		gemini,
+		filepath.Join("testdata", "agy", ".system_generated", "logs", "transcript.jsonl"),
+		filepath.Join("..", "..", "..", "testdata", "opencode-compaction", "storage", "session", "proj", "ses_compact.json"),
+		filepath.Join("..", "..", "..", "testdata", "pi", "agent", "sessions", "proj", "pi-compaction.jsonl"),
+	}
+
+	var stdout, stderr bytes.Buffer
+	args := append([]string{"-json"}, paths...)
+	if err := run(context.Background(), args, &stdout, &stderr); err != nil {
+		t.Fatalf("run: %v\nstderr: %s\nstdout: %s", err, stderr.String(), stdout.String())
+	}
+	var reports []report
+	if err := json.Unmarshal(stdout.Bytes(), &reports); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, stdout.String())
+	}
+	if len(reports) != 6 {
+		t.Fatalf("got %d reports, want 6: %+v", len(reports), reports)
+	}
+	seen := make(map[string]bool)
+	for _, report := range reports {
+		if report.Error != "" || report.Entries == 0 {
+			t.Errorf("report = %+v", report)
+		}
+		seen[report.Harness] = true
+	}
+	for _, harness := range []string{"claude", "codex", "gemini", "opencode", "pi", "antigravity"} {
+		if !seen[harness] {
+			t.Errorf("missing %s report: %+v", harness, reports)
+		}
+	}
+}
+
+func copyFixture(t *testing.T, src, dst string) {
+	t.Helper()
+	in, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Create(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRunAntigravity(t *testing.T) {
 	path := filepath.Join("testdata", "agy")
