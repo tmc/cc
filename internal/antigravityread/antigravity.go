@@ -235,6 +235,20 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 				},
 			})
 
+		case "COMPACTION", "COMPACTION_BOUNDARY":
+			if step.Content != "" {
+				entries = append(entries, ccmodel.Entry{
+					Type:      "system",
+					Subtype:   "compact_boundary",
+					SessionID: sessionID,
+					Timestamp: parsedTime,
+					Source:    "antigravity",
+					IsMeta:    true,
+					Content:   step.Content,
+					CWD:       cwd,
+				})
+			}
+
 		default:
 			// CONVERSATION_HISTORY, SYSTEM_MESSAGE, ERROR_MESSAGE, etc.
 			if step.Content != "" {
@@ -345,7 +359,7 @@ func isToolResultStep(stepType, toolName string) bool {
 		return true
 	}
 	switch strings.ToUpper(stepType) {
-	case "SYSTEM_MESSAGE", "CHECKPOINT", "USER_INPUT", "PLANNER_RESPONSE", "CONVERSATION_HISTORY":
+	case "SYSTEM_MESSAGE", "CHECKPOINT", "USER_INPUT", "PLANNER_RESPONSE", "CONVERSATION_HISTORY", "COMPACTION", "COMPACTION_BOUNDARY":
 		return false
 	default:
 		return true

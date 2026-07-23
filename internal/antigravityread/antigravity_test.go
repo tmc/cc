@@ -459,3 +459,36 @@ func TestReadTranscriptFallbackCWDSpaces(t *testing.T) {
 		})
 	}
 }
+
+func TestReadTranscriptCompaction(t *testing.T) {
+	tmp := t.TempDir()
+	sessionDir := filepath.Join(tmp, "session-compaction-test")
+	logDir := filepath.Join(sessionDir, ".system_generated", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	transcriptJSONL := `{"step_index":0,"source":"SYSTEM","type":"COMPACTION","status":"DONE","created_at":"2026-06-12T03:22:47Z","content":"Compacted history"}
+{"step_index":1,"source":"SYSTEM","type":"COMPACTION_BOUNDARY","status":"DONE","created_at":"2026-06-12T03:22:48Z","content":"Boundary marker"}
+`
+	if err := os.WriteFile(filepath.Join(logDir, "transcript.jsonl"), []byte(transcriptJSONL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := ReadFile(context.Background(), sessionDir)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+
+	if entries[1].Type != "system" || entries[1].Subtype != "compact_boundary" || entries[1].Content != "Compacted history" {
+		t.Errorf("entry 1 mismatch: got Type=%q, Subtype=%q, Content=%q", entries[1].Type, entries[1].Subtype, entries[1].Content)
+	}
+
+	if entries[2].Type != "system" || entries[2].Subtype != "compact_boundary" || entries[2].Content != "Boundary marker" {
+		t.Errorf("entry 2 mismatch: got Type=%q, Subtype=%q, Content=%q", entries[2].Type, entries[2].Subtype, entries[2].Content)
+	}
+}
