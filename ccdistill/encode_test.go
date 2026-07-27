@@ -3,6 +3,7 @@ package ccdistill
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -130,6 +131,39 @@ func TestEncodeAnthropic(t *testing.T) {
 	}
 	if tr["content"] != "package main" {
 		t.Errorf("tool_result.content = %v", tr["content"])
+	}
+}
+
+func TestDecodeAnthropicRoundTrip(t *testing.T) {
+	encoder, err := NewEncoder(FormatAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded bytes.Buffer
+	if err := encoder.Encode(&encoded, sampleForEncoding()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeAnthropic(&encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sampleForEncoding()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decoded sample differs:\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestDecodeAnthropicRejectsMalformedToolBlock(t *testing.T) {
+	input := `{"messages":[{"role":"user","content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}],"meta":{}}`
+	if _, err := DecodeAnthropic(strings.NewReader(input)); err == nil {
+		t.Fatal("DecodeAnthropic accepted user tool_use block")
+	}
+}
+
+func TestDecodeAnthropicRejectsUnknownField(t *testing.T) {
+	input := `{"messages":[],"meta":{},"unexpected":true}`
+	if _, err := DecodeAnthropic(strings.NewReader(input)); err == nil {
+		t.Fatal("DecodeAnthropic accepted unknown field")
 	}
 }
 

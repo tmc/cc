@@ -117,6 +117,96 @@ func (anthropicEncoder) Encode(w io.Writer, s *Sample) error {
 	return writeJSON(w, rec)
 }
 
+// DecodeAnthropic decodes one record written by the Anthropic encoder.
+// It rejects unknown fields and malformed role/block combinations.
+func DecodeAnthropic(r io.Reader) (*Sample, error) {
+	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
+	var rec anthropicRecord
+	if err := dec.Decode(&rec); err != nil {
+		return nil, fmt.Errorf("decode anthropic record: %w", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("decode anthropic record: trailing value")
+		}
+		return nil, fmt.Errorf("decode anthropic record: trailing data: %w", err)
+	}
+
+	sample := &Sample{Meta: rec.Meta}
+	if rec.System != "" {
+		sample.Turns = append(sample.Turns, Turn{
+			Role:   RoleSystem,
+			Blocks: []Block{{Kind: KindText, Text: rec.System}},
+		})
+	}
+	for i, message := range rec.Messages {
+		if message.Role != RoleUser && message.Role != RoleAssistant {
+			return nil, fmt.Errorf("decode anthropic record: message %d: invalid role %q", i, message.Role)
+		}
+		turn := Turn{Role: message.Role, Blocks: make([]Block, 0, len(message.Content))}
+		for j, content := range message.Content {
+			block, err := decodeAnthropicBlock(message.Role, &content)
+			if err != nil {
+				return nil, fmt.Errorf("decode anthropic record: message %d block %d: %w", i, j, err)
+			}
+			turn.Blocks = append(turn.Blocks, block)
+		}
+		sample.Turns = append(sample.Turns, turn)
+	}
+	return sample, nil
+}
+
+func decodeAnthropicBlock(role string, content *anthropicCB) (Block, error) {
+	switch content.Type {
+	case "text":
+		if content.ID != "" || content.Name != "" || len(content.Input) != 0 ||
+			content.ToolUseID != "" || content.Content != "" || content.IsError {
+			return Block{}, fmt.Errorf("text block contains tool fields")
+		}
+		return Block{Kind: KindText, Text: content.Text}, nil
+	case "tool_use":
+		if role != RoleAssistant {
+			return Block{}, fmt.Errorf("tool_use block has role %q", role)
+		}
+		if content.ID == "" || content.Name == "" || len(content.Input) == 0 || !json.Valid(content.Input) {
+			return Block{}, fmt.Errorf("incomplete tool_use block")
+		}
+		if content.Text != "" || content.ToolUseID != "" || content.Content != "" || content.IsError {
+			return Block{}, fmt.Errorf("tool_use block contains unrelated fields")
+		}
+		return Block{
+			Kind: KindToolUse,
+			ToolUse: &ToolUse{
+				ID:    content.ID,
+				Name:  content.Name,
+				Input: append(json.RawMessage(nil), content.Input...),
+			},
+		}, nil
+	case "tool_result":
+		if role != RoleUser {
+			return Block{}, fmt.Errorf("tool_result block has role %q", role)
+		}
+		if content.ToolUseID == "" {
+			return Block{}, fmt.Errorf("tool_result block has empty tool_use_id")
+		}
+		if content.Text != "" || content.ID != "" || content.Name != "" || len(content.Input) != 0 {
+			return Block{}, fmt.Errorf("tool_result block contains unrelated fields")
+		}
+		return Block{
+			Kind: KindToolResult,
+			ToolRes: &ToolResult{
+				ToolUseID: content.ToolUseID,
+				Content:   content.Content,
+				IsError:   content.IsError,
+			},
+		}, nil
+	default:
+		return Block{}, fmt.Errorf("unknown block type %q", content.Type)
+	}
+}
+
 // openaiEncoder emits {messages:[{role,content}]} with tool calls and results
 // flattened into the message text, which trainers expecting a flat chat shape
 // can consume directly.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/ccdistill"
@@ -71,4 +72,17 @@ func ExampleSignalFilter() {
 	// Output:
 	// keep with min 0 tool uses: true
 	// keep with min 1 tool use:  false
+}
+
+func ExampleDecodeAnthropic() {
+	record := `{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"main.go"}}]}],"meta":{"session_id":"abc"}}`
+	sample, err := ccdistill.DecodeAnthropic(strings.NewReader(record))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	call := sample.Turns[0].Blocks[0].ToolUse
+	fmt.Println(sample.Meta.SessionID, call.ID, call.Name)
+	// Output:
+	// abc t1 Read
 }
