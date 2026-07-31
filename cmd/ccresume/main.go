@@ -31,6 +31,7 @@ var (
 	hasFlag     = flag.String("has", "", "Only include sessions whose transcript contains this literal text")
 	cmdFlag     = flag.String("cmd", "", "Only include sessions with a tool command containing this literal text")
 	resultFlag  = flag.String("result", "", "Only include sessions with a tool result containing this literal text")
+	wroteFlag   = flag.String("wrote", "", "Only include sessions that wrote a file matching this path or glob")
 	dirFlag     = flag.String("dir", "", "Only include sessions recorded in this directory")
 	harnessFlag = flag.String("harness", "", "Only include sessions from this harness")
 	sidSideFlag = flag.String("sid-side", "src", "When a query is an it2 send-text line, resume the src or dst pane")
@@ -76,15 +77,19 @@ func run() error {
 		return err
 	}
 	query := strings.Join(flag.Args(), " ")
-	if query == "" && *clipFlag {
+	has := strings.TrimSpace(*hasFlag)
+	cmdText := strings.TrimSpace(*cmdFlag)
+	resultText := strings.TrimSpace(*resultFlag)
+	wrote := strings.TrimSpace(*wroteFlag)
+	// The clipboard fallback only applies when nothing else names what to search.
+	// An explicit content filter (-has/-cmd/-result/-wrote) is the intended query
+	// and must not be overridden by whatever happens to be on the clipboard.
+	if query == "" && *clipFlag && has == "" && cmdText == "" && resultText == "" && wrote == "" {
 		out, err := exec.Command("pbpaste").Output()
 		if err == nil {
 			query = strings.TrimSpace(string(out))
 		}
 	}
-	has := strings.TrimSpace(*hasFlag)
-	cmdText := strings.TrimSpace(*cmdFlag)
-	resultText := strings.TrimSpace(*resultFlag)
 	if query == "" && has != "" {
 		query = has
 	}
@@ -93,6 +98,9 @@ func run() error {
 	}
 	if query == "" && resultText != "" {
 		query = resultText
+	}
+	if query == "" && wrote != "" {
+		query = wrote
 	}
 	if query == "" && dir != "" {
 		query = dir
@@ -145,6 +153,15 @@ func run() error {
 			if err != nil {
 				return err
 			}
+		case query == wrote:
+			// A -wrote pattern is a path or glob, not free text; narrow candidates
+			// with a since-bounded literal grep (the dedicated block below then
+			// checks which actually wrote a matching file). Never fall through to
+			// the unbounded grepMatches, which would scan all history for a glob.
+			matches, err = recentContentMatches(literalToken(wrote), since)
+			if err != nil {
+				return err
+			}
 		default:
 			matches, err = grepMatches(query)
 			if err != nil {
@@ -171,6 +188,18 @@ func run() error {
 		}
 		if len(matches) == 0 && (query == cmdText || query == resultText) {
 			matches, err = grepToolMatches(query, cmdText, resultText, since)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if wrote != "" {
+		matches = filterWroteMatches(matches, wrote)
+		// When -wrote is the only filter (so it drove the query), the metadata and
+		// literal-grep passes above cannot find a glob pattern; do the real
+		// structured scan over recent sessions.
+		if len(matches) == 0 && query == wrote {
+			matches, err = grepWroteMatches(wrote, since)
 			if err != nil {
 				return err
 			}

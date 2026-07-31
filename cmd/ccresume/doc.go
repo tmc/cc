@@ -36,6 +36,7 @@
 //	-has text    Only include sessions whose transcript contains text.
 //	-cmd text    Only include sessions with a tool command containing text.
 //	-result text Only include sessions with a tool result containing text.
+//	-wrote path  Only include sessions that wrote a file matching path (or glob).
 //	-dir path    Only include sessions recorded in this directory.
 //	-harness h   Only include sessions from h (for example, codex).
 //	-sid-side s  For an it2 send-text line query, resume the src (default) or dst pane.
@@ -60,6 +61,12 @@
 // Find sessions that ran a command and captured a particular result:
 //
 //	ccresume -cmd "it2 session current" -result 052AB527
+//
+// Find the session that last edited a particular file, or any file matching a
+// glob:
+//
+//	ccresume -wrote cmd/ccresume/main.go
+//	ccresume -wrote '*_test.go'
 //
 // Resume the session that created an artifact, from its claude.ai URL:
 //
@@ -102,4 +109,16 @@
 // -info — the size/occurrence detail comes first, the RUNNING marker sits last so
 // it is easy to scan for down the right edge. A fresh session started without an
 // identifier cannot be attributed to a match and is never marked.
+//
+// The -wrote filter keeps sessions that wrote a file matching its argument. A
+// pattern with glob metacharacters (*?[) is matched with path matching against
+// the full path and the basename ('*_test.go' matches by basename, 'cmd/*/x.go'
+// by the full path); any other pattern is a case-insensitive substring, like the
+// other content filters. Written paths are read from the normalized transcript
+// across harnesses: Write/Edit/MultiEdit/NotebookEdit (Claude, opencode) and
+// write_to_file/replace_file_content (Antigravity) carry the path in a tool
+// input; codex apply_patch carries it in the patch body; and shell writes
+// (redirects, tee, cp/mv, sed -i, touch, heredocs) are parsed from Bash
+// commands. Reads never count. Coverage is best-effort for codex, whose writes
+// are recovered heuristically from command text rather than a structured field.
 package main
