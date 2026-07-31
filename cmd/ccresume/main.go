@@ -37,6 +37,7 @@ var (
 	dirFlag     = flag.String("dir", "", "Only include sessions recorded in this directory")
 	harnessFlag = flag.String("harness", "", "Only include sessions from this harness")
 	sidSideFlag = flag.String("sid-side", "src", "When a query is an it2 send-text line, resume the src or dst pane")
+	sortFlag    = flag.String("sort", "relevance", "Order matches by relevance or recency")
 	infoFlag    = flag.Bool("info", false, "Annotate each resume line with session size and an occurrence sparkline")
 	runningFlag = flag.Bool("show-is-running", false, "Annotate each resume line whose session is already running as a process")
 	noColorFlag = flag.Bool("no-color", false, "Disable ANSI color in -info annotations")
@@ -134,6 +135,9 @@ func run() error {
 	since, err := ccpaths.ParseDuration(*sinceFlag)
 	if err != nil {
 		return fmt.Errorf("invalid duration: %w", err)
+	}
+	if *sortFlag != "relevance" && *sortFlag != "recency" {
+		return fmt.Errorf("invalid -sort %q (want relevance or recency)", *sortFlag)
 	}
 
 	// Try index first
@@ -265,6 +269,9 @@ func run() error {
 	}
 	wg.Wait()
 	sort.SliceStable(resolved, func(i, j int) bool {
+		if *sortFlag == "recency" {
+			return resolved[i].entry.ModifiedTime().After(resolved[j].entry.ModifiedTime())
+		}
 		if resolved[i].occurrences != resolved[j].occurrences {
 			return resolved[i].occurrences > resolved[j].occurrences
 		}
@@ -367,6 +374,12 @@ func sameDirectory(a, b string) bool {
 }
 
 func sortIndexMatches(query string, matches []cc.IndexEntry, curGitCommonDir string) {
+	if *sortFlag == "recency" {
+		sort.SliceStable(matches, func(i, j int) bool {
+			return matches[i].ModifiedTime().After(matches[j].ModifiedTime())
+		})
+		return
+	}
 	// Count occurrences once per match: transcript content when the query is
 	// only found there (e.g. an artifact URL, which appears in the creating
 	// session's tool results but in no index field), otherwise the cheaper

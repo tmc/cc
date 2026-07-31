@@ -926,3 +926,18 @@ func TestHomeQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestSortIndexMatchesRecency(t *testing.T) {
+	old := *sortFlag
+	*sortFlag = "recency"
+	defer func() { *sortFlag = old }()
+
+	matches := []cc.IndexEntry{
+		{SessionID: "older", FullPath: "/a", Modified: "2026-07-01T00:00:00Z", FirstPrompt: "needle needle needle"},
+		{SessionID: "newer", FullPath: "/b", Modified: "2026-07-02T00:00:00Z", FirstPrompt: "needle"},
+	}
+	sortIndexMatches("needle", matches, "")
+	if matches[0].SessionID != "newer" {
+		t.Errorf("recency sort: first = %q, want %q", matches[0].SessionID, "newer")
+	}
+}

@@ -40,6 +40,7 @@
 //	-dir path    Only include sessions recorded in this directory.
 //	-harness h   Only include sessions from h (for example, codex).
 //	-sid-side s  For an it2 send-text line query, resume the src (default) or dst pane.
+//	-sort mode   Order matches by relevance (default) or recency.
 //	-info            Annotate each resume line with session size and an occurrence sparkline.
 //	-show-is-running Annotate each resume line whose session is already open in a running process.
 //	-no-color        Disable ANSI color in -info annotations (also honors NO_COLOR).
