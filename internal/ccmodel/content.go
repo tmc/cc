@@ -2,6 +2,7 @@ package ccmodel
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -157,8 +158,13 @@ func collectText(parts *[]string, v any) {
 		if foundPreferred {
 			return
 		}
-		for _, vv := range x {
-			collectText(parts, vv)
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			collectText(parts, x[k])
 		}
 	}
 }

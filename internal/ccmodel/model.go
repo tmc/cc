@@ -9,6 +9,7 @@
 package ccmodel
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 )
@@ -159,6 +160,40 @@ type ContentBlock struct {
 	Data      string          `json:"data,omitempty"`
 	MIMEType  string          `json:"mime_type,omitempty"`
 	MediaType string          `json:"media_type,omitempty"`
+
+	// ContentRaw holds the original content field when it is an array of
+	// nested blocks rather than a string. Content then carries the text
+	// extracted from it, which is empty for payloads that hold no text.
+	ContentRaw json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON accepts a content field that is either a string or an array of
+// nested blocks. Claude Code writes the array form for structured tool results,
+// such as the tool_reference lists returned by ToolSearch. Because a message's
+// blocks are decoded as one array, a single such block would otherwise fail the
+// decode and discard every block in the message.
+func (b *ContentBlock) UnmarshalJSON(data []byte) error {
+	type alias ContentBlock
+	var v struct {
+		alias
+		Content json.RawMessage `json:"content,omitempty"`
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*b = ContentBlock(v.alias)
+	raw := bytes.TrimLeft(v.Content, " \t\r\n")
+	switch {
+	case len(raw) == 0:
+	case raw[0] == '"':
+		if err := json.Unmarshal(raw, &b.Content); err != nil {
+			return err
+		}
+	default:
+		b.ContentRaw = append(b.ContentRaw[:0], raw...)
+		b.Content = ExtractAnyText(raw)
+	}
+	return nil
 }
 
 // Usage holds token usage information.
@@ -185,15 +220,21 @@ type CompactMetadata struct {
 
 // ToolUseResult holds the result of a tool invocation.
 type ToolUseResult struct {
-	Type     string          `json:"type,omitempty"`
-	Content  json.RawMessage `json:"content,omitempty"`
-	Stdout   string          `json:"stdout,omitempty"`
-	Stderr   string          `json:"stderr,omitempty"`
-	Status   string          `json:"status,omitempty"`
-	Success  bool            `json:"success,omitempty"`
-	FilePath string          `json:"filePath,omitempty"`
-	File     *FileResult     `json:"file,omitempty"`
-	Error    string          `json:"error,omitempty"`
+	Type    string          `json:"type,omitempty"`
+	Content json.RawMessage `json:"content,omitempty"`
+
+	// Text holds the result when Claude Code writes toolUseResult as a bare
+	// string rather than an object, which it does for tool errors and user
+	// rejections ("User rejected tool use").
+	Text string `json:"-"`
+
+	Stdout   string      `json:"stdout,omitempty"`
+	Stderr   string      `json:"stderr,omitempty"`
+	Status   string      `json:"status,omitempty"`
+	Success  bool        `json:"success,omitempty"`
+	FilePath string      `json:"filePath,omitempty"`
+	File     *FileResult `json:"file,omitempty"`
+	Error    string      `json:"error,omitempty"`
 
 	// Edit fields.
 	OldString string `json:"oldString,omitempty"`
@@ -227,6 +268,31 @@ type ToolUseResult struct {
 	TotalDurationMs   float64 `json:"totalDurationMs,omitempty"`
 	TotalTokens       int     `json:"totalTokens,omitempty"`
 	TotalToolUseCount int     `json:"totalToolUseCount,omitempty"`
+}
+
+// UnmarshalJSON accepts every shape Claude Code writes for toolUseResult: an
+// object, a bare string, or a content-block array. A strict object decode
+// fails on the latter two, discarding the entry that carries them.
+func (t *ToolUseResult) UnmarshalJSON(data []byte) error {
+	*t = ToolUseResult{}
+	trimmed := bytes.TrimLeft(data, " \t\r\n")
+	if len(trimmed) == 0 {
+		return nil
+	}
+	switch trimmed[0] {
+	case '"':
+		return json.Unmarshal(trimmed, &t.Text)
+	case '[':
+		t.Content = append(t.Content[:0], trimmed...)
+		return nil
+	}
+	type alias ToolUseResult
+	var v alias
+	if err := json.Unmarshal(trimmed, &v); err != nil {
+		return err
+	}
+	*t = ToolUseResult(v)
+	return nil
 }
 
 // FileResult holds file read results.

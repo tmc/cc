@@ -910,6 +910,7 @@ func toolUseResultContains(res *cc.ToolUseResult, text string) bool {
 	return strings.Contains(res.Stdout, text) ||
 		strings.Contains(res.Stderr, text) ||
 		strings.Contains(res.Error, text) ||
+		strings.Contains(res.Text, text) ||
 		strings.Contains(string(res.Content), text)
 }
 
