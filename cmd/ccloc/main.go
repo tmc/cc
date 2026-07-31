@@ -11,11 +11,20 @@ import (
 )
 
 var (
-	checkFlag    = flag.Bool("check", false, "Check if cache directory exists")
-	createFlag   = flag.Bool("create", false, "Create cache directory if needed")
-	sessionsFlag = flag.Bool("sessions", false, "Print sessions subdirectory")
+	harnessFlag  = flag.String("harness", "", "Harness to resolve for (claude, gemini, codex, opencode, pi, antigravity)")
+	homeFlag     = flag.Bool("home", false, "Print the harness data home instead of a project directory")
+	rootFlag     = flag.Bool("root", false, "Print the harness sessions root instead of a project directory")
+	checkFlag    = flag.Bool("check", false, "Check if the directory exists")
+	createFlag   = flag.Bool("create", false, "Create the directory if needed")
+	sessionsFlag = flag.Bool("sessions", false, "Print the sessions subdirectory of the project directory")
 	shortFlag    = flag.Bool("short", false, "Use ~ instead of full home path")
-	geminiFlag   = flag.Bool("gemini", false, "Use Gemini CLI path instead of Claude Code")
+
+	claudeFlag      = flag.Bool("claude", false, "Shorthand for -harness claude")
+	geminiFlag      = flag.Bool("gemini", false, "Shorthand for -harness gemini")
+	codexFlag       = flag.Bool("codex", false, "Shorthand for -harness codex")
+	opencodeFlag    = flag.Bool("opencode", false, "Shorthand for -harness opencode")
+	piFlag          = flag.Bool("pi", false, "Shorthand for -harness pi")
+	antigravityFlag = flag.Bool("antigravity", false, "Shorthand for -harness antigravity")
 )
 
 func main() {
@@ -27,61 +36,84 @@ func main() {
 	}
 }
 
+// selectedHarness resolves -harness and the shorthand flags to one name,
+// defaulting to claude. Naming more than one harness is an error.
+func selectedHarness() (string, error) {
+	shorthands := []struct {
+		set  bool
+		name string
+	}{
+		{*claudeFlag, "claude"},
+		{*geminiFlag, "gemini"},
+		{*codexFlag, "codex"},
+		{*opencodeFlag, "opencode"},
+		{*piFlag, "pi"},
+		{*antigravityFlag, "antigravity"},
+	}
+	harness := *harnessFlag
+	for _, s := range shorthands {
+		if !s.set {
+			continue
+		}
+		if harness != "" && harness != s.name {
+			return "", fmt.Errorf("conflicting harness flags: %q and %q", harness, s.name)
+		}
+		harness = s.name
+	}
+	if harness == "" {
+		harness = "claude"
+	}
+	return harness, nil
+}
+
 func run() error {
-	// Get target directory
-	dir := "."
-	if flag.NArg() > 0 {
-		dir = flag.Arg(0)
-	}
-
-	// Resolve to absolute path
-	absDir, err := filepath.Abs(dir)
+	harness, err := selectedHarness()
 	if err != nil {
-		return fmt.Errorf("resolve path: %w", err)
+		return err
 	}
 
-	// Get home directory
-	home, err := os.UserHomeDir()
+	var path string
+	switch {
+	case *homeFlag:
+		path, err = ccpaths.DataHome(harness)
+	case *rootFlag:
+		path, err = ccpaths.SessionsRoot(harness)
+	default:
+		dir := "."
+		if flag.NArg() > 0 {
+			dir = flag.Arg(0)
+		}
+		absDir, absErr := filepath.Abs(dir)
+		if absErr != nil {
+			return fmt.Errorf("resolve path: %w", absErr)
+		}
+		path, err = ccpaths.ProjectDir(harness, absDir)
+		if *sessionsFlag && err == nil {
+			path = filepath.Join(path, "sessions")
+		}
+	}
 	if err != nil {
-		return fmt.Errorf("get home directory: %w", err)
+		return err
 	}
 
-	// Encode the path
-	encoded := ccpaths.EncodePath(absDir)
-
-	// Build cache path
-	var ch string
-	if *geminiFlag {
-		ch, _ = ccpaths.GeminiHome()
-	} else {
-		ch, _ = ccpaths.ClaudeHome()
-	}
-	cachePath := filepath.Join(ch, "projects", encoded)
-	if *sessionsFlag {
-		cachePath = filepath.Join(cachePath, "sessions")
-	}
-
-	// Check if exists
 	if *checkFlag {
-		if _, err := os.Stat(cachePath); err != nil {
-			return fmt.Errorf("cache directory does not exist")
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("directory does not exist: %s", path)
 		}
 		return nil
 	}
-
-	// Create if requested
 	if *createFlag {
-		if err := os.MkdirAll(cachePath, 0755); err != nil {
+		if err := os.MkdirAll(path, 0o755); err != nil {
 			return fmt.Errorf("create directory: %w", err)
 		}
 	}
 
-	// Output path
-	output := cachePath
 	if *shortFlag {
-		output = strings.Replace(cachePath, home, "~", 1)
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
+			path = strings.Replace(path, home, "~", 1)
+		}
 	}
-
-	fmt.Println(output)
+	fmt.Println(path)
 	return nil
 }
