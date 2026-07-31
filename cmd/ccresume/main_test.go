@@ -941,3 +941,23 @@ func TestSortIndexMatchesRecency(t *testing.T) {
 		t.Errorf("recency sort: first = %q, want %q", matches[0].SessionID, "newer")
 	}
 }
+
+func TestResolveMatchDropsAntigravityBrainTarget(t *testing.T) {
+	dir := t.TempDir()
+	brain := filepath.Join(dir, ".gemini", "antigravity-cli", "brain", "conv-uuid")
+	logs := filepath.Join(brain, ".system_generated", "logs")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	session := filepath.Join(logs, "transcript.jsonl")
+	writeJSONL(t, session, []map[string]any{
+		{"step_index": 0, "type": "USER_INPUT", "content": "hello"},
+	})
+
+	// No recorded cwd exists, so resolution would otherwise fall back to the
+	// brain storage dir; that must be dropped rather than used as a workspace.
+	r := resolveMatch("", cc.IndexEntry{FullPath: session, ProjectPath: brain})
+	if r.target != "" {
+		t.Fatalf("target = %q, want empty (brain storage is not a workspace)", r.target)
+	}
+}

@@ -465,8 +465,24 @@ func resolveMatch(query string, m cc.IndexEntry) resolvedMatch {
 			r.target = r.summary.DistinctCWDs[len(r.summary.DistinctCWDs)-1]
 		}
 	}
+	// A target inside session storage (an antigravity brain conversation dir)
+	// is worse than none: agy treats the resume cwd as the workspace, so
+	// cd'ing into storage would point the resumed agent at its own transcript.
+	if isAgentStoragePath(r.target) {
+		r.target = ""
+		return r
+	}
 	r.target = preferredProjectPath(r.target)
 	return r
+}
+
+// isAgentStoragePath reports whether path lies inside a harness's session
+// storage rather than a real working directory.
+func isAgentStoragePath(path string) bool {
+	sep := string(filepath.Separator)
+	return strings.Contains(path, sep+"antigravity"+sep+"brain"+sep) ||
+		strings.Contains(path, sep+"antigravity-cli"+sep+"brain"+sep) ||
+		strings.Contains(path, sep+".codex"+sep+"sessions"+sep)
 }
 
 func canPreferProjectPath(query string, m cc.IndexEntry) bool {
@@ -476,7 +492,7 @@ func canPreferProjectPath(query string, m cc.IndexEntry) bool {
 	if filepath.IsAbs(query) && m.ProjectPath == query {
 		return true
 	}
-	return !strings.Contains(m.FullPath, string(filepath.Separator)+".codex"+string(filepath.Separator)+"sessions"+string(filepath.Separator))
+	return !isAgentStoragePath(m.FullPath)
 }
 
 func preferredProjectPath(path string) string {
