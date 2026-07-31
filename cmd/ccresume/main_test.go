@@ -517,12 +517,12 @@ func TestGrepMatchesLiteralQuery(t *testing.T) {
 	// paren here must match literally instead of failing rg's regex parser.
 	const query = "code didn't compile (empirically reproduced"
 	writeJSONL(t, path, []map[string]any{{"sessionId": "test-id", "cwd": filepath.Join(root, "work"), "text": query}})
-	matches, err := grepMatches(query)
+	matches, err := recentContentMatches(query, time.Hour)
 	if err != nil {
-		t.Fatalf("grepMatches: %v", err)
+		t.Fatalf("recentContentMatches: %v", err)
 	}
 	if len(matches) != 1 || matches[0].FullPath != path {
-		t.Fatalf("grepMatches = %#v, want single match for %s", matches, path)
+		t.Fatalf("recentContentMatches = %#v, want single match for %s", matches, path)
 	}
 }
 

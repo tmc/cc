@@ -163,7 +163,9 @@ func run() error {
 				return err
 			}
 		default:
-			matches, err = grepMatches(query)
+			// Bound the content grep by -since: find selects candidate files by
+			// mtime before rg runs, so old history is never scanned or resolved.
+			matches, err = recentContentMatches(query, since)
 			if err != nil {
 				return err
 			}
@@ -1050,6 +1052,9 @@ func recentContentMatches(query string, since time.Duration) ([]cc.IndexEntry, e
 		if rootMatch.dir == "" {
 			continue
 		}
+		if !isResumeSessionPath(path, rootMatch.kind) {
+			continue
+		}
 		if e, ok := indexEntryForPath(path, rootMatch, info); ok {
 			if seen[e.FullPath] {
 				continue
@@ -1130,60 +1135,6 @@ func recentMatchingPaths(roots []searchRoot, query string, minutes int) ([]strin
 		}
 		if err := scanner.Err(); err != nil {
 			return nil, err
-		}
-	}
-	return matches, nil
-}
-
-// grepMatches searches file contents using rg
-func grepMatches(query string) ([]cc.IndexEntry, error) {
-	roots, err := sessionRoots()
-	if err != nil {
-		return nil, err
-	}
-
-	args := []string{"-l", "-F", "--", query}
-	for _, root := range roots {
-		args = append(args, root.dir)
-	}
-	cmd := exec.Command("rg", args...)
-	out, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("rg: %w", err)
-	}
-
-	var matches []cc.IndexEntry
-	seen := map[string]bool{}
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		path := scanner.Text()
-		var rootMatch searchRoot
-		for _, root := range roots {
-			if strings.HasPrefix(path, root.dir) {
-				rootMatch = root
-				break
-			}
-		}
-		if rootMatch.dir == "" {
-			continue
-		}
-		if !isResumeSessionPath(path, rootMatch.kind) {
-			continue
-		}
-
-		info, err := os.Stat(path)
-		if err != nil {
-			continue
-		}
-		if e, ok := indexEntryForPath(path, rootMatch, info); ok {
-			if seen[e.FullPath] {
-				continue
-			}
-			seen[e.FullPath] = true
-			matches = append(matches, e)
 		}
 	}
 	return matches, nil
