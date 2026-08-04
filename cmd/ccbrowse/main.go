@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/internal/transcript"
 )
 
 var (
@@ -417,8 +418,6 @@ var (
 	titleStyle  = lipgloss.NewStyle().Bold(true)
 	dimStyle    = lipgloss.NewStyle().Faint(true)
 	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	userStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	asstStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 	toolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 )
 
@@ -472,52 +471,7 @@ func (m model) View() string {
 }
 
 func renderTranscript(entries []cc.Entry, timestamps bool) string {
-	var b strings.Builder
-	for _, e := range entries {
-		if e.IsMeta || e.Message == nil {
-			continue
-		}
-		prefix := ""
-		if timestamps && !e.Timestamp.IsZero() {
-			prefix = dimStyle.Render(e.Timestamp.Local().Format("15:04:05 "))
-		}
-		switch e.Message.Role {
-		case "user":
-			if e.Message.IsToolResultOnly() {
-				for _, tr := range e.Message.ToolResults() {
-					txt := collapse(tr.Content, 200)
-					if txt == "" {
-						continue
-					}
-					style := dimStyle
-					if tr.IsError {
-						style = toolStyle
-					}
-					fmt.Fprintf(&b, "%s  %s\n", prefix, style.Render("⎿ "+txt))
-				}
-				continue
-			}
-			if txt := e.Message.TextContent(); txt != "" && !cc.IsHarnessPreamble(txt) {
-				fmt.Fprintf(&b, "%s%s %s\n\n", prefix, userStyle.Render(">"), txt)
-			}
-		case "assistant":
-			for _, blk := range e.Message.ContentBlocks() {
-				switch blk.Type {
-				case "text":
-					if blk.Text != "" {
-						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, asstStyle.Render("⏺"), blk.Text)
-					}
-				case "tool_use":
-					detail := blk.BashCommand()
-					if detail == "" {
-						detail = collapse(string(blk.Input), 120)
-					}
-					fmt.Fprintf(&b, "%s%s\n", prefix, toolStyle.Render("⏺ "+blk.Name+" "+detail))
-				}
-			}
-		}
-	}
-	return b.String()
+	return transcript.Render(entries, transcript.Options{Timestamps: timestamps})
 }
 
 func age(t time.Time) string {
