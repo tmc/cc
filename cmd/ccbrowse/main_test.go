@@ -70,7 +70,7 @@ func TestRenderTranscript(t *testing.T) {
 			`[{"type":"text","text":"hi back"},{"type":"tool_use","name":"Bash","input":{"command":"ls -l"}}]`)},
 		{Type: "user", IsMeta: true, Message: mkmsg("user", `"meta noise"`)},
 	}
-	out := renderTranscript(entries, false)
+	out := renderTranscript("x.jsonl", entries, false, 0)
 	for _, want := range []string{"hello there", "hi back", "Bash", "ls -l"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("renderTranscript missing %q in:\n%s", want, out)

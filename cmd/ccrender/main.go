@@ -175,6 +175,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.viewport.Width = msg.Width
 			m.viewport.Height = msg.Height - 2
+			m.viewport.SetContent(m.render())
 		}
 		return m, nil
 
@@ -228,7 +229,11 @@ func (m model) render() string {
 	if *maxFlag > 0 && len(entries) > *maxFlag {
 		entries = entries[len(entries)-*maxFlag:]
 	}
-	return transcript.Render(entries, transcript.Options{Timestamps: m.timestamps})
+	return transcript.Render(entries, transcript.Options{
+		Timestamps: m.timestamps,
+		Width:      m.width,
+		Style:      transcript.StyleFor(cc.Harness(m.file)),
+	})
 }
 
 func (m model) View() string {

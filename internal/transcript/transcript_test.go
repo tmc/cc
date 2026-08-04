@@ -30,3 +30,54 @@ func TestRender(t *testing.T) {
 		t.Error("Render included IsMeta entry")
 	}
 }
+
+func TestWrap(t *testing.T) {
+	got := wrap("aaa bbb ccc ddd", 7, "  ")
+	want := "aaa bbb\n  ccc\n  ddd"
+	if got != want {
+		t.Errorf("wrap = %q, want %q", got, want)
+	}
+	if got := wrap("short", 80, "  "); got != "short" {
+		t.Errorf("wrap(short) = %q", got)
+	}
+}
+
+func TestCodexCommand(t *testing.T) {
+	input := json.RawMessage(`{"input":"const r = await tools.exec_command({\"cmd\":\"go version && ls\",\"timeout\":10})"}`)
+	if got, want := codexCommand(input), "go version && ls"; got != want {
+		t.Errorf("codexCommand = %q, want %q", got, want)
+	}
+	if got := codexCommand(json.RawMessage(`{"command":"ls"}`)); got != "" {
+		t.Errorf("codexCommand(non-exec) = %q, want empty", got)
+	}
+}
+
+func TestResultText(t *testing.T) {
+	tr := ccmodel.ContentBlock{Content: `[{"text":"line one","type":"input_text"}]`}
+	if got := resultText(tr); got != "line one" {
+		t.Errorf("resultText = %q, want %q", got, "line one")
+	}
+	tr = ccmodel.ContentBlock{Content: "plain"}
+	if got := resultText(tr); got != "plain" {
+		t.Errorf("resultText = %q, want plain", got)
+	}
+}
+
+func TestStripExecPreamble(t *testing.T) {
+	in := "Script completed\nWall time 0.2 seconds\nOutput:\ngo version go1.25.3\nfile.go"
+	if got, want := stripExecPreamble(in), "go version go1.25.3\nfile.go"; got != want {
+		t.Errorf("stripExecPreamble = %q, want %q", got, want)
+	}
+	if got := stripExecPreamble("plain output"); got != "plain output" {
+		t.Errorf("stripExecPreamble(plain) = %q", got)
+	}
+}
+
+func TestStyleFor(t *testing.T) {
+	if StyleFor("codex") != CodexStyle {
+		t.Error("StyleFor(codex) != CodexStyle")
+	}
+	if StyleFor("claude") != ClaudeStyle || StyleFor("") != ClaudeStyle {
+		t.Error("StyleFor default != ClaudeStyle")
+	}
+}

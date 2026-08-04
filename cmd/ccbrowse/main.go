@@ -350,7 +350,7 @@ func (m model) updateTranscript(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "t":
 		m.timestamps = !m.timestamps
-		m.viewport.SetContent(renderTranscript(m.entries, m.timestamps))
+		m.viewport.SetContent(renderTranscript(m.transcript.file, m.entries, m.timestamps, m.width))
 		return m, nil
 	case "y", "ctrl+y":
 		m.yanked = resumeCommand(m.transcript)
@@ -381,7 +381,7 @@ func (m model) openTranscript(r row) (tea.Model, tea.Cmd) {
 	m.transcript = r
 	m.view = transcriptView
 	m.viewport = viewport.New(m.width, m.height-2)
-	m.viewport.SetContent(renderTranscript(entries, m.timestamps))
+	m.viewport.SetContent(renderTranscript(r.file, entries, m.timestamps, m.width))
 	m.viewport.GotoBottom()
 	return m, nil
 }
@@ -470,8 +470,12 @@ func (m model) View() string {
 	return b.String()
 }
 
-func renderTranscript(entries []cc.Entry, timestamps bool) string {
-	return transcript.Render(entries, transcript.Options{Timestamps: timestamps})
+func renderTranscript(file string, entries []cc.Entry, timestamps bool, width int) string {
+	return transcript.Render(entries, transcript.Options{
+		Timestamps: timestamps,
+		Width:      width,
+		Style:      transcript.StyleFor(cc.Harness(file)),
+	})
 }
 
 func age(t time.Time) string {
