@@ -207,3 +207,29 @@ func TestPrimaryArg(t *testing.T) {
 		t.Errorf("primaryArg(none) = %q", got)
 	}
 }
+
+func TestExploreItems(t *testing.T) {
+	items, ok := exploreItems("ls cmd | head && sed -n '1,15p' go.mod")
+	if !ok || len(items) != 2 || items[0] != "List cmd" || items[1] != "Read go.mod" {
+		t.Errorf("exploreItems = %v, %v", items, ok)
+	}
+	if _, ok := exploreItems("rm -rf /"); ok {
+		t.Error("exploreItems(rm) ok, want false")
+	}
+	if _, ok := exploreItems("go test ./..."); ok {
+		t.Error("exploreItems(go test) ok, want false")
+	}
+}
+
+func TestLineRange(t *testing.T) {
+	in := json.RawMessage(`{"file_path":"/a/go.mod","limit":15}`)
+	if got := lineRange(in, ClaudeStyle); got != " · lines 1-15" {
+		t.Errorf("lineRange = %q", got)
+	}
+	if got := lineRange(in, PiStyle); got != ":1-15" {
+		t.Errorf("lineRange(pi) = %q", got)
+	}
+	if got := lineRange(json.RawMessage(`{"file_path":"/a"}`), ClaudeStyle); got != "" {
+		t.Errorf("lineRange(no limit) = %q", got)
+	}
+}

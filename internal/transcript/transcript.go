@@ -13,10 +13,12 @@ import (
 )
 
 var (
-	dimStyle  = lipgloss.NewStyle().Faint(true)
-	userStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	asstStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
-	toolStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	dimStyle   = lipgloss.NewStyle().Faint(true)
+	boldStyle  = lipgloss.NewStyle().Bold(true)
+	userStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	asstStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	toolStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	plainStyle = lipgloss.NewStyle()
 )
 
 // A Style is a set of glyphs matching one harness's native transcript look.
@@ -28,6 +30,8 @@ type Style struct {
 	Shell       string            // render shell tool calls as this prefix + cmd (e.g. "Ran ", "$ ")
 	Empty       string            // shown for empty tool results (e.g. "(No output)"); "" hides them
 	ToolCont    string            // continuation marker for wrapped tool-call lines; "" clips instead
+	BareCall    bool              // render non-shell calls as "name detail" instead of Name(detail)
+	Explore     bool              // group read-only shell calls under "Explored", hiding their output
 	StripExec   bool              // drop Codex exec-result boilerplate from results
 	HideResults bool              // omit tool result bodies (Antigravity folds them away)
 	ResultRows  int               // result lines shown before folding into "+N lines"
@@ -38,13 +42,13 @@ type Style struct {
 // Styles by harness name (as reported by cc.Harness). ClaudeStyle is the
 // default for unknown harnesses.
 var (
-	ClaudeStyle = Style{User: "❯", Asst: "⏺", Tool: "⏺", Result: "⎿  ", ResultRows: 1,
+	ClaudeStyle = Style{User: "❯", Asst: "⏺", Tool: "⏺", Result: "⎿  ", ResultRows: 10,
 		Empty: "(No output)"}
 	CodexStyle = Style{User: "›", Asst: "•", Tool: "•", Result: "└ ",
-		Shell: "Ran ", StripExec: true, ResultRows: 2, ResultTail: 2, ToolCont: "│ "}
+		Shell: "Ran ", StripExec: true, ResultRows: 2, ResultTail: 2, ToolCont: "│ ", Explore: true}
 	AntigravityStyle = Style{User: ">", Asst: " ", Tool: "●", Result: "⎿  ", ResultRows: 1,
 		HideResults: true, ToolNames: map[string]string{"LS": "ListDir", "View": "Read"}}
-	PiStyle = Style{User: "›", Asst: " ", Shell: "$ ", Result: "", ResultRows: 3}
+	PiStyle = Style{User: "›", Asst: " ", Shell: "$ ", Result: "", ResultRows: 8, BareCall: true}
 )
 
 // StyleFor returns the native style for a harness name ("claude", "codex",
@@ -78,6 +82,16 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 		st = ClaudeStyle
 	}
 	var b strings.Builder
+	hidden := make(map[string]bool) // tool_use IDs whose results are folded away
+	inExplore := false
+	// leaveExplore closes an open Explored group with the blank line the
+	// Codex TUI puts after it.
+	leaveExplore := func() {
+		if inExplore {
+			b.WriteString("\n")
+			inExplore = false
+		}
+	}
 	for _, e := range entries {
 		if e.IsMeta || e.Message == nil {
 			continue
@@ -89,11 +103,24 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 		switch e.Message.Role {
 		case "user":
 			if e.Message.IsToolResultOnly() {
+				hasShown := false
 				for _, tr := range e.Message.ToolResults() {
+					if !hidden[tr.ToolUseID] {
+						hasShown = true
+					}
+				}
+				if hasShown {
+					leaveExplore()
+				}
+				for _, tr := range e.Message.ToolResults() {
+					if hidden[tr.ToolUseID] {
+						continue
+					}
 					renderResult(&b, prefix, tr, e.ToolUseResult, st, opts.Width)
 				}
 				continue
 			}
+			leaveExplore()
 			if txt := userText(e.Message.TextContent()); txt != "" && !ccmodel.IsHarnessPreamble(txt) {
 				fmt.Fprintf(&b, "%s%s %s\n\n", prefix, userStyle.Render(st.User), wrap(txt, opts.Width-2, "  "))
 			}
@@ -101,15 +128,39 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 			for _, blk := range e.Message.ContentBlocks() {
 				switch blk.Type {
 				case "text":
+					leaveExplore()
 					if blk.Text != "" {
 						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, asstStyle.Render(st.Asst), wrap(mdInline(blk.Text), opts.Width-2, "  "))
 					}
 				case "tool_use":
 					if blk.Name == "AskUserQuestion" {
+						leaveExplore()
 						renderQuestions(&b, prefix, blk.Input, st, opts.Width)
 						continue
 					}
-					line := toolCall(blk, st)
+					cmd := blk.BashCommand()
+					if cmd == "" {
+						cmd = codexCommand(blk.Input)
+					}
+					if st.Explore && cmd != "" {
+						if items, ok := exploreItems(cmd); ok {
+							hidden[blk.ID] = true
+							if !inExplore {
+								fmt.Fprintf(&b, "%s%s %s\n", prefix, dimStyle.Render(st.Tool), boldStyle.Render("Explored"))
+							}
+							for i, it := range items {
+								marker := "    "
+								if !inExplore && i == 0 {
+									marker = "  └ "
+								}
+								fmt.Fprintf(&b, "%s%s%s\n", prefix, dimStyle.Render(marker), it)
+							}
+							inExplore = true
+							continue
+						}
+					}
+					leaveExplore()
+					line, name := callLine(blk, cmd, st)
 					if st.Tool != "" {
 						line = st.Tool + " " + line
 					}
@@ -118,7 +169,10 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 					} else {
 						line = clip(line, opts.Width)
 					}
-					fmt.Fprintf(&b, "%s%s\n", prefix, toolStyle.Render(line))
+					if name != "" {
+						line = strings.Replace(line, name, boldStyle.Render(name), 1)
+					}
+					fmt.Fprintf(&b, "%s%s\n", prefix, line)
 				}
 			}
 		}
@@ -145,7 +199,9 @@ func renderResult(b *strings.Builder, prefix string, tr ccmodel.ContentBlock, tu
 		}
 		txt = st.Empty
 	}
-	style := dimStyle
+	// Native TUIs render result content in the default color; only the
+	// marker and fold hint are dimmed. Errors highlight the content too.
+	style := plainStyle
 	if tr.IsError {
 		style = toolStyle
 	}
@@ -162,7 +218,8 @@ func renderResult(b *strings.Builder, prefix string, tr ccmodel.ContentBlock, tu
 		if first {
 			marker = st.Result
 		}
-		fmt.Fprintf(b, "%s  %s\n", prefix, style.Render(clip(marker+strings.TrimRight(all[i], " "), width-2)))
+		fmt.Fprintf(b, "%s  %s%s\n", prefix, dimStyle.Render(marker),
+			style.Render(clip(strings.TrimRight(all[i], " "), width-2-len([]rune(marker)))))
 	}
 	head := min(len(all), max(st.ResultRows, 1))
 	tail := 0
@@ -265,20 +322,21 @@ func userText(txt string) string {
 	return txt
 }
 
-// toolCall renders a tool_use block the way its harness displays it:
-// Name(detail) for Claude-style TUIs, a Shell prefix ("Ran <cmd>",
-// "$ <cmd>") for shell calls in harnesses that render them bare.
-func toolCall(blk ccmodel.ContentBlock, st Style) string {
-	cmd := blk.BashCommand()
-	if cmd == "" {
-		cmd = codexCommand(blk.Input)
-	}
+// callLine renders a tool_use block the way its harness displays it:
+// Name(detail) for Claude-style TUIs, a Shell prefix ("Ran <cmd>", "$ <cmd>")
+// for shell calls in harnesses that render them bare, and "name detail" for
+// pi's bare-call style. It also returns the display name so the caller can
+// embolden it after width handling.
+func callLine(blk ccmodel.ContentBlock, cmd string, st Style) (line, name string) {
 	if cmd != "" && st.Shell != "" {
-		return st.Shell + collapse(cmd, 160)
+		return st.Shell + collapse(cmd, 160), ""
 	}
 	detail := cmd
 	if detail == "" {
 		detail = primaryArg(blk.Input)
+		if detail != "" {
+			detail += lineRange(blk.Input, st)
+		}
 	}
 	if detail == "" {
 		detail = agyDetail(blk.Input)
@@ -286,14 +344,73 @@ func toolCall(blk ccmodel.ContentBlock, st Style) string {
 	if detail == "" {
 		detail = collapse(string(blk.Input), 120)
 	}
-	name := blk.Name
+	name = blk.Name
 	if n, ok := st.ToolNames[name]; ok {
 		name = n
 	}
 	if detail == "" {
-		return name
+		return name, name
 	}
-	return name + "(" + collapse(detail, 160) + ")"
+	if st.BareCall {
+		return name + " " + collapse(detail, 160), name
+	}
+	return name + "(" + collapse(detail, 160) + ")", name
+}
+
+// lineRange renders a Read-style offset/limit input as the line-range suffix
+// the harness shows: " · lines 1-15" for Claude, ":1-15" for pi.
+func lineRange(input json.RawMessage, st Style) string {
+	var f struct {
+		Offset int `json:"offset"`
+		Limit  int `json:"limit"`
+	}
+	if err := json.Unmarshal(input, &f); err != nil || f.Limit <= 0 {
+		return ""
+	}
+	start := max(f.Offset, 1)
+	end := start + f.Limit - 1
+	if st.BareCall {
+		return fmt.Sprintf(":%d-%d", start, end)
+	}
+	return fmt.Sprintf(" · lines %d-%d", start, end)
+}
+
+// exploreItems classifies a shell command as read-only exploration the way
+// the Codex TUI does, splitting on && and mapping each part to a display
+// verb ("List cmd", "Read go.mod"). ok is false if any part is not clearly
+// read-only, in which case the command renders as a normal shell call.
+func exploreItems(cmd string) (items []string, ok bool) {
+	for part := range strings.SplitSeq(cmd, "&&") {
+		// A trailing pipeline (| head) doesn't change read-only-ness.
+		part, _, _ = strings.Cut(part, "|")
+		fields := strings.Fields(part)
+		if len(fields) == 0 {
+			continue
+		}
+		arg := fields[len(fields)-1]
+		switch fields[0] {
+		case "ls":
+			if len(fields) == 1 || strings.HasPrefix(arg, "-") {
+				arg = "."
+			}
+			items = append(items, "List "+arg)
+		case "cat", "head", "tail":
+			items = append(items, "Read "+arg)
+		case "sed":
+			// Only the print form (sed -n '1,15p' file) is a read.
+			if len(fields) < 2 || fields[1] != "-n" {
+				return nil, false
+			}
+			items = append(items, "Read "+arg)
+		case "rg", "grep":
+			items = append(items, "Search "+arg)
+		case "pwd", "wc", "file", "stat":
+			items = append(items, "Read "+arg)
+		default:
+			return nil, false
+		}
+	}
+	return items, len(items) > 0
 }
 
 // primaryArg extracts the argument agent TUIs headline for a tool call —
