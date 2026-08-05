@@ -558,8 +558,17 @@ func parseCodexToolOutput(raw json.RawMessage) (stdout, status string, success b
 		return stdout, "error", false, errText
 	}
 
-	lower := strings.ToLower(trimmed)
-	if strings.Contains(lower, "error") || strings.Contains(lower, "failed") || strings.Contains(lower, "panic") {
+	// Exec results carry their own verdict on the first line; anything else
+	// is judged by how it starts, not by failure words appearing anywhere in
+	// the output (a cat of a file discussing errors is not an error).
+	if strings.HasPrefix(trimmed, "Script completed") {
+		return trimmed, "success", true, ""
+	}
+	if strings.HasPrefix(trimmed, "Script failed") {
+		return trimmed, "error", false, trimmed
+	}
+	first, _, _ := strings.Cut(strings.ToLower(trimmed), "\n")
+	if strings.Contains(first, "error") || strings.Contains(first, "failed") || strings.Contains(first, "panic") {
 		return trimmed, "error", false, trimmed
 	}
 	return trimmed, "success", true, ""
