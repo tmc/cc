@@ -90,7 +90,8 @@ func (m *Message) IsToolResultOnly() bool {
 // BashCommand returns the command field from a Bash tool_use block's Input.
 // Returns "" if the block is not a Bash tool_use or the input is unparseable.
 func (b ContentBlock) BashCommand() string {
-	if b.Type != "tool_use" || b.Name != "Bash" || len(b.Input) == 0 {
+	// Harnesses vary in case: Claude records "Bash", pi records "bash".
+	if b.Type != "tool_use" || !strings.EqualFold(b.Name, "Bash") || len(b.Input) == 0 {
 		return ""
 	}
 	var in struct {

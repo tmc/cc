@@ -73,11 +73,54 @@ func TestStripExecPreamble(t *testing.T) {
 	}
 }
 
+func TestPiShellStyle(t *testing.T) {
+	entries := []ccmodel.Entry{
+		{Type: "assistant", Message: &ccmodel.Message{Role: "assistant", Content: json.RawMessage(
+			`[{"type":"tool_use","name":"bash","input":{"command":"go version"}}]`)}},
+	}
+	out := Render(entries, Options{Style: PiStyle})
+	if !strings.Contains(out, "$ go version") || strings.Contains(out, "bash(") {
+		t.Errorf("pi style render = %q, want bare $ cmd", out)
+	}
+}
+
+func TestResultTailFold(t *testing.T) {
+	var b strings.Builder
+	tr := ccmodel.ContentBlock{Content: "l1\nl2\nl3\nl4\nl5\nl6\nl7"}
+	renderResult(&b, "", tr, nil, CodexStyle, 0)
+	out := b.String()
+	for _, want := range []string{"l1", "l2", "… +3 lines", "l6", "l7"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("tail fold missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "l4") {
+		t.Errorf("tail fold shows folded line l4:\n%s", out)
+	}
+}
+
+func TestHideResults(t *testing.T) {
+	var b strings.Builder
+	renderResult(&b, "", ccmodel.ContentBlock{Content: "secret"}, nil, AntigravityStyle, 0)
+	if b.String() != "" {
+		t.Errorf("HideResults rendered %q, want empty", b.String())
+	}
+}
+
+func TestMdInline(t *testing.T) {
+	if got := mdInline("run **Go 1.26** on `darwin`"); got != "run Go 1.26 on darwin" {
+		t.Errorf("mdInline = %q", got)
+	}
+	if got := mdInline("a ** unpaired `tick"); got != "a ** unpaired `tick" {
+		t.Errorf("mdInline(unpaired) = %q", got)
+	}
+}
+
 func TestStyleFor(t *testing.T) {
-	if StyleFor("codex") != CodexStyle {
+	if StyleFor("codex").Shell != "Ran " {
 		t.Error("StyleFor(codex) != CodexStyle")
 	}
-	if StyleFor("claude") != ClaudeStyle || StyleFor("") != ClaudeStyle {
+	if StyleFor("claude").User != "❯" || StyleFor("").User != "❯" {
 		t.Error("StyleFor default != ClaudeStyle")
 	}
 }
@@ -103,5 +146,64 @@ func TestAgyDetail(t *testing.T) {
 	}
 	if got := agyDetail(json.RawMessage(`{"other":1}`)); got != "" {
 		t.Errorf("agyDetail(no keys) = %q, want empty", got)
+	}
+}
+
+func TestRenderQuestions(t *testing.T) {
+	entries := []ccmodel.Entry{
+		{Type: "assistant", Message: &ccmodel.Message{Role: "assistant", Content: json.RawMessage(
+			`[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[
+			  {"question":"Which path?","header":"Approach","options":[
+			    {"label":"Fast (Recommended)"},{"label":"Careful"}]}]}}]`)}},
+	}
+	out := Render(entries, Options{})
+	for _, want := range []string{"AskUserQuestion (1)", "[Approach]", "Which path?", "○ Fast (Recommended)", "○ Careful"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("renderQuestions missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestResultSummary(t *testing.T) {
+	if got := resultSummary(&ccmodel.ToolUseResult{File: &ccmodel.FileResult{NumLines: 41}}); got != "Read 41 lines" {
+		t.Errorf("resultSummary(file) = %q", got)
+	}
+	if got := resultSummary(&ccmodel.ToolUseResult{NumFiles: 3}); got != "Found 3 files" {
+		t.Errorf("resultSummary(files) = %q", got)
+	}
+	if got := resultSummary(nil); got != "" {
+		t.Errorf("resultSummary(nil) = %q", got)
+	}
+}
+
+func TestEmptyResult(t *testing.T) {
+	var b strings.Builder
+	renderResult(&b, "", ccmodel.ContentBlock{Content: "  "}, nil, ClaudeStyle, 0)
+	if !strings.Contains(b.String(), "(No output)") {
+		t.Errorf("empty result = %q, want (No output)", b.String())
+	}
+	b.Reset()
+	renderResult(&b, "", ccmodel.ContentBlock{Content: ""}, nil, CodexStyle, 0)
+	if b.String() != "" {
+		t.Errorf("codex empty result = %q, want hidden", b.String())
+	}
+}
+
+func TestMdHeadings(t *testing.T) {
+	if got := mdInline("### Overview\nbody"); got != "Overview\nbody" {
+		t.Errorf("mdInline(heading) = %q", got)
+	}
+	if got := mdInline("#!/bin/sh"); got != "#!/bin/sh" {
+		t.Errorf("mdInline(shebang) = %q", got)
+	}
+}
+
+func TestPrimaryArg(t *testing.T) {
+	in := json.RawMessage(`{"replace_all":false,"file_path":"/a/b.md","old_string":"x"}`)
+	if got := primaryArg(in); got != "/a/b.md" {
+		t.Errorf("primaryArg = %q", got)
+	}
+	if got := primaryArg(json.RawMessage(`{"n":1}`)); got != "" {
+		t.Errorf("primaryArg(none) = %q", got)
 	}
 }
