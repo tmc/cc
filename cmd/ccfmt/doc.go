@@ -1,8 +1,9 @@
 // Command ccfmt formats coding-agent session transcripts.
 //
 // ccfmt reads Claude Code, Codex, opencode, or pi session files (or stdin)
-// and renders them in cleaner formats for humans. The markdown format is
-// intended for publishing transcripts on GitHub or GitHub Pages.
+// and renders them in formats for reading or export. Transcript is the
+// default reading format. Text is a raw diagnostic format; markdown is for
+// publishing transcripts on GitHub or GitHub Pages.
 //
 // # Usage
 //
@@ -13,7 +14,7 @@
 //
 // # Flags
 //
-//	-format FMT          Output format: text (default), transcript, markdown/md,
+//	-format FMT          Output format: transcript (default), text (raw), markdown/md,
 //	                     json, jsonl. The transcript format reproduces the
 //	                     recording harness's own TUI (glyphs, folded tool
 //	                     results, color) and ignores the document flags below.
@@ -43,7 +44,7 @@
 //
 //	ccsessions -format jsonl | ccfmt -format jsonl
 //
-// Get a terminal-friendly transcript with timestamps:
+// Get a terminal-friendly transcript with timestamps (the default format):
 //
 //	ccfmt -timestamps session.jsonl
 //

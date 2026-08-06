@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	formatFlag       = flag.String("format", "text", "Output format: text, transcript, markdown, json, jsonl")
+	formatFlag       = flag.String("format", "transcript", "Output format: transcript, text, markdown, json, jsonl")
 	widthFlag        = flag.Int("width", 0, "Wrap width for -format transcript (0 uses $COLUMNS, else 100)")
 	titleFlag        = flag.String("title", "", "Optional document title")
 	includeMeta      = flag.Bool("meta", false, "Include session metadata and injected preamble messages")

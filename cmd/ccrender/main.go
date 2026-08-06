@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -84,7 +85,7 @@ func runTUI(file string) error {
 // writeTranscript prints the transcript the TUI would show, wrapped to
 // $COLUMNS (or 100), for piping into pagers and diffs.
 func writeTranscript(file string) error {
-	entries, err := cc.ReadFile(context.Background(), file)
+	entries, err := cc.ReadFileWithSubagents(context.Background(), file)
 	if err != nil {
 		return err
 	}
@@ -180,18 +181,25 @@ func newModel(file string) (model, error) {
 		expand:     *expandFlag,
 		follow:     *followFlag,
 	}
-	// Offset tailing reads raw claude/codex JSONL lines; the other formats
-	// (pi, opencode, antigravity) need their dedicated readers, so follow
-	// mode falls back to re-reading the whole file when it grows.
+	// Offset tailing reads raw claude/codex JSONL lines. Every initial render
+	// includes sidechain entries, the same session view ccfmt uses.
 	switch cc.Harness(file) {
 	case "claude", "codex":
 		entries, offset, _, err := cc.ReadFileWithOffset(context.Background(), file)
 		if err != nil {
 			return model{}, err
 		}
+		subs, err := cc.ReadSubagents(context.Background(), file)
+		if err != nil {
+			return model{}, err
+		}
+		entries = append(entries, subs...)
+		sort.SliceStable(entries, func(i, j int) bool {
+			return entries[i].Timestamp.Before(entries[j].Timestamp)
+		})
 		m.entries, m.offset, m.tailable = entries, offset, true
 	default:
-		entries, err := cc.ReadFile(context.Background(), file)
+		entries, err := cc.ReadFileWithSubagents(context.Background(), file)
 		if err != nil {
 			return model{}, err
 		}
