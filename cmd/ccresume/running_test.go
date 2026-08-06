@@ -141,10 +141,11 @@ func TestAnnotateLineRunningAtEnd(t *testing.T) {
 		t.Errorf("running-only annotateLine = %q, want it to end with the RUNNING comment", got)
 	}
 
-	// both flags: info comment first, RUNNING last (at the very end of the line).
+	// both flags: one comment, info detail first, RUNNING last (at the very
+	// end of the line).
 	*infoFlag = true
 	got = annotateLine(base, "q", r, true, procs, "claude", args, false)
-	if !strings.HasSuffix(got, "# RUNNING") {
+	if !strings.HasSuffix(got, "RUNNING") {
 		t.Errorf("combined annotateLine = %q, want RUNNING at the end", got)
 	}
 	iInfo := strings.Index(got, "12×")

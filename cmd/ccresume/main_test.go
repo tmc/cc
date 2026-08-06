@@ -752,7 +752,7 @@ func TestInfoAnnotationIDResolutionHasNoSparkline(t *testing.T) {
 		summary:     cc.SessionSummary{TotalLines: 100},
 		occurrences: 3,
 	}
-	got := infoAnnotation("widget", r, true)
+	got := infoAnnotation("widget", r, true, false)
 	if strings.ContainsAny(got, "▁▂▃▄▅▆▇█") || strings.Contains(got, "%") || strings.Contains(got, "@") {
 		t.Errorf("id-resolution annotation = %q, want no sparkline/density/hits", got)
 	}
@@ -760,9 +760,29 @@ func TestInfoAnnotationIDResolutionHasNoSparkline(t *testing.T) {
 		t.Errorf("annotation = %q, want size (42×) present", got)
 	}
 	// A content query on the same match DOES get a sparkline + density.
-	got2 := infoAnnotation("widget", r, false)
+	got2 := infoAnnotation("widget", r, false, false)
 	if !strings.Contains(got2, "%") || !strings.ContainsAny(got2, "▁▂▃▄▅▆▇█") {
 		t.Errorf("content annotation = %q, want density + sparkline", got2)
+	}
+}
+
+func TestInfoAnnotationSessionName(t *testing.T) {
+	r := resolvedMatch{
+		entry:   cc.IndexEntry{MessageCount: 42, Modified: "2026-07-19T13:54:00Z"},
+		summary: cc.SessionSummary{CustomTitle: "main appledocs coordinator"},
+	}
+	got := infoAnnotation("", r, true, false)
+	if !strings.HasSuffix(got, ` "main appledocs coordinator"`) {
+		t.Errorf("plain annotation = %q, want quoted name after the stats", got)
+	}
+	colored := infoAnnotation("", r, true, true)
+	if !strings.Contains(colored, ansiReverse+" main appledocs coordinator "+ansiReset) {
+		t.Errorf("colored annotation = %q, want reverse-video padded name", colored)
+	}
+	// No name → no leading name token.
+	r.summary.CustomTitle = ""
+	if got := infoAnnotation("", r, true, false); !strings.HasPrefix(got, "42×") {
+		t.Errorf("unnamed annotation = %q, want to start with size", got)
 	}
 }
 
@@ -841,12 +861,12 @@ func TestInfoAnnotationHasDensityToken(t *testing.T) {
 		summary:     cc.SessionSummary{TotalLines: 2},
 		occurrences: 1,
 	}
-	got := infoAnnotation("widget", r, false)
+	got := infoAnnotation("widget", r, false, false)
 	if !strings.Contains(got, "50%") {
 		t.Errorf("annotation = %q, want a '50%%' density token", got)
 	}
 	// id-resolution: no density token.
-	if id := infoAnnotation("widget", r, true); strings.Contains(id, "%") {
+	if id := infoAnnotation("widget", r, true, false); strings.Contains(id, "%") {
 		t.Errorf("id-resolution annotation = %q, want no density token", id)
 	}
 }

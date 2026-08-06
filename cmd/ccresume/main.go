@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass/it2bind"
@@ -25,28 +26,38 @@ import (
 )
 
 var (
-	launchFlag  = flag.Bool("l", false, "Launch claude instead of printing command")
-	sinceFlag   = flag.String("since", "7d", "Search sessions modified within duration")
-	oneFlag     = flag.Bool("1", false, "Show only the most recent match")
-	clipFlag    = flag.Bool("clip", true, "Use clipboard as search query (pbpaste)")
-	pathsFlag   = flag.Bool("paths", false, "Print raw session file paths instead of resume commands")
-	hasFlag     = flag.String("has", "", "Only include sessions whose transcript contains this literal text")
-	cmdFlag     = flag.String("cmd", "", "Only include sessions with a tool command containing this literal text")
-	resultFlag  = flag.String("result", "", "Only include sessions with a tool result containing this literal text")
-	wroteFlag   = flag.String("wrote", "", "Only include sessions that wrote a file matching this path or glob")
-	dirFlag     = flag.String("dir", "", "Only include sessions recorded in this directory")
-	harnessFlag = flag.String("harness", "", "Only include sessions from this harness")
-	sidSideFlag = flag.String("sid-side", "src", "When a query is an it2 send-text line, resume the src or dst pane")
-	sortFlag    = flag.String("sort", "relevance", "Order matches by relevance or recency")
-	infoFlag    = flag.Bool("info", false, "Annotate each resume line with session size and an occurrence sparkline")
-	runningFlag = flag.Bool("show-is-running", false, "Annotate each resume line whose session is already running as a process")
-	noColorFlag = flag.Bool("no-color", false, "Disable ANSI color in -info annotations")
+	launchFlag   = flag.Bool("l", false, "Launch claude instead of printing command")
+	sinceFlag    = flag.String("since", "7d", "Search sessions modified within duration")
+	oneFlag      = flag.Bool("1", false, "Show only the most recent match")
+	clipFlag     = flag.Bool("clip", true, "Use clipboard as search query (pbpaste)")
+	pathsFlag    = flag.Bool("paths", false, "Print raw session file paths instead of resume commands")
+	hasFlag      = flag.String("has", "", "Only include sessions whose transcript contains this literal text")
+	cmdFlag      = flag.String("cmd", "", "Only include sessions with a tool command containing this literal text")
+	resultFlag   = flag.String("result", "", "Only include sessions with a tool result containing this literal text")
+	wroteFlag    = flag.String("wrote", "", "Only include sessions that wrote a file matching this path or glob")
+	dirFlag      = flag.String("dir", "", "Only include sessions recorded in this directory")
+	harnessFlag  = flag.String("harness", "", "Only include sessions from this harness")
+	sidSideFlag  = flag.String("sid-side", "src", "When a query is an it2 send-text line, resume the src or dst pane")
+	sortFlag     = flag.String("sort", "relevance", "Order matches by relevance or recency")
+	infoFlag     = flag.Bool("info", false, "Annotate each resume line with session name, size, an occurrence sparkline, and running state (implies -show-is-running)")
+	runningFlag  = flag.Bool("show-is-running", false, "Annotate each resume line whose session is already running as a process")
+	infoLineFlag = flag.Bool("info-line", false, "Print the -info annotation on its own line under each resume command (implies -info)")
+	noColorFlag  = flag.Bool("no-color", false, "Disable ANSI color in -info annotations")
 )
 
 const (
-	ansiDim   = "\033[2m"
-	ansiReset = "\033[0m"
+	ansiDim       = "\033[2m"
+	ansiReverse   = "\033[7m"
+	ansiGreen     = "\033[32m"
+	ansiBoldGreen = "\033[1;32m"
+	ansiCyan      = "\033[36m"
+	ansiBoldCyan  = "\033[1;36m"
+	ansiReset     = "\033[0m"
 )
+
+// annotateColCap bounds the column the -info annotations are aligned to:
+// commands wider than this don't widen the column, they just overrun it.
+const annotateColCap = 100
 
 // useColor reports whether ANSI styling should be written to f: only when f is a
 // terminal, NO_COLOR is unset, and -no-color was not passed. This mirrors the
@@ -64,6 +75,16 @@ func useColor(f *os.File) bool {
 
 func main() {
 	flag.Parse()
+	// -info-line is a layout variant of -info, and -info is the "tell me about
+	// each match" mode, where whether the session is already open belongs in
+	// the picture; the process scan behind it is a single ps snapshot, cheap
+	// next to the transcript reads -info does anyway.
+	if *infoLineFlag {
+		*infoFlag = true
+	}
+	if *infoFlag {
+		*runningFlag = true
+	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "ccresume: %v\n", err)
 		os.Exit(1)
@@ -285,7 +306,14 @@ func run() error {
 		return resolved[i].entry.ModifiedTime().After(resolved[j].entry.ModifiedTime())
 	})
 
-	for _, r := range resolved {
+	// Render every command first so the -info annotations can be aligned into
+	// one column: pad each command to the widest one, capped so a single
+	// outlier path doesn't push the whole column off-screen. Lines past the
+	// cap just run long.
+	lines := make([]string, len(resolved))
+	runs := make([]string, len(resolved))
+	annotateCol := 0
+	for i, r := range resolved {
 		bin, args := resumeInvocation(r.entry)
 		if *launchFlag {
 			if *infoFlag || *runningFlag {
@@ -297,12 +325,27 @@ func run() error {
 			}
 			return launchAgent(bin, args, r.target)
 		}
-		// A trailing shell comment keeps the line pipe/copy-safe: sh ignores
-		// everything after '#'. The comment is reference, not payload, so it is
-		// dimmed on a terminal; piped output stays byte-clean.
-		line := renderResumeCommand(r.target, bin, args)
-		line = annotateLine(line, query, r, isIDResolution, procs, bin, args, useColor(os.Stdout))
-		fmt.Println(line)
+		lines[i] = renderResumeCommand(r.target, bin, args)
+		if w := utf8.RuneCountInString(lines[i]); w > annotateCol && w <= annotateColCap {
+			annotateCol = w
+		}
+		if *runningFlag {
+			runs[i] = runningMarker(procs, bin, args)
+		}
+	}
+	// A trailing shell comment keeps each line pipe/copy-safe: sh ignores
+	// everything after '#'. The comment is reference, not payload, so it is
+	// dimmed on a terminal; piped output stays byte-clean.
+	on := useColor(os.Stdout)
+	anns := alignedAnnotations(query, resolved, runs, isIDResolution, on)
+	for i := range resolved {
+		line := lines[i]
+		if !*infoLineFlag && anns[i] != "" {
+			if pad := annotateCol - utf8.RuneCountInString(line); pad > 0 {
+				line += strings.Repeat(" ", pad)
+			}
+		}
+		fmt.Println(attachAnnotation(line, anns[i], on))
 	}
 	return nil
 }
@@ -552,15 +595,200 @@ func countFileOccurrences(query, path string) int {
 // dimming. bin and args are the resume invocation, used both to match the session
 // against running processes and, via resumeToken, as the identifier to look for.
 func annotateLine(line, query string, r resolvedMatch, isIDResolution bool, procs []runningProc, bin string, args []string, on bool) string {
-	if *infoFlag {
-		line += "   " + dim("# "+infoAnnotation(query, r, isIDResolution), on)
-	}
+	var runs []string
 	if *runningFlag {
-		if m := runningMarker(procs, bin, args); m != "" {
-			line += "   " + dim("# "+m, on)
-		}
+		runs = []string{runningMarker(procs, bin, args)}
+	} else {
+		runs = []string{""}
 	}
-	return line
+	return attachAnnotation(line, alignedAnnotations(query, []resolvedMatch{r}, runs, isIDResolution, on)[0], on)
+}
+
+// attachAnnotation joins a rendered command and its annotation into the output
+// layout: a trailing "# ..." comment, or with -info-line an indented comment
+// line below the command. Both layouts stay sh-safe since the annotation is a
+// comment either way. An empty annotation leaves the line untouched.
+func attachAnnotation(line, ann string, on bool) string {
+	if ann == "" {
+		return line
+	}
+	ann = dim("# "+ann, on)
+	if *infoLineFlag {
+		return line + "\n  " + ann
+	}
+	return line + "   " + ann
+}
+
+// annRow holds one match's plain (unstyled, unpadded) annotation fields.
+type annRow struct {
+	msgs, lines, hits, dense, spark, age, run, name string
+	sparkCounts                                     []int
+	recent                                          bool
+}
+
+// annotationRows extracts each match's annotation fields. Fields that don't
+// apply (no line count, no content occurrences) are left empty; runs carries
+// the per-row RUNNING marker, computed by the caller, which knows the resume
+// invocation each row was matched against.
+func annotationRows(query string, resolved []resolvedMatch, runs []string, isIDResolution bool) []annRow {
+	rows := make([]annRow, len(resolved))
+	for i, r := range resolved {
+		row := &rows[i]
+		// MessageCount is free from the index, but the grep fallback builds
+		// entries without it; fall back to the summary, which is read anyway.
+		msgs := r.entry.MessageCount
+		if msgs == 0 {
+			msgs = r.summary.UserMessages + r.summary.AsstMessages
+		}
+		row.msgs = humanize(msgs) + "×"
+		if r.summary.TotalLines > 0 {
+			row.lines = humanize(r.summary.TotalLines) + "L"
+		}
+		// An id-resolution (a claude.ai URL or it2 SID that resolved to a
+		// specific session) has no meaningful occurrences-over-time, so it
+		// shows size and time only.
+		if !isIDResolution && r.occurrences > 0 {
+			counts, densePct := occurrenceBuckets(query, r.entry.FullPath, 12)
+			row.hits = humanize(r.occurrences) + "@"
+			row.dense = strconv.Itoa(densePct) + "%"
+			row.spark = renderSpark(counts)
+			row.sparkCounts = counts
+		}
+		row.age = relAge(r.entry.ModifiedTime())
+		if t := r.entry.ModifiedTime(); !t.IsZero() && time.Since(t) < time.Hour {
+			row.recent = true
+		}
+		row.run = runs[i]
+		row.name = r.summary.CustomTitle
+	}
+	return rows
+}
+
+// alignedAnnotations renders each match's annotation with every field padded
+// to a shared column width across the whole result set, so the annotations
+// read as a table down the listing: counts and age right-align, the sparkline
+// and RUNNING marker left-align, and the variable-width session name comes
+// last so it never shifts another column. Styling (dim scaffolding, cyan
+// density+sparkline, green fresh age, bold-green RUNNING, reverse-video name)
+// is applied after padding so widths are computed over plain text.
+func alignedAnnotations(query string, resolved []resolvedMatch, runs []string, isIDResolution, on bool) []string {
+	rows := annotationRows(query, resolved, runs, isIDResolution)
+	var w annRow // column widths, stored as pad targets via maxw
+	for i := range rows {
+		r := &rows[i]
+		// The ● glyph rides only on styled output so piped text keeps the
+		// bare RUNNING token; it participates in the column width.
+		if on && r.run != "" {
+			r.run = "● " + r.run
+		}
+		w.msgs = maxw(w.msgs, r.msgs)
+		w.lines = maxw(w.lines, r.lines)
+		w.hits = maxw(w.hits, r.hits)
+		w.dense = maxw(w.dense, r.dense)
+		w.spark = maxw(w.spark, r.spark)
+		w.age = maxw(w.age, r.age)
+		w.run = maxw(w.run, r.run)
+		w.name = maxw(w.name, r.name)
+	}
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		// Cells are collected as plain/styled pairs: widths and the
+		// trailing-blank trim work on plain text, the output joins styled.
+		var plain, styled []string
+		emit := func(p, s string) { plain = append(plain, p); styled = append(styled, s) }
+		if *infoFlag {
+			p := padLeft(r.msgs, utf8.RuneCountInString(w.msgs))
+			emit(p, p)
+			if w.lines != "" {
+				p := padLeft(r.lines, utf8.RuneCountInString(w.lines))
+				emit(p, p)
+			}
+			if w.hits != "" {
+				p := padLeft(r.hits, utf8.RuneCountInString(w.hits))
+				emit(p, p)
+			}
+			if w.dense != "" {
+				// Density and sparkline form one cyan cell: together they are
+				// the shape of relevance — central vs incidental, and when.
+				// Styled sparklines grade each bucket by intensity.
+				p := padLeft(r.dense, utf8.RuneCountInString(w.dense)) + " " + padRight(r.spark, utf8.RuneCountInString(w.spark))
+				s := p
+				if r.spark != "" && on {
+					s = hl(padLeft(r.dense, utf8.RuneCountInString(w.dense)), ansiCyan, on) + " " +
+						renderSparkStyled(r.sparkCounts) + strings.Repeat(" ", utf8.RuneCountInString(w.spark)-utf8.RuneCountInString(r.spark))
+				}
+				emit(p, s)
+			}
+			// A fresh session is likely the one being hunted for; brighten it.
+			p = padLeft(r.age, utf8.RuneCountInString(w.age))
+			s := p
+			if r.recent {
+				s = hl(p, ansiGreen, on)
+			}
+			emit(p, s)
+		}
+		// The user-assigned name sits between the stats and the RUNNING
+		// marker: reverse-video the way Claude Code's own UI shows it, quoted
+		// in plain output. Both renderings are 2 runes wider than the bare
+		// name (padding spaces / quotes), so the cell width is w.name+2, and
+		// the cell is padded (or emitted blank) only when a RUNNING marker
+		// follows on this row, keeping that column aligned without ever
+		// ending a line in blanks.
+		if w.name != "" && (r.name != "" || r.run != "") {
+			cell, sCell := "", ""
+			if r.name != "" {
+				if on {
+					cell, sCell = " "+r.name+" ", hl(" "+r.name+" ", ansiReverse, on)
+				} else {
+					cell = strconv.Quote(r.name)
+					sCell = cell
+				}
+			}
+			if r.run != "" {
+				pad := utf8.RuneCountInString(w.name) + 2 - utf8.RuneCountInString(cell)
+				if pad > 0 {
+					cell += strings.Repeat(" ", pad)
+					sCell += strings.Repeat(" ", pad)
+				}
+			}
+			emit(cell, sCell)
+		}
+		if *runningFlag && r.run != "" {
+			// Bold green, on the right edge: the one glanceable "this
+			// session is live" signal.
+			emit(r.run, hl(r.run, ansiBoldGreen, on))
+		}
+		for len(plain) > 0 && strings.TrimSpace(plain[len(plain)-1]) == "" {
+			plain = plain[:len(plain)-1]
+			styled = styled[:len(styled)-1]
+		}
+		out[i] = strings.Join(styled, " ")
+	}
+	return out
+}
+
+// maxw returns whichever of the running-widest example a and candidate s is
+// wider, measured in runes.
+func maxw(a, s string) string {
+	if utf8.RuneCountInString(s) > utf8.RuneCountInString(a) {
+		return s
+	}
+	return a
+}
+
+// padLeft right-aligns s in a w-rune cell; padRight left-aligns it.
+func padLeft(s string, w int) string {
+	if n := w - utf8.RuneCountInString(s); n > 0 {
+		return strings.Repeat(" ", n) + s
+	}
+	return s
+}
+
+func padRight(s string, w int) string {
+	if n := w - utf8.RuneCountInString(s); n > 0 {
+		return s + strings.Repeat(" ", n)
+	}
+	return s
 }
 
 // annotationStderr builds the annotation text logged to stderr in -paths and -l
@@ -570,7 +798,7 @@ func annotateLine(line, query string, r resolvedMatch, isIDResolution bool, proc
 func annotationStderr(query string, r resolvedMatch, isIDResolution bool, procs []runningProc, bin string, args []string) string {
 	var parts []string
 	if *infoFlag {
-		parts = append(parts, infoAnnotation(query, r, isIDResolution))
+		parts = append(parts, infoAnnotation(query, r, isIDResolution, false))
 	}
 	if *runningFlag {
 		if m := runningMarker(procs, bin, args); m != "" {
@@ -585,29 +813,35 @@ func annotationStderr(query string, r resolvedMatch, isIDResolution bool, procs 
 // across the session's timeline, then the last-active time. An id-resolution (a
 // claude.ai URL or it2 SID that resolved to a specific session) has no
 // meaningful occurrences-over-time, so it shows size and time only.
-func infoAnnotation(query string, r resolvedMatch, isIDResolution bool) string {
-	// MessageCount is free from the index, but the grep fallback builds entries
-	// without it; fall back to the summary, which is read anyway.
-	msgs := r.entry.MessageCount
-	if msgs == 0 {
-		msgs = r.summary.UserMessages + r.summary.AsstMessages
+// Compact, space-separated tokens: <msgs>× <lines>L <hits>@ <dense>% <spark>
+// <age> <name>. Counts use distinct markers (× messages, L lines, @ hits) so
+// the relative age (3h, 40m) is never confused with a count; numbers are
+// humanized (2123 -> 2.1k). Unlike the aligned listing path, tokens here are
+// unpadded — this feeds the single-line stderr annotation and tests.
+func infoAnnotation(query string, r resolvedMatch, isIDResolution, on bool) string {
+	row := annotationRows(query, []resolvedMatch{r}, []string{""}, isIDResolution)[0]
+	parts := []string{row.msgs}
+	if row.lines != "" {
+		parts = append(parts, row.lines)
 	}
-	// Compact, space-separated tokens so the annotation fits on one line after
-	// the (already long) resume command: <msgs>× <lines>L <hits>@ <dense>%
-	// <spark> <age>. Counts use distinct markers (× messages, L lines, @ hits)
-	// so the trailing relative age (3h, 40m) is never confused with a count.
-	// Numbers are humanized (2123 -> 2.1k).
-	parts := []string{humanize(msgs) + "×"}
-	if r.summary.TotalLines > 0 {
-		parts = append(parts, humanize(r.summary.TotalLines)+"L")
+	if row.hits != "" {
+		// Density and sparkline form one cyan cell: the shape of relevance —
+		// central vs incidental, and when.
+		parts = append(parts, row.hits, hl(row.dense+" "+row.spark, ansiCyan, on))
 	}
-	if !isIDResolution && r.occurrences > 0 {
-		spark, densePct := occurrenceInfo(query, r.entry.FullPath, 8)
-		// hits, then density adjacent to the sparkline: together density+spark
-		// are the "shape of relevance" — central vs incidental, and when.
-		parts = append(parts, humanize(r.occurrences)+"@", fmt.Sprintf("%d%% %s", densePct, spark))
+	age := row.age
+	if row.recent {
+		// A fresh session is likely the one being hunted for; brighten it.
+		age = hl(age, ansiGreen, on)
 	}
-	parts = append(parts, relAge(r.entry.ModifiedTime()))
+	parts = append(parts, age)
+	if row.name != "" {
+		if on {
+			parts = append(parts, hl(" "+row.name+" ", ansiReverse, on))
+		} else {
+			parts = append(parts, strconv.Quote(row.name))
+		}
+	}
 	return strings.Join(parts, " ")
 }
 
@@ -657,6 +891,16 @@ func dim(s string, on bool) string {
 	return ansiDim + s + ansiReset
 }
 
+// hl styles a token that lives inside a dim-wrapped annotation: it applies the
+// given ANSI style at full intensity, then restores dim so the surrounding
+// annotation text stays subdued. With on false it returns s unchanged.
+func hl(s, style string, on bool) string {
+	if !on {
+		return s
+	}
+	return ansiReset + style + s + ansiReset + ansiDim
+}
+
 var sparkGlyphs = []rune("▁▂▃▄▅▆▇█")
 
 // tsPattern extracts the leading RFC3339 timestamp string from a transcript
@@ -671,9 +915,17 @@ var tsPattern = regexp.MustCompile(`"timestamp":"([^"]+)"`)
 // without a parseable timestamp are skipped. When there are no matches it
 // returns an empty sparkline and zero density.
 func occurrenceInfo(query, path string, buckets int) (spark string, densePct int) {
+	counts, densePct := occurrenceBuckets(query, path, buckets)
+	return renderSpark(counts), densePct
+}
+
+// occurrenceBuckets is occurrenceInfo before glyph rendering: the raw
+// per-bucket match counts, for callers that grade each bucket visually.
+// It returns a nil slice when there are no matches.
+func occurrenceBuckets(query, path string, buckets int) (counts []int, densePct int) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", 0
+		return nil, 0
 	}
 	type lineHit struct {
 		ts   time.Time
@@ -708,12 +960,12 @@ func occurrenceInfo(query, path string, buckets int) (spark string, densePct int
 		}
 	}
 	if len(hits) == 0 {
-		return "", 0
+		return nil, 0
 	}
 	if totalLines > 0 {
 		densePct = (100*hitLines + totalLines/2) / totalLines // rounded
 	}
-	counts := make([]int, buckets)
+	counts = make([]int, buckets)
 	span := last.Sub(first)
 	for _, h := range hits {
 		b := 0
@@ -725,7 +977,7 @@ func occurrenceInfo(query, path string, buckets int) (spark string, densePct int
 		}
 		counts[b] += h.hits
 	}
-	return renderSpark(counts), densePct
+	return counts, densePct
 }
 
 // renderSpark maps bucket counts to block glyphs, scaled to the max bucket.
@@ -744,6 +996,36 @@ func renderSpark(counts []int) string {
 		}
 		idx := c * (len(sparkGlyphs) - 1) / max
 		b.WriteRune(sparkGlyphs[idx])
+	}
+	return b.String()
+}
+
+// renderSparkStyled is renderSpark with each bucket color-graded by intensity
+// for styled output: empty buckets keep the surrounding dim, active buckets
+// are cyan, and peak buckets bold cyan — so both the shape and the hotspot
+// read at a glance. The visible glyphs match renderSpark exactly.
+func renderSparkStyled(counts []int) string {
+	max := 0
+	for _, c := range counts {
+		if c > max {
+			max = c
+		}
+	}
+	var b strings.Builder
+	for _, c := range counts {
+		if max == 0 {
+			b.WriteRune(sparkGlyphs[0])
+			continue
+		}
+		g := string(sparkGlyphs[c*(len(sparkGlyphs)-1)/max])
+		switch {
+		case c == 0:
+			b.WriteString(g)
+		case c == max:
+			b.WriteString(ansiReset + ansiBoldCyan + g + ansiReset + ansiDim)
+		default:
+			b.WriteString(ansiReset + ansiCyan + g + ansiReset + ansiDim)
+		}
 	}
 	return b.String()
 }

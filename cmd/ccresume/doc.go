@@ -41,7 +41,8 @@
 //	-harness h   Only include sessions from h (for example, codex).
 //	-sid-side s  For an it2 send-text line query, resume the src (default) or dst pane.
 //	-sort mode   Order matches by relevance (default) or recency.
-//	-info            Annotate each resume line with session size and an occurrence sparkline.
+//	-info            Annotate each resume line with session name, size, an occurrence sparkline, and running state (implies -show-is-running).
+//	-info-line       Print the -info annotation on its own line under each resume command (implies -info).
 //	-show-is-running Annotate each resume line whose session is already open in a running process.
 //	-no-color        Disable ANSI color in -info annotations (also honors NO_COLOR).
 //
@@ -91,10 +92,20 @@
 //
 //	ccresume -show-is-running "kafka rebalance"
 //
-// The annotation is a compact trailing shell comment (# 482× 1.2kL 3@ 8% ▁▁▂▁▅█
-// 2h — messages, lines, hits, density, sparkline, last-active age; ×/L/@ mark
-// counts so the trailing age is never read as one), so the line stays safe to
-// pipe into sh and fits on one row. The "N%" token is the share of
+// The annotation is a compact trailing shell comment (# 482× 1.2kL 3@ 8%
+// ▁▁▂▁▅█ 2h "session name" — messages, lines, hits, density, sparkline,
+// last-active age, then the user-assigned name if any; ×/L/@ mark counts so
+// the trailing age is never read as one, and the name trails the stats so the
+// numeric columns stay aligned), so the line stays safe to pipe into sh and
+// fits on one row. The comments are aligned into one column across the result set
+// (capped, so one long path overruns rather than widening the column for
+// everyone), and within them each field is padded to a shared width — counts and
+// age right-aligned, sparkline and RUNNING left-aligned — so the listing reads
+// as a table. With -info-line the comment moves to its own indented line under
+// each command instead, which keeps long resume lines scannable. On a terminal
+// the name renders as a reverse-video segment (the way Claude Code's own UI
+// shows it), the density+sparkline in cyan, a sub-hour age in green, and the
+// RUNNING marker in green; plain output quotes the name. The "N%" token is the share of
 // the session's timestamped lines that mention the query (central vs
 // incidental), and the sparkline reads left (oldest) to right (newest) within
 // that one session: ▁▁▁▁▁▁▁█ means the query only matched at the end (recent
@@ -103,7 +114,7 @@
 // it2 SID) shows size and age only. On a terminal the comment is dimmed; piped
 // output stays byte-clean (honors NO_COLOR/-no-color).
 //
-// With -show-is-running a "# RUNNING" comment is appended at the very end of any
+// With -show-is-running (implied by -info) a "RUNNING" marker is appended at the very end of any
 // line whose session is currently open, found by matching the session identifier
 // (the last part of the resume command) against the running process table; when
 // several processes share the session it reads "# RUNNING ×N". It composes with
