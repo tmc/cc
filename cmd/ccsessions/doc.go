@@ -19,6 +19,12 @@
 //	-v             Verbose: include the first user message.
 //	-index         Read sessions-index.json instead of scanning every
 //	               JSONL file. Faster but reports a smaller schema.
+//	-waiting       Only show sessions blocked at an unanswered question
+//	               dialog, listing each pending question. Detection is
+//	               file-based: Antigravity persists pending dialogs, but
+//	               Claude Code only writes a question turn once answered,
+//	               so a waiting Claude session is detectable only from its
+//	               terminal screen, not from its session file.
 //
 // # Examples
 //

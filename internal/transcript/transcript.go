@@ -249,10 +249,12 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 // renderResult writes a tool result as up to st.ResultRows lines with a
 // dimmed "+N lines" fold marker, the way agent TUIs summarize output.
 func renderResult(b *strings.Builder, prefix string, tr ccmodel.ContentBlock, tur *ccmodel.ToolUseResult, st Style, width int) {
-	if st.HideResults {
+	txt := resultSummary(tur)
+	if st.HideResults && txt == "" {
+		// Antigravity folds raw result bodies away, but structured summaries
+		// (question answers, edit confirmations) still display natively.
 		return
 	}
-	txt := resultSummary(tur)
 	if txt == "" {
 		txt = strings.TrimRight(resultText(tr), "\n")
 		if st.StripExec {

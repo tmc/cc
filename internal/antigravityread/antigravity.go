@@ -71,8 +71,62 @@ type agToolCall struct {
 }
 
 type pendingToolCall struct {
-	id   string
-	name string
+	id        string
+	name      string
+	questions []string // ask_question question texts, for pairing answers
+}
+
+// askQuestions extracts the question texts from ask_question args, whose
+// "questions" field arrives double-encoded (a JSON string holding a JSON
+// array).
+func askQuestions(args json.RawMessage) []string {
+	var w struct {
+		Questions json.RawMessage `json:"questions"`
+	}
+	if json.Unmarshal(args, &w) != nil || len(w.Questions) == 0 {
+		return nil
+	}
+	raw := w.Questions
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		raw = json.RawMessage(s)
+	}
+	var qs []struct {
+		Question string `json:"question"`
+	}
+	if json.Unmarshal(raw, &qs) != nil {
+		return nil
+	}
+	var out []string
+	for _, q := range qs {
+		out = append(out, q.Question)
+	}
+	return out
+}
+
+// askAnswerRe matches the "A1: label" lines an ASK_QUESTION step records.
+var askAnswerRe = regexp.MustCompile(`(?m)^A(\d+): (.*)$`)
+
+// parseAskAnswers pairs an ASK_QUESTION step's "A<n>: label" lines with the
+// asked questions, producing the same answered shape Claude Code persists.
+func parseAskAnswers(questions []string, content string) *ccmodel.ToolUseResult {
+	ms := askAnswerRe.FindAllStringSubmatch(content, -1)
+	if len(ms) == 0 {
+		return nil
+	}
+	res := &ccmodel.ToolUseResult{Type: "tool_result", Answers: make(map[string]string)}
+	for _, q := range questions {
+		res.Questions = append(res.Questions, ccmodel.AskedQuestion{Question: q})
+	}
+	for _, m := range ms {
+		i, _ := strconv.Atoi(m[1])
+		key := fmt.Sprintf("A%s", m[1])
+		if i >= 1 && i <= len(questions) {
+			key = questions[i-1]
+		}
+		res.Answers[key] = m[2]
+	}
+	return res
 }
 
 // ReadFile reads and parses an Antigravity session from a directory or a
@@ -176,7 +230,13 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 		if len(pendingToolCalls) > 0 && isToolResultStep(step.Type, pendingToolCalls[0].name) {
 			tc := pendingToolCalls[0]
 			pendingToolCalls = pendingToolCalls[1:]
-			entries = append(entries, antigravityToolResult(sessionID, cwd, parsedTime, tc.id, step.Content))
+			e := antigravityToolResult(sessionID, cwd, parsedTime, tc.id, step.Content)
+			if normalizeToolName(tc.name) == "AskUserQuestion" {
+				if res := parseAskAnswers(tc.questions, step.Content); res != nil {
+					e.ToolUseResult = res
+				}
+			}
+			entries = append(entries, e)
 			continue
 		}
 
@@ -220,8 +280,9 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 			for i, tc := range step.ToolCalls {
 				toolUseID := fmt.Sprintf("ag-tc-%d-%d", stepNumber, i)
 				pendingToolCalls = append(pendingToolCalls, pendingToolCall{
-					id:   toolUseID,
-					name: tc.Name,
+					id:        toolUseID,
+					name:      tc.Name,
+					questions: askQuestions(tc.Args),
 				})
 				blocks = append(blocks, ccmodel.ContentBlock{
 					Type:  "tool_use",

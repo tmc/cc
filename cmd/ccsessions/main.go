@@ -24,7 +24,12 @@ var (
 	indexFlag   = flag.Bool("index", false, "Use sessions-index.json (faster, less detail)")
 	dirFlag     = flag.String("dir", "", "Only show sessions recorded in this directory")
 	harnessFlag = flag.String("harness", "", "Only show sessions from this harness")
+	waitingFlag = flag.Bool("waiting", false, "Only show sessions blocked at an unanswered question dialog")
 )
+
+// pendingBySession holds unanswered question texts, keyed by session ID, for
+// the -waiting text output.
+var pendingBySession = make(map[string][]string)
 
 func main() {
 	flag.Parse()
@@ -125,6 +130,15 @@ func runFull(since time.Duration) error {
 		if s.TotalLines == 0 {
 			continue
 		}
+		if *waitingFlag {
+			pending := cc.PendingQuestions(entries)
+			if len(pending) == 0 {
+				continue
+			}
+			for _, q := range pending {
+				pendingBySession[s.SessionID] = append(pendingBySession[s.SessionID], questionTexts(q.Input)...)
+			}
+		}
 		if *dirFlag != "" && !summaryHasDirectory(s, *dirFlag) {
 			continue
 		}
@@ -167,6 +181,9 @@ func runFull(since time.Duration) error {
 			fmt.Println()
 			if *verboseFlag && s.FirstPrompt != "" {
 				fmt.Printf("  → %s\n", s.FirstPrompt)
+			}
+			for _, q := range pendingBySession[s.SessionID] {
+				fmt.Printf("  ? %s\n", q)
 			}
 		}
 		return nil
@@ -216,4 +233,34 @@ func collapse(s string, max int) string {
 		return s[:max] + "..."
 	}
 	return s
+}
+
+// questionTexts extracts the question texts from an AskUserQuestion input,
+// handling both Claude's inline array and Antigravity's double-encoded
+// "questions" string.
+func questionTexts(input json.RawMessage) []string {
+	var w struct {
+		Questions json.RawMessage `json:"questions"`
+	}
+	if json.Unmarshal(input, &w) != nil || len(w.Questions) == 0 {
+		return nil
+	}
+	raw := w.Questions
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		raw = json.RawMessage(s)
+	}
+	var qs []struct {
+		Question string `json:"question"`
+	}
+	if json.Unmarshal(raw, &qs) != nil {
+		return nil
+	}
+	var out []string
+	for _, q := range qs {
+		if q.Question != "" {
+			out = append(out, q.Question)
+		}
+	}
+	return out
 }
