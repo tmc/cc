@@ -628,7 +628,15 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 			}
 			if dir.kind == "antigravity" {
 				if antigravityread.IsSessionPath(path) {
-					if info.ModTime().Before(cutoff) {
+					mod := info.ModTime()
+					if info.IsDir() {
+						// The directory's mtime goes stale: appending to the
+						// nested transcript only touches its own parent.
+						if st, err := os.Stat(filepath.Join(path, ".system_generated", "logs", "transcript.jsonl")); err == nil {
+							mod = st.ModTime()
+						}
+					}
+					if mod.Before(cutoff) {
 						if info.IsDir() {
 							return filepath.SkipDir
 						}
