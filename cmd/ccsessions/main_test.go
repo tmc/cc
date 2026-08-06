@@ -1,11 +1,33 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/tmc/cc"
 )
+
+func TestReadClaudeWaiting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "waiting.jsonl")
+	data := "{\"session_id\":\"one\",\"questions\":[\"First?\"],\"waiting\":true}\n" +
+		"{\"session_id\":\"two\",\"waiting\":true}\n" +
+		"{\"session_id\":\"one\",\"waiting\":false}\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CC_WAITING_FILE", path)
+	got, err := readClaudeWaiting()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["one"]; ok {
+		t.Fatalf("cleared session remains: %#v", got)
+	}
+	if questions, ok := got["two"]; !ok || len(questions) != 0 {
+		t.Fatalf("two = %#v, want present with no questions", got)
+	}
+}
 
 func TestFilterIndexEntries(t *testing.T) {
 	root := t.TempDir()

@@ -20,11 +20,13 @@
 //	-index         Read sessions-index.json instead of scanning every
 //	               JSONL file. Faster but reports a smaller schema.
 //	-waiting       Only show sessions blocked at an unanswered question
-//	               dialog, listing each pending question. Detection is
-//	               file-based: Antigravity persists pending dialogs, but
-//	               Claude Code only writes a question turn once answered,
-//	               so a waiting Claude session is detectable only from its
-//	               terminal screen, not from its session file.
+//	               dialog, listing each pending question. Antigravity persists
+//	               pending dialogs. Claude Code needs a notification hook to
+//	               append JSON records to ~/.cc/waiting.jsonl (or
+//	               $CC_WAITING_FILE): {"session_id":"...","questions":[...],
+//	               "waiting":true}. Append waiting:false after an answer.
+//	               Without that hook, a live Claude dialog is not detectable
+//	               from its session file or when no terminal is available.
 //
 // # Examples
 //

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,6 +31,12 @@ var (
 // pendingBySession holds unanswered question texts, keyed by session ID, for
 // the -waiting text output.
 var pendingBySession = make(map[string][]string)
+
+type waitingRecord struct {
+	SessionID string   `json:"session_id"`
+	Questions []string `json:"questions"`
+	Waiting   bool     `json:"waiting"`
+}
 
 func main() {
 	flag.Parse()
@@ -111,6 +118,11 @@ func runIndex(since time.Duration) error {
 }
 
 func runFull(since time.Duration) error {
+	pendingBySession = make(map[string][]string)
+	claudeWaiting, err := readClaudeWaiting()
+	if err != nil {
+		return err
+	}
 	files, err := cc.FindSessionFiles(context.Background(), since, *projectFlag)
 	if err != nil {
 		return err
@@ -132,7 +144,13 @@ func runFull(since time.Duration) error {
 		}
 		if *waitingFlag {
 			pending := cc.PendingQuestions(entries)
-			if len(pending) == 0 {
+			if cc.Harness(f) == "claude" {
+				if questions, ok := claudeWaiting[s.SessionID]; ok {
+					pendingBySession[s.SessionID] = append(pendingBySession[s.SessionID], questions...)
+				} else if len(pending) == 0 {
+					continue
+				}
+			} else if len(pending) == 0 {
 				continue
 			}
 			for _, q := range pending {
@@ -187,6 +205,50 @@ func runFull(since time.Duration) error {
 			}
 		}
 		return nil
+	}
+}
+
+// readClaudeWaiting reads the optional state file written by a Claude Code
+// notification hook. The hook appends JSON lines with session_id, questions,
+// and waiting; the last record for a session wins. An absent file means no
+// terminal-independent Claude wait state is available.
+func readClaudeWaiting() (map[string][]string, error) {
+	path := os.Getenv("CC_WAITING_FILE")
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(home, ".cc", "waiting.jsonl")
+	}
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return make(map[string][]string), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	states := make(map[string][]string)
+	dec := json.NewDecoder(f)
+	for {
+		var record waitingRecord
+		err := dec.Decode(&record)
+		if err == io.EOF {
+			return states, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read Claude waiting state: %w", err)
+		}
+		if record.SessionID == "" {
+			continue
+		}
+		if record.Waiting {
+			states[record.SessionID] = record.Questions
+		} else {
+			delete(states, record.SessionID)
+		}
 	}
 }
 
