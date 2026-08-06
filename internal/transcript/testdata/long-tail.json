@@ -1,0 +1,6 @@
+[
+  {"type":"assistant","agentId":"reviewer","isSidechain":true,"message":{"role":"assistant","content":[{"type":"tool_use","id":"edit","name":"Edit","input":{"file_path":"main.go","old_string":"before","new_string":"after"}},{"type":"image","data":"AA==","mimeType":"image/png"}]}},
+  {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"edit","content":"patch failed: context mismatch","is_error":true}]}},
+  {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"todo","name":"TodoWrite","input":{"todos":[{"content":"verify patch","status":"in_progress"}]}}]}},
+  {"type":"user","message":{"role":"user","content":[{"type":"image","data":"AA==","mimeType":"image/png"}]}}
+]

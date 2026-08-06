@@ -15,7 +15,7 @@ import (
 var update = flag.Bool("update", false, "update transcript golden files")
 
 func TestGolden(t *testing.T) {
-	for _, name := range []string{"claude", "codex", "antigravity", "pi"} {
+	for _, name := range []string{"claude", "codex", "antigravity", "pi", "long-tail"} {
 		t.Run(name, func(t *testing.T) {
 			in := filepath.Join("testdata", name+".json")
 			data, err := os.ReadFile(in)
@@ -26,9 +26,13 @@ func TestGolden(t *testing.T) {
 			if err := json.Unmarshal(data, &entries); err != nil {
 				t.Fatalf("decode %s: %v", in, err)
 			}
+			style := name
+			if name == "long-tail" {
+				style = "claude"
+			}
 			got := transcript.Render(entries, transcript.Options{
 				Width: 60,
-				Style: transcript.StyleFor(name),
+				Style: transcript.StyleFor(style),
 			})
 			golden := filepath.Join("testdata", name+".txt")
 			if *update {
