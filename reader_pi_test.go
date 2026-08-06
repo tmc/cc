@@ -244,6 +244,30 @@ func TestFindSessionFilesPi(t *testing.T) {
 	}
 }
 
+func TestReadFileFromPi(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "agent", "sessions", "proj", "session.jsonl")
+	writeTestFile(t, path, `{"type":"session","id":"sid","timestamp":"2026-01-01T00:00:00Z","cwd":"/work"}`+"\n"+
+		`{"type":"message","id":"u","timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"first"}}`+"\n")
+	entries, off, _, err := ReadFileWithOffset(context.Background(), path)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("initial = %d, %v", len(entries), err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.WriteString(`{"type":"message","id":"a","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":"second"}}` + "\n")
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tail, next, _, err := ReadFileFrom(context.Background(), path, off)
+	if err != nil || len(tail) != 1 || tail[0].Message.TextContent() != "second" || next <= off {
+		t.Fatalf("tail = %#v, %d, %v", tail, next, err)
+	}
+}
+
 func TestPiIndexEntries(t *testing.T) {
 	root := t.TempDir()
 	piHome := filepath.Join(root, "pi")

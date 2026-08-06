@@ -200,6 +200,80 @@ func ReadFile(ctx context.Context, path string) ([]ccmodel.Entry, error) {
 	return entries, nil
 }
 
+// ReadFileFrom reads messages appended after offset. Offset must be at a line
+// boundary returned by a previous call. Pi's header is read separately so the
+// appended messages retain the session metadata needed for normalization.
+func ReadFileFrom(ctx context.Context, path string, offset int64) ([]ccmodel.Entry, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	if offset > info.Size() {
+		return nil, 0, fmt.Errorf("tail offset invalid")
+	}
+	if offset == 0 {
+		entries, err := ReadFile(ctx, path)
+		return entries, info.Size(), err
+	}
+	var b [1]byte
+	if _, err := f.ReadAt(b[:], offset-1); err != nil || b[0] != '\n' {
+		return nil, 0, fmt.Errorf("tail offset invalid")
+	}
+	header, version, err := readHeader(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	if _, err := f.Seek(offset, 0); err != nil {
+		return nil, 0, err
+	}
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, ccmodel.InitialBufferSize), ccmodel.MaxLineSize)
+	var entries []ccmodel.Entry
+	for s.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
+		var entry piEntry
+		if json.Unmarshal(s.Bytes(), &entry) != nil || entry.Type != "message" || entry.Message == nil {
+			continue
+		}
+		if normalized, ok := piMessageEntry(header.ID, header, version, entry); ok {
+			entries = append(entries, normalized)
+		}
+	}
+	if err := s.Err(); err != nil {
+		return nil, 0, err
+	}
+	return entries, info.Size(), nil
+}
+
+func readHeader(path string) (piSessionHeader, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return piSessionHeader{}, "", err
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, ccmodel.InitialBufferSize), ccmodel.MaxLineSize)
+	if !s.Scan() {
+		return piSessionHeader{}, "", fmt.Errorf("pi session empty: %s", path)
+	}
+	var header piSessionHeader
+	if err := json.Unmarshal(s.Bytes(), &header); err != nil || header.Type != "session" || header.ID == "" {
+		return piSessionHeader{}, "", fmt.Errorf("pi session missing header: %s", path)
+	}
+	version := ""
+	if header.Version != 0 {
+		version = strconv.Itoa(header.Version)
+	}
+	return header, version, nil
+}
+
 func piMessageEntry(sessionID string, header piSessionHeader, version string, pe piEntry) (ccmodel.Entry, bool) {
 	msg := pe.Message
 	blocks := piBlocks(msg)

@@ -181,22 +181,24 @@ func newModel(file string) (model, error) {
 		expand:     *expandFlag,
 		follow:     *followFlag,
 	}
-	// Offset tailing reads raw claude/codex JSONL lines. Every initial render
+	// Offset tailing reads raw claude, codex, and pi JSONL lines. Every initial render
 	// includes sidechain entries, the same session view ccfmt uses.
 	switch cc.Harness(file) {
-	case "claude", "codex":
+	case "claude", "codex", "pi":
 		entries, offset, _, err := cc.ReadFileWithOffset(context.Background(), file)
 		if err != nil {
 			return model{}, err
 		}
-		subs, err := cc.ReadSubagents(context.Background(), file)
-		if err != nil {
-			return model{}, err
+		if cc.Harness(file) != "pi" {
+			subs, err := cc.ReadSubagents(context.Background(), file)
+			if err != nil {
+				return model{}, err
+			}
+			entries = append(entries, subs...)
+			sort.SliceStable(entries, func(i, j int) bool {
+				return entries[i].Timestamp.Before(entries[j].Timestamp)
+			})
 		}
-		entries = append(entries, subs...)
-		sort.SliceStable(entries, func(i, j int) bool {
-			return entries[i].Timestamp.Before(entries[j].Timestamp)
-		})
 		m.entries, m.offset, m.tailable = entries, offset, true
 	default:
 		entries, err := cc.ReadFileWithSubagents(context.Background(), file)
