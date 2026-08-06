@@ -61,6 +61,8 @@ type agStep struct {
 	Thinking        string       `json:"thinking,omitempty"`
 	ToolCalls       []agToolCall `json:"tool_calls,omitempty"`
 	TruncatedFields []string     `json:"truncated_fields,omitempty"`
+	Error           string       `json:"error,omitempty"`
+	ErrorCode       int          `json:"error_code,omitempty"`
 }
 
 type agToolCall struct {
@@ -255,8 +257,32 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 				})
 			}
 
+		case "ERROR_MESSAGE":
+			// API errors surface as visible entries, matching how the other
+			// readers normalize them (see ccmodel.Entry.IsAPIErrorMessage).
+			txt := step.Content
+			if txt == "" && step.Error != "" {
+				txt = "Error: " + step.Error
+			}
+			if txt != "" {
+				content, _ := json.Marshal([]ccmodel.ContentBlock{{Type: "text", Text: txt}})
+				entries = append(entries, ccmodel.Entry{
+					Type:              "assistant",
+					Subtype:           "error_message",
+					SessionID:         sessionID,
+					Timestamp:         parsedTime,
+					Source:            "antigravity",
+					IsAPIErrorMessage: true,
+					CWD:               cwd,
+					Message: &ccmodel.Message{
+						Role:    "assistant",
+						Content: content,
+					},
+				})
+			}
+
 		default:
-			// CONVERSATION_HISTORY, SYSTEM_MESSAGE, ERROR_MESSAGE, etc.
+			// CONVERSATION_HISTORY, SYSTEM_MESSAGE, etc.
 			if step.Content != "" {
 				entries = append(entries, ccmodel.Entry{
 					Type:      "system",
