@@ -119,6 +119,9 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 			case "turn_duration":
 				if e.DurationMs >= 1000 {
 					leaveExplore()
+					// Claude chooses a decorative verb at display time, but does
+					// not store it in the session. Keep this deterministic so a
+					// rendered transcript is stable and suitable for comparison.
 					fmt.Fprintf(&b, "%s\n\n", dimStyle.Render(fmt.Sprintf("✻ Worked for %ds", e.DurationMs/1000)))
 				}
 			}

@@ -1,0 +1,7 @@
+› show status
+
+  Checking.
+
+$ git status --short
+  M main.go
+

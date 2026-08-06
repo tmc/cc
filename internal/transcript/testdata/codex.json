@@ -1,0 +1,5 @@
+[
+  {"type":"user","message":{"role":"user","content":"run tests"}},
+  {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"functions.exec","input":{"input":"const r = await tools.exec_command({\"cmd\":\"go test ./...\"})"}}]}},
+  {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Script completed\nWall time 0.1 seconds\nOutput:\nok"}]}}
+]

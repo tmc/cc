@@ -1,0 +1,5 @@
+› run tests
+
+• Ran go test ./...
+  └ ok
+

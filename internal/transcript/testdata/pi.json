@@ -1,0 +1,5 @@
+[
+  {"type":"user","message":{"role":"user","content":"show status"}},
+  {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Checking."},{"type":"tool_use","id":"t1","name":"bash","input":{"command":"git status --short"}}]}},
+  {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":" M main.go"}]}}
+]

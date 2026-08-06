@@ -1,0 +1,10 @@
+❯ inspect main.go
+
+⏺ I will inspect it.
+
+⏺ Read(main.go)
+  ⎿  package main
+     func main() {}
+
+✻ Worked for 16s
+
