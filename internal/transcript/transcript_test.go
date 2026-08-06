@@ -108,11 +108,20 @@ func TestHideResults(t *testing.T) {
 }
 
 func TestMdInline(t *testing.T) {
-	if got := mdInline("run **Go 1.26** on `darwin`"); got != "run Go 1.26 on `darwin`" {
+	// Bold markers pass through mdInline; boldSpans styles them post-wrap.
+	if got := mdInline("run **Go 1.26** on `darwin`"); got != "run **Go 1.26** on `darwin`" {
 		t.Errorf("mdInline = %q", got)
 	}
-	if got := mdInline("a ** unpaired"); got != "a ** unpaired" {
-		t.Errorf("mdInline(unpaired) = %q", got)
+}
+
+func TestBoldSpans(t *testing.T) {
+	got := boldSpans("run **Go 1.26** now")
+	if strings.Contains(got, "**") || !strings.Contains(got, "Go 1.26") {
+		t.Errorf("boldSpans = %q", got)
+	}
+	// A span the wrap split across lines loses its markers.
+	if got := boldSpans("a **split\nspan** b"); strings.Contains(got, "**") {
+		t.Errorf("boldSpans(dangling) = %q", got)
 	}
 }
 
@@ -190,11 +199,18 @@ func TestEmptyResult(t *testing.T) {
 }
 
 func TestMdHeadings(t *testing.T) {
-	if got := mdInline("### Overview\nbody"); got != "Overview\nbody" {
+	// mdInline leaves headings for boldHeads, which styles them post-wrap.
+	if got := mdInline("### Overview\nbody"); got != "### Overview\nbody" {
 		t.Errorf("mdInline(heading) = %q", got)
 	}
-	if got := mdInline("#!/bin/sh"); got != "#!/bin/sh" {
-		t.Errorf("mdInline(shebang) = %q", got)
+	if got := boldHeads("### Overview\nbody", false); !strings.Contains(got, "Overview") || strings.Contains(got, "#") {
+		t.Errorf("boldHeads = %q, want hashes dropped", got)
+	}
+	if got := boldHeads("### Overview", true); !strings.Contains(got, "### Overview") {
+		t.Errorf("boldHeads(keepHash) = %q, want hashes kept", got)
+	}
+	if got := boldHeads("#!/bin/sh", false); got != "#!/bin/sh" {
+		t.Errorf("boldHeads(shebang) = %q", got)
 	}
 }
 

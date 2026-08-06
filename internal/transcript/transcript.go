@@ -35,6 +35,7 @@ type Style struct {
 	Empty       string            // shown for empty tool results (e.g. "(No output)"); "" hides them
 	ToolCont    string            // continuation marker for wrapped tool-call lines; "" clips instead
 	BareCall    bool              // render non-shell calls as "name detail" instead of Name(detail)
+	HeadHash    bool              // keep heading hashes: "### Title" bold (pi), vs bold text only
 	Explore     bool              // group read-only shell calls under "Explored", hiding their output
 	StripExec   bool              // drop Codex exec-result boilerplate from results
 	HideResults bool              // omit tool result bodies (Antigravity folds them away)
@@ -52,7 +53,8 @@ var (
 		Shell: "Ran ", StripExec: true, ResultRows: 2, ResultTail: 2, ToolCont: "│ ", Explore: true}
 	AntigravityStyle = Style{User: ">", Asst: " ", Tool: "●", Result: "⎿  ", Thinking: "∴", ResultRows: 1,
 		HideResults: true, ToolNames: map[string]string{"LS": "ListDir", "View": "Read"}}
-	PiStyle = Style{User: "›", Asst: " ", Shell: "$ ", Result: "", Thinking: " ", ResultRows: 8, BareCall: true}
+	PiStyle = Style{User: "›", Asst: " ", Shell: "$ ", Result: "", Thinking: " ", ResultRows: 8, BareCall: true,
+		HeadHash: true}
 )
 
 // StyleFor returns the native style for a harness name ("claude", "codex",
@@ -138,7 +140,7 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 							fmt.Fprintf(&b, "%s%s %s\n\n", prefix, errStyle.Render(st.Asst), errStyle.Render(wrap(blk.Text, opts.Width-2, "  ")))
 							continue
 						}
-						txt := colorCode(wrap(mdInline(blk.Text), opts.Width-2, "  "))
+						txt := boldHeads(boldSpans(colorCode(wrap(mdInline(blk.Text), opts.Width-2, "  "))), st.HeadHash)
 						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, asstStyle.Render(st.Asst), txt)
 					}
 				case "thinking":
@@ -151,6 +153,10 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 					}
 					if txt != "" {
 						leaveExplore()
+						// Thinking stays uniformly dim: strip bold markers
+						// rather than styling them, since an inner ANSI reset
+						// would cancel the dim for the rest of the line.
+						txt = strings.ReplaceAll(txt, "**", "")
 						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, dimStyle.Render(st.Thinking), dimStyle.Render(wrap(txt, opts.Width-2, "  ")))
 					}
 				case "tool_use":
@@ -395,26 +401,46 @@ func colorCode(txt string) string {
 var linkRe = regexp.MustCompile(`\[([^\[\]\n]+)\]\([^()\n]+\)`)
 
 // mdInline strips inline markdown that agent TUIs render as styling rather
-// than literal characters: **bold** markers (only when paired), heading
-// hashes, and [label](target) links, which collapse to their label.
+// than literal characters: [label](target) links collapse to their label.
+// **bold** markers and heading lines pass through untouched — boldSpans and
+// boldHeads style them after wrapping.
 func mdInline(txt string) string {
-	if strings.Count(txt, "**")%2 == 0 {
-		txt = strings.ReplaceAll(txt, "**", "")
-	}
 	txt = linkRe.ReplaceAllString(txt, "$1")
-	// Heading markers likewise render as styling, not literal hashes, and
-	// code-fence lines drop away with their content left in place.
+	// Code-fence lines drop away with their content left in place.
 	var lines []string
 	for l := range strings.SplitSeq(txt, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(l), "```") {
 			continue
 		}
-		if t := strings.TrimLeft(l, "#"); t != l && strings.HasPrefix(t, " ") {
-			l = strings.TrimSpace(t)
-		}
 		lines = append(lines, l)
 	}
 	return strings.Join(lines, "\n")
+}
+
+var boldRe = regexp.MustCompile(`\*\*([^*\n]+)\*\*`)
+
+// boldSpans styles **bold** spans after wrapping, then strips any markers
+// left dangling by a span the wrap split across lines.
+func boldSpans(txt string) string {
+	txt = boldRe.ReplaceAllStringFunc(txt, func(m string) string {
+		return boldStyle.Render(m[2 : len(m)-2])
+	})
+	return strings.ReplaceAll(txt, "**", "")
+}
+
+var headRe = regexp.MustCompile(`(?m)^([ \t]*)(#{1,6}) (.*)$`)
+
+// boldHeads styles markdown heading lines after wrapping, when the ANSI codes
+// no longer affect width accounting. Most TUIs bold the heading text and drop
+// the hashes; pi bolds the whole "### Title" line, hashes included.
+func boldHeads(txt string, keepHash bool) string {
+	return headRe.ReplaceAllStringFunc(txt, func(m string) string {
+		sub := headRe.FindStringSubmatch(m)
+		if keepHash {
+			return sub[1] + boldStyle.Render(sub[2]+" "+sub[3])
+		}
+		return sub[1] + boldStyle.Render(sub[3])
+	})
 }
 
 // userText strips the Antigravity prompt envelope, which wraps the actual
