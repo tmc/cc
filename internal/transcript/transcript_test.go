@@ -31,6 +31,20 @@ func TestRender(t *testing.T) {
 	}
 }
 
+func TestRenderLongTailBlocks(t *testing.T) {
+	entries := []ccmodel.Entry{
+		{Type: "user", Message: &ccmodel.Message{Role: "user", Content: json.RawMessage(`[{"type":"image","data":"AA=="}]`)}},
+		{Type: "assistant", AgentID: "reviewer", IsSidechain: true, Message: &ccmodel.Message{Role: "assistant", Content: json.RawMessage(`[{"type":"tool_use","name":"Edit","input":{"file_path":"a.go","old_string":"old","new_string":"new"}},{"type":"image","data":"AA=="}]`)}},
+		{Type: "user", Message: &ccmodel.Message{Role: "user", Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"x","content":"patch failed","is_error":true}]`)}},
+	}
+	out := Render(entries, Options{Width: 80})
+	for _, want := range []string{"[image]", "subagent reviewer", "Edit", "patch failed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("long-tail render missing %q in:\n%s", want, out)
+		}
+	}
+}
+
 func TestWrap(t *testing.T) {
 	got := wrap("aaa bbb ccc ddd", 7, "  ")
 	want := "aaa bbb\n  ccc\n  ddd"

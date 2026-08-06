@@ -156,6 +156,10 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 			}
 			leaveExplore()
 			txt := userText(e.Message.TextContent())
+			if txt == "" && hasImage(e.Message.ContentBlocks()) {
+				fmt.Fprintf(&b, "%s%s [image]\n\n", prefix, userStyle.Render(st.User))
+				continue
+			}
 			if txt == "" || ccmodel.IsHarnessPreamble(txt) {
 				continue
 			}
@@ -181,6 +185,10 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 			}
 			fmt.Fprintf(&b, "%s%s %s\n\n", prefix, userStyle.Render(st.User), wrap(txt, opts.Width-2, "  "))
 		case "assistant":
+			if e.IsSidechain && e.AgentID != "" {
+				leaveExplore()
+				fmt.Fprintf(&b, "%s%s subagent %s\n", prefix, dimStyle.Render(st.Asst), e.AgentID)
+			}
 			for _, blk := range e.Message.ContentBlocks() {
 				switch blk.Type {
 				case "text":
@@ -250,11 +258,23 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 						line = strings.Replace(line, name, boldStyle.Render(name), 1)
 					}
 					fmt.Fprintf(&b, "%s%s\n", prefix, line)
+				case "image":
+					leaveExplore()
+					fmt.Fprintf(&b, "%s%s [image]\n\n", prefix, asstStyle.Render(st.Asst))
 				}
 			}
 		}
 	}
 	return b.String()
+}
+
+func hasImage(blocks []ccmodel.ContentBlock) bool {
+	for _, block := range blocks {
+		if block.Type == "image" {
+			return true
+		}
+	}
+	return false
 }
 
 // renderResult writes a tool result as up to st.ResultRows lines with a
