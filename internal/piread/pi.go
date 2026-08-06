@@ -291,7 +291,7 @@ func piBlocks(msg *piMessage) []ccmodel.ContentBlock {
 			}
 		case "thinking":
 			if b.Thinking != "" {
-				blocks = append(blocks, ccmodel.ContentBlock{Type: "text", Text: b.Thinking})
+				blocks = append(blocks, ccmodel.ContentBlock{Type: "thinking", Thinking: b.Thinking})
 			}
 		case "toolCall":
 			blocks = append(blocks, ccmodel.ContentBlock{

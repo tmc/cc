@@ -279,3 +279,26 @@ func TestAPIErrorRender(t *testing.T) {
 		t.Errorf("API error missing from render:\n%s", out)
 	}
 }
+
+func TestThinkingRender(t *testing.T) {
+	entries := []ccmodel.Entry{
+		{Type: "assistant", Message: &ccmodel.Message{Role: "assistant", Content: json.RawMessage(
+			`[{"type":"thinking","thinking":"pondering the layout"}]`)}},
+	}
+	out := Render(entries, Options{Style: ClaudeStyle})
+	if !strings.Contains(out, "∴") || !strings.Contains(out, "pondering the layout") {
+		t.Errorf("claude thinking render = %q, want dim ∴ + text", out)
+	}
+	// Agy readers store thinking text in Text rather than Thinking.
+	entries[0].Message.Content = json.RawMessage(`[{"type":"thinking","text":"agy thought"}]`)
+	out = Render(entries, Options{Style: AntigravityStyle})
+	if !strings.Contains(out, "agy thought") {
+		t.Errorf("agy thinking render = %q, want text fallback", out)
+	}
+	// A style with no Thinking marker hides the block.
+	hidden := ClaudeStyle
+	hidden.Thinking = ""
+	if out := Render(entries, Options{Style: hidden}); strings.Contains(out, "agy thought") {
+		t.Errorf("hidden thinking rendered: %q", out)
+	}
+}

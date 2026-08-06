@@ -30,6 +30,7 @@ type Style struct {
 	Asst        string            // assistant text marker
 	Tool        string            // tool call marker ("" = none)
 	Result      string            // tool result marker (rendered indented)
+	Thinking    string            // thinking block marker; "" hides thinking
 	Shell       string            // render shell tool calls as this prefix + cmd (e.g. "Ran ", "$ ")
 	Empty       string            // shown for empty tool results (e.g. "(No output)"); "" hides them
 	ToolCont    string            // continuation marker for wrapped tool-call lines; "" clips instead
@@ -45,13 +46,13 @@ type Style struct {
 // Styles by harness name (as reported by cc.Harness). ClaudeStyle is the
 // default for unknown harnesses.
 var (
-	ClaudeStyle = Style{User: "❯", Asst: "⏺", Tool: "⏺", Result: "⎿  ", ResultRows: 10,
+	ClaudeStyle = Style{User: "❯", Asst: "⏺", Tool: "⏺", Result: "⎿  ", Thinking: "∴", ResultRows: 10,
 		Empty: "(No output)"}
-	CodexStyle = Style{User: "›", Asst: "•", Tool: "•", Result: "└ ",
+	CodexStyle = Style{User: "›", Asst: "•", Tool: "•", Result: "└ ", Thinking: "•",
 		Shell: "Ran ", StripExec: true, ResultRows: 2, ResultTail: 2, ToolCont: "│ ", Explore: true}
-	AntigravityStyle = Style{User: ">", Asst: " ", Tool: "●", Result: "⎿  ", ResultRows: 1,
+	AntigravityStyle = Style{User: ">", Asst: " ", Tool: "●", Result: "⎿  ", Thinking: "∴", ResultRows: 1,
 		HideResults: true, ToolNames: map[string]string{"LS": "ListDir", "View": "Read"}}
-	PiStyle = Style{User: "›", Asst: " ", Shell: "$ ", Result: "", ResultRows: 8, BareCall: true}
+	PiStyle = Style{User: "›", Asst: " ", Shell: "$ ", Result: "", Thinking: " ", ResultRows: 8, BareCall: true}
 )
 
 // StyleFor returns the native style for a harness name ("claude", "codex",
@@ -139,6 +140,18 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 						}
 						txt := colorCode(wrap(mdInline(blk.Text), opts.Width-2, "  "))
 						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, asstStyle.Render(st.Asst), txt)
+					}
+				case "thinking":
+					if st.Thinking == "" {
+						continue
+					}
+					txt := blk.Thinking
+					if txt == "" {
+						txt = blk.Text
+					}
+					if txt != "" {
+						leaveExplore()
+						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, dimStyle.Render(st.Thinking), dimStyle.Render(wrap(txt, opts.Width-2, "  ")))
 					}
 				case "tool_use":
 					if blk.Name == "AskUserQuestion" || blk.Name == "ask_question" {

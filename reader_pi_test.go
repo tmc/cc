@@ -75,15 +75,18 @@ func TestReadFilePi(t *testing.T) {
 		assistant.Usage.CacheReadInputTokens != 5 || assistant.Usage.CacheCreationInputTokens != 2 {
 		t.Errorf("assistant usage = %#v", assistant.Usage)
 	}
-	// thinking is folded in as a text block alongside the assistant's text.
+	// thinking is preserved as a thinking block alongside the assistant's text.
 	var texts []string
 	for _, b := range assistant.Message.ContentBlocks() {
-		if b.Type == "text" {
+		switch b.Type {
+		case "thinking":
+			texts = append(texts, b.Thinking)
+		case "text":
 			texts = append(texts, b.Text)
 		}
 	}
 	if len(texts) != 2 || texts[0] != "I should read the file." || texts[1] != "Reading it now." {
-		t.Errorf("assistant text blocks = %#v, want thinking then text", texts)
+		t.Errorf("assistant blocks = %#v, want thinking then text", texts)
 	}
 	uses := assistant.Message.ToolUses()
 	if len(uses) != 1 || uses[0].Name != "Read" || uses[0].ID != "call_01" {
