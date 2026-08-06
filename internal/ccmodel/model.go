@@ -65,6 +65,11 @@ type Entry struct {
 	IsVisibleInTranscriptOnly bool `json:"isVisibleInTranscriptOnly,omitempty"`
 	IsMeta                    bool `json:"isMeta,omitempty"`
 
+	// IsAPIErrorMessage marks a synthetic assistant message carrying an API
+	// error (Claude Code writes these with model "<synthetic>"; other
+	// readers set it when the harness records an error field).
+	IsAPIErrorMessage bool `json:"isApiErrorMessage,omitempty"`
+
 	// Agent teams fields.
 	TeamName  string `json:"teamName,omitempty"`
 	AgentName string `json:"agentName,omitempty"`

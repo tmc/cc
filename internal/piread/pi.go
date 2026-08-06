@@ -60,6 +60,9 @@ type piMessage struct {
 	StopReason string          `json:"stopReason"`
 	ToolCallID string          `json:"toolCallId"`
 	IsError    bool            `json:"isError"`
+	// ErrorMessage carries the API error when StopReason is "error"; the
+	// content array is empty in that case.
+	ErrorMessage string `json:"errorMessage"`
 }
 
 type piUsage struct {
@@ -200,6 +203,9 @@ func ReadFile(ctx context.Context, path string) ([]ccmodel.Entry, error) {
 func piMessageEntry(sessionID string, header piSessionHeader, version string, pe piEntry) (ccmodel.Entry, bool) {
 	msg := pe.Message
 	blocks := piBlocks(msg)
+	if msg.ErrorMessage != "" {
+		blocks = append(blocks, ccmodel.ContentBlock{Type: "text", Text: "API Error: " + msg.ErrorMessage})
+	}
 	if len(blocks) == 0 {
 		return ccmodel.Entry{}, false
 	}
@@ -227,15 +233,16 @@ func piMessageEntry(sessionID string, header piSessionHeader, version string, pe
 	}
 
 	return ccmodel.Entry{
-		Type:       role,
-		SessionID:  sessionID,
-		UUID:       pe.ID,
-		ParentUUID: pe.ParentID,
-		Timestamp:  parsePiTime(pe.Timestamp),
-		CWD:        header.CWD,
-		Version:    version,
-		Source:     "pi",
-		Usage:      usage,
+		Type:              role,
+		SessionID:         sessionID,
+		UUID:              pe.ID,
+		ParentUUID:        pe.ParentID,
+		Timestamp:         parsePiTime(pe.Timestamp),
+		CWD:               header.CWD,
+		Version:           version,
+		Source:            "pi",
+		IsAPIErrorMessage: msg.ErrorMessage != "",
+		Usage:             usage,
 		Message: &ccmodel.Message{
 			ID:         pe.ID,
 			Role:       role,

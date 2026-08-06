@@ -268,3 +268,14 @@ func TestParseQuestionsAgy(t *testing.T) {
 		t.Errorf("parseQuestions(agy) = %+v", qs)
 	}
 }
+
+func TestAPIErrorRender(t *testing.T) {
+	entries := []ccmodel.Entry{
+		{Type: "assistant", IsAPIErrorMessage: true, Message: &ccmodel.Message{Role: "assistant", Content: json.RawMessage(
+			`[{"type":"text","text":"API Error: Credit balance is too low"}]`)}},
+	}
+	out := Render(entries, Options{})
+	if !strings.Contains(out, "Credit balance is too low") {
+		t.Errorf("API error missing from render:\n%s", out)
+	}
+}

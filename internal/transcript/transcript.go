@@ -20,6 +20,7 @@ var (
 	userStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 	asstStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 	toolStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	errStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	plainStyle = lipgloss.NewStyle()
 )
 
@@ -132,6 +133,10 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 				case "text":
 					leaveExplore()
 					if blk.Text != "" {
+						if e.IsAPIErrorMessage {
+							fmt.Fprintf(&b, "%s%s %s\n\n", prefix, errStyle.Render(st.Asst), errStyle.Render(wrap(blk.Text, opts.Width-2, "  ")))
+							continue
+						}
 						txt := colorCode(wrap(mdInline(blk.Text), opts.Width-2, "  "))
 						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, asstStyle.Render(st.Asst), txt)
 					}
