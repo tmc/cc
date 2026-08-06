@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -135,7 +136,7 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, asstStyle.Render(st.Asst), txt)
 					}
 				case "tool_use":
-					if blk.Name == "AskUserQuestion" {
+					if blk.Name == "AskUserQuestion" || blk.Name == "ask_question" {
 						leaveExplore()
 						renderQuestions(&b, prefix, blk.Input, st, opts.Width)
 						continue
@@ -248,6 +249,23 @@ func resultSummary(tur *ccmodel.ToolUseResult) string {
 		return ""
 	}
 	switch {
+	case len(tur.Answers) > 0:
+		var lines []string
+		seen := make(map[string]bool)
+		for _, q := range tur.Questions {
+			if a, ok := tur.Answers[q.Question]; ok {
+				lines = append(lines, "· "+q.Question+" → "+a)
+				seen[q.Question] = true
+			}
+		}
+		var rest []string
+		for q, a := range tur.Answers {
+			if !seen[q] {
+				rest = append(rest, "· "+q+" → "+a)
+			}
+		}
+		slices.Sort(rest)
+		return strings.Join(append(lines, rest...), "\n")
 	case tur.File != nil && tur.File.NumLines > 0:
 		return fmt.Sprintf("Read %d lines", tur.File.NumLines)
 	case tur.FilePath != "" && (tur.OldString != "" || tur.NewString != ""):
@@ -264,32 +282,80 @@ func resultSummary(tur *ccmodel.ToolUseResult) string {
 // and options, the way the interactive dialog presents them, instead of the
 // one-line raw-input summary used for other tools.
 func renderQuestions(b *strings.Builder, prefix string, input json.RawMessage, st Style, width int) {
-	var in struct {
-		Questions []struct {
-			Question    string `json:"question"`
-			Header      string `json:"header"`
-			MultiSelect bool   `json:"multiSelect"`
-			Options     []struct {
-				Label string `json:"label"`
-			} `json:"options"`
-		} `json:"questions"`
-	}
-	if err := json.Unmarshal(input, &in); err != nil || len(in.Questions) == 0 {
+	qs := parseQuestions(input)
+	if len(qs) == 0 {
 		fmt.Fprintf(b, "%s%s\n", prefix, toolStyle.Render(clip(st.Tool+" AskUserQuestion", width)))
 		return
 	}
-	fmt.Fprintf(b, "%s%s\n", prefix, toolStyle.Render(fmt.Sprintf("%s AskUserQuestion (%d)", st.Tool, len(in.Questions))))
-	for _, q := range in.Questions {
-		head := q.Header
-		if q.MultiSelect {
+	fmt.Fprintf(b, "%s%s\n", prefix, toolStyle.Render(fmt.Sprintf("%s AskUserQuestion (%d)", st.Tool, len(qs))))
+	for _, q := range qs {
+		head := q.header
+		if q.multi {
 			head += " (multi)"
 		}
-		fmt.Fprintf(b, "%s  %s %s\n", prefix, toolStyle.Render("["+head+"]"), wrap(q.Question, width-4, "  "))
-		for _, o := range q.Options {
-			fmt.Fprintf(b, "%s    %s\n", prefix, dimStyle.Render(clip("○ "+o.Label, width-4)))
+		if head != "" {
+			head = toolStyle.Render("["+head+"]") + " "
+		}
+		fmt.Fprintf(b, "%s  %s%s\n", prefix, head, wrap(q.question, width-4, "  "))
+		for _, o := range q.options {
+			fmt.Fprintf(b, "%s    %s\n", prefix, dimStyle.Render(clip("○ "+o, width-4)))
 		}
 	}
 	b.WriteString("\n")
+}
+
+type askedQuestion struct {
+	question, header string
+	multi            bool
+	options          []string
+}
+
+// parseQuestions decodes a question-dialog tool input in either Claude's
+// AskUserQuestion shape ({"questions":[{question,header,multiSelect,
+// options:[{label}]}]}) or Antigravity's ask_question shape, whose
+// "questions" value is a JSON array encoded a second time as a string, with
+// is_multi_select and bare option strings.
+func parseQuestions(input json.RawMessage) []askedQuestion {
+	var raw struct {
+		Questions json.RawMessage `json:"questions"`
+	}
+	if json.Unmarshal(input, &raw) != nil || len(raw.Questions) == 0 {
+		return nil
+	}
+	arr := raw.Questions
+	var double string
+	if json.Unmarshal(arr, &double) == nil {
+		arr = json.RawMessage(double)
+	}
+	var qs []struct {
+		Question      string          `json:"question"`
+		Header        string          `json:"header"`
+		MultiSelect   bool            `json:"multiSelect"`
+		IsMultiSelect bool            `json:"is_multi_select"`
+		Options       json.RawMessage `json:"options"`
+	}
+	if json.Unmarshal(arr, &qs) != nil {
+		return nil
+	}
+	var out []askedQuestion
+	for _, q := range qs {
+		aq := askedQuestion{question: q.Question, header: q.Header, multi: q.MultiSelect || q.IsMultiSelect}
+		var labeled []struct {
+			Label string `json:"label"`
+		}
+		if json.Unmarshal(q.Options, &labeled) == nil && len(labeled) > 0 && labeled[0].Label != "" {
+			for _, o := range labeled {
+				aq.options = append(aq.options, o.Label)
+			}
+		} else {
+			var plain []string
+			if json.Unmarshal(q.Options, &plain) == nil {
+				aq.options = plain
+			}
+		}
+		out = append(out, aq)
+	}
+	return out
 }
 
 // codeRe matches an inline code span on a single line.

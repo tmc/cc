@@ -266,6 +266,11 @@ type ToolUseResult struct {
 	NumMatches int `json:"numMatches,omitempty"`
 	NumFiles   int `json:"numFiles,omitempty"`
 
+	// AskUserQuestion fields: the questions asked and the user's answers,
+	// keyed by question text.
+	Questions []AskedQuestion   `json:"questions,omitempty"`
+	Answers   map[string]string `json:"answers,omitempty"`
+
 	// Task fields.
 	Task   *TaskResult   `json:"task,omitempty"`
 	Tasks  []TaskSummary `json:"tasks,omitempty"`
@@ -324,6 +329,13 @@ type FileResult struct {
 	NumLines   int    `json:"numLines,omitempty"`
 	StartLine  int    `json:"startLine,omitempty"`
 	TotalLines int    `json:"totalLines,omitempty"`
+}
+
+// AskedQuestion is one question from an AskUserQuestion invocation,
+// preserving the order questions were asked in.
+type AskedQuestion struct {
+	Question string `json:"question,omitempty"`
+	Header   string `json:"header,omitempty"`
 }
 
 // TaskResult holds task tool results.

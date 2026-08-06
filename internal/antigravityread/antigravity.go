@@ -411,7 +411,9 @@ func normalizeToolName(name string) string {
 		return "WebFetch"
 	case "invoke_subagent":
 		return "Task"
-	case "ask_question", "ask_permission":
+	case "ask_question":
+		return "AskUserQuestion"
+	case "ask_permission":
 		return "Interaction"
 	case "call_mcp_tool":
 		return "MCP"

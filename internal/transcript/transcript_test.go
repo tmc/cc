@@ -249,3 +249,22 @@ func TestMdLinks(t *testing.T) {
 		t.Errorf("mdInline(link) = %q", got)
 	}
 }
+
+func TestAnswersSummary(t *testing.T) {
+	tur := &ccmodel.ToolUseResult{
+		Questions: []ccmodel.AskedQuestion{{Question: "Snack?"}, {Question: "Drink?"}},
+		Answers:   map[string]string{"Snack?": "Apple", "Drink?": "Water, Tea"},
+	}
+	got := resultSummary(tur)
+	if got != "· Snack? → Apple\n· Drink? → Water, Tea" {
+		t.Errorf("resultSummary(answers) = %q", got)
+	}
+}
+
+func TestParseQuestionsAgy(t *testing.T) {
+	in := json.RawMessage(`{"questions":"[{\"is_multi_select\":false,\"options\":[\"Go\",\"Python\"],\"question\":\"Which language?\"}]"}`)
+	qs := parseQuestions(in)
+	if len(qs) != 1 || qs[0].question != "Which language?" || len(qs[0].options) != 2 || qs[0].options[0] != "Go" {
+		t.Errorf("parseQuestions(agy) = %+v", qs)
+	}
+}
