@@ -99,6 +99,23 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 		}
 	}
 	for _, e := range entries {
+		if e.Type == "system" {
+			switch e.Subtype {
+			case "compact_boundary":
+				leaveExplore()
+				msg := e.Content
+				if msg == "" {
+					msg = "Conversation compacted"
+				}
+				fmt.Fprintf(&b, "%s\n\n", dimStyle.Render("✻ "+msg))
+			case "turn_duration":
+				if e.DurationMs >= 1000 {
+					leaveExplore()
+					fmt.Fprintf(&b, "%s\n\n", dimStyle.Render(fmt.Sprintf("✻ Worked for %ds", e.DurationMs/1000)))
+				}
+			}
+			continue
+		}
 		if e.IsMeta || e.Message == nil {
 			continue
 		}
@@ -127,9 +144,31 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 				continue
 			}
 			leaveExplore()
-			if txt := userText(e.Message.TextContent()); txt != "" && !ccmodel.IsHarnessPreamble(txt) {
-				fmt.Fprintf(&b, "%s%s %s\n\n", prefix, userStyle.Render(st.User), wrap(txt, opts.Width-2, "  "))
+			txt := userText(e.Message.TextContent())
+			if txt == "" || ccmodel.IsHarnessPreamble(txt) {
+				continue
 			}
+			if e.IsCompactSummary {
+				fmt.Fprintf(&b, "%s%s\n\n", prefix, dimStyle.Render("✻ Conversation compacted"))
+				continue
+			}
+			// Slash commands persist as XML-tagged user entries; the native
+			// TUI shows the bare command and its captured stdout.
+			if name := tagText(txt, "command-name"); name != "" {
+				if args := tagText(txt, "command-args"); args != "" {
+					name += " " + args
+				}
+				fmt.Fprintf(&b, "%s%s %s\n\n", prefix, userStyle.Render(st.User), name)
+				continue
+			}
+			if strings.Contains(txt, "<local-command-stdout>") {
+				if out := tagText(txt, "local-command-stdout"); out != "" {
+					renderResult(&b, prefix, ccmodel.ContentBlock{Content: out}, nil, st, opts.Width)
+					b.WriteString("\n")
+				}
+				continue
+			}
+			fmt.Fprintf(&b, "%s%s %s\n\n", prefix, userStyle.Render(st.User), wrap(txt, opts.Width-2, "  "))
 		case "assistant":
 			for _, blk := range e.Message.ContentBlocks() {
 				switch blk.Type {
@@ -441,6 +480,17 @@ func boldHeads(txt string, keepHash bool) string {
 		}
 		return sub[1] + boldStyle.Render(sub[3])
 	})
+}
+
+// tagText returns the trimmed content of the first <tag>…</tag> span in txt,
+// or "" if the tag is absent.
+func tagText(txt, tag string) string {
+	_, rest, ok := strings.Cut(txt, "<"+tag+">")
+	if !ok {
+		return ""
+	}
+	inner, _, _ := strings.Cut(rest, "</"+tag+">")
+	return strings.TrimSpace(inner)
 }
 
 // userText strips the Antigravity prompt envelope, which wraps the actual

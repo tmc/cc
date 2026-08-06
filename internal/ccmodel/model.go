@@ -88,10 +88,11 @@ type Entry struct {
 	PermissionMode string `json:"permissionMode,omitempty"`
 
 	// Progress fields.
-	Operation string          `json:"operation,omitempty"` // queue-operation variant (enqueue, dequeue, remove, popAll).
-	Content   string          `json:"content,omitempty"`
-	Level     string          `json:"level,omitempty"`
-	Data      json.RawMessage `json:"data,omitempty"`
+	Operation  string          `json:"operation,omitempty"` // queue-operation variant (enqueue, dequeue, remove, popAll).
+	Content    string          `json:"content,omitempty"`
+	Level      string          `json:"level,omitempty"`
+	DurationMs int             `json:"durationMs,omitempty"` // turn_duration system entries
+	Data       json.RawMessage `json:"data,omitempty"`
 
 	// Tool result fields.
 	ToolUseResult *ToolUseResult `json:"toolUseResult,omitempty"`
