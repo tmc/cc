@@ -50,7 +50,8 @@ var (
 	ClaudeStyle = Style{User: "❯", Asst: "⏺", Tool: "⏺", Result: "⎿  ", Thinking: "∴", ResultRows: 10,
 		Empty: "(No output)"}
 	CodexStyle = Style{User: "›", Asst: "•", Tool: "•", Result: "└ ", Thinking: "•",
-		Shell: "Ran ", StripExec: true, ResultRows: 2, ResultTail: 2, ToolCont: "│ ", Explore: true}
+		Shell: "Ran ", StripExec: true, ResultRows: 2, ResultTail: 2, ToolCont: "│ ", Explore: true,
+		HeadHash: true}
 	AntigravityStyle = Style{User: ">", Asst: " ", Tool: "●", Result: "⎿  ", Thinking: "∴", ResultRows: 1,
 		HideResults: true, ToolNames: map[string]string{"LS": "ListDir", "View": "Read"}}
 	PiStyle = Style{User: "›", Asst: " ", Shell: "$ ", Result: "", Thinking: " ", ResultRows: 8, BareCall: true,
