@@ -125,13 +125,23 @@ func inProject(sum cc.SessionSummary, cwd string) bool {
 
 // promptTitle cleans a first prompt for display. Antigravity wraps prompts in
 // <USER_REQUEST>…</USER_REQUEST> followed by metadata blocks; show only the
-// request itself.
+// request itself. Claude slash-command turns persist as XML-tagged entries;
+// show the bare command.
 func promptTitle(s string) string {
 	if _, rest, ok := strings.Cut(s, "<USER_REQUEST>"); ok {
 		if inner, _, ok := strings.Cut(rest, "</USER_REQUEST>"); ok {
 			return strings.TrimSpace(inner)
 		}
 		return strings.TrimSpace(rest)
+	}
+	if _, rest, ok := strings.Cut(s, "<command-name>"); ok {
+		name, _, _ := strings.Cut(rest, "</command-name>")
+		if _, rest, ok := strings.Cut(s, "<command-args>"); ok {
+			if args, _, _ := strings.Cut(rest, "</command-args>"); strings.TrimSpace(args) != "" {
+				name += " " + strings.TrimSpace(args)
+			}
+		}
+		return strings.TrimSpace(name)
 	}
 	return s
 }
