@@ -25,6 +25,7 @@ var (
 	formatFlag = flag.String("format", "", "Delegate to ccfmt with this format instead of the TUI")
 	followFlag = flag.Bool("follow", false, "Tail the session file for new entries (TUI only)")
 	tsFlag     = flag.Bool("timestamps", false, "Start with per-entry timestamps shown")
+	expandFlag = flag.Bool("expand", false, "Start with folded output (tool results, Explored groups) expanded")
 	maxFlag    = flag.Int("max", 2000, "Render at most the last N entries (0 = no limit)")
 	sinceFlag  = flag.String("since", "30d", "How far back to search when resolving an ID")
 )
@@ -96,6 +97,7 @@ func writeTranscript(file string) error {
 	}
 	_, err = io.WriteString(os.Stdout, transcript.Render(entries, transcript.Options{
 		Timestamps: *tsFlag,
+		Expand:     *expandFlag,
 		Width:      width,
 		Style:      transcript.StyleFor(cc.Harness(file)),
 	}))
@@ -162,6 +164,7 @@ type model struct {
 	size       int64
 	viewport   viewport.Model
 	timestamps bool
+	expand     bool
 	follow     bool
 	width      int
 	height     int
@@ -174,6 +177,7 @@ func newModel(file string) (model, error) {
 	m := model{
 		file:       file,
 		timestamps: *tsFlag,
+		expand:     *expandFlag,
 		follow:     *followFlag,
 	}
 	// Offset tailing reads raw claude/codex JSONL lines; the other formats
@@ -272,6 +276,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.timestamps = !m.timestamps
 			m.viewport.SetContent(m.render())
 			return m, nil
+		case "ctrl+o":
+			// ctrl+o expands folded output, matching the native TUIs.
+			m.expand = !m.expand
+			atBottom := m.viewport.AtBottom()
+			m.viewport.SetContent(m.render())
+			if atBottom {
+				m.viewport.GotoBottom()
+			}
+			return m, nil
 		case "f":
 			m.follow = !m.follow
 			if m.follow {
@@ -292,6 +305,7 @@ func (m model) render() string {
 	}
 	return transcript.Render(entries, transcript.Options{
 		Timestamps: m.timestamps,
+		Expand:     m.expand,
 		Width:      m.width,
 		Style:      transcript.StyleFor(cc.Harness(m.file)),
 	})
@@ -306,6 +320,6 @@ func (m model) View() string {
 		mode = " · following"
 	}
 	header := titleStyle.Render(fmt.Sprintf("%s · %d entries%s", m.file, len(m.entries), mode))
-	footer := dimStyle.Render("↑/↓ scroll · g/G top/bottom · t timestamps · f follow · q quit")
+	footer := dimStyle.Render("↑/↓ scroll · g/G top/bottom · ctrl+o expand · t timestamps · f follow · q quit")
 	return fmt.Sprintf("%s\n%s\n%s", header, m.viewport.View(), footer)
 }

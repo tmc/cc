@@ -21,6 +21,7 @@
 //	               markdown/md, json, jsonl) instead of opening the TUI.
 //	-follow        Tail the session file for new entries (TUI only).
 //	-timestamps    Start with per-entry timestamps shown.
+//	-expand        Start with folded output expanded (see ctrl+o).
 //	-max N         Render at most the last N entries (default 2000;
 //	               0 means no limit).
 //	-since DUR     How far back to search when resolving an ID
@@ -30,6 +31,8 @@
 //
 //	↑/↓, pgup/pgdn  Scroll.
 //	g/G             Jump to top / bottom.
+//	ctrl+o          Toggle expanded output: every tool-result line, no
+//	                hidden bodies, no collapsed Explored groups.
 //	t               Toggle per-entry timestamps.
 //	f               Toggle follow mode.
 //	q, esc, ctrl+c  Quit.
