@@ -156,8 +156,13 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 			}
 			leaveExplore()
 			txt := userText(e.Message.TextContent())
+			marker := st.User
+			if e.IsSidechain && e.AgentID != "" {
+				marker = "↳"
+				txt = "subagent " + e.AgentID + ": " + txt
+			}
 			if txt == "" && hasImage(e.Message.ContentBlocks()) {
-				fmt.Fprintf(&b, "%s%s [image]\n\n", prefix, userStyle.Render(st.User))
+				fmt.Fprintf(&b, "%s%s [image]\n\n", prefix, userStyle.Render(marker))
 				continue
 			}
 			if txt == "" || ccmodel.IsHarnessPreamble(txt) {
@@ -183,7 +188,7 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 				}
 				continue
 			}
-			fmt.Fprintf(&b, "%s%s %s\n\n", prefix, userStyle.Render(st.User), wrap(txt, opts.Width-2, "  "))
+			fmt.Fprintf(&b, "%s%s %s\n\n", prefix, userStyle.Render(marker), wrap(txt, opts.Width-2, "  "))
 		case "assistant":
 			if e.IsSidechain && e.AgentID != "" {
 				leaveExplore()
