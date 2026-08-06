@@ -99,6 +99,35 @@ func TestResultTailFold(t *testing.T) {
 	}
 }
 
+func TestExpand(t *testing.T) {
+	entries := []ccmodel.Entry{{
+		Type: "user",
+		Message: &ccmodel.Message{Role: "user", Content: json.RawMessage(
+			`[{"type":"tool_result","tool_use_id":"t1","content":"l1\nl2\nl3\nl4\nl5\nl6\nl7"}]`)},
+	}}
+	folded := Render(entries, Options{Style: CodexStyle})
+	if !strings.Contains(folded, "… +3 lines") {
+		t.Fatalf("folded render lost its fold marker:\n%s", folded)
+	}
+	full := Render(entries, Options{Style: CodexStyle, Expand: true})
+	if strings.Contains(full, "+3 lines") {
+		t.Errorf("expanded render still folds:\n%s", full)
+	}
+	for _, want := range []string{"l1", "l4", "l7"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("expanded render missing %q:\n%s", want, full)
+		}
+	}
+	// Antigravity hides result bodies entirely; expanding reveals them.
+	hidden := Render(entries, Options{Style: AntigravityStyle})
+	if strings.Contains(hidden, "l1") {
+		t.Errorf("HideResults leaked a body:\n%s", hidden)
+	}
+	if shown := Render(entries, Options{Style: AntigravityStyle, Expand: true}); !strings.Contains(shown, "l7") {
+		t.Errorf("expanded Antigravity render still hides bodies:\n%s", shown)
+	}
+}
+
 func TestHideResults(t *testing.T) {
 	var b strings.Builder
 	renderResult(&b, "", ccmodel.ContentBlock{Content: "secret"}, nil, AntigravityStyle, 0)

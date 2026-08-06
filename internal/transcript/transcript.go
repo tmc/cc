@@ -39,7 +39,7 @@ type Style struct {
 	Explore     bool              // group read-only shell calls under "Explored", hiding their output
 	StripExec   bool              // drop Codex exec-result boilerplate from results
 	HideResults bool              // omit tool result bodies (Antigravity folds them away)
-	ResultRows  int               // result lines shown before folding into "+N lines"
+	ResultRows  int               // result lines shown before folding into "+N lines"; 0 shows all
 	ResultTail  int               // result lines shown after the fold marker
 	ToolNames   map[string]string // display names for recorded tool names
 }
@@ -78,6 +78,8 @@ type Options struct {
 	Timestamps bool  // prefix each line with the entry's local time
 	Width      int   // wrap text to this width; 0 disables wrapping
 	Style      Style // glyph set; zero value falls back to ClaudeStyle
+	Expand     bool  // show folded content in full: every result line, no
+	// hidden bodies, no collapsed Explored groups
 }
 
 // Render formats entries for display in a terminal viewport. Meta entries and
@@ -87,6 +89,11 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 	st := opts.Style
 	if st.User == "" {
 		st = ClaudeStyle
+	}
+	if opts.Expand {
+		st.HideResults = false
+		st.ResultRows, st.ResultTail = 0, 0
+		st.Explore = false
 	}
 	var b strings.Builder
 	hidden := make(map[string]bool) // tool_use IDs whose results are folded away
@@ -290,7 +297,10 @@ func renderResult(b *strings.Builder, prefix string, tr ccmodel.ContentBlock, tu
 		fmt.Fprintf(b, "%s  %s%s\n", prefix, dimStyle.Render(marker),
 			style.Render(clip(strings.TrimRight(all[i], " "), width-2-len([]rune(marker)))))
 	}
-	head := min(len(all), max(st.ResultRows, 1))
+	head := len(all)
+	if st.ResultRows > 0 {
+		head = min(head, st.ResultRows)
+	}
 	tail := 0
 	if rest := len(all) - head; rest > 0 {
 		tail = min(st.ResultTail, rest)
