@@ -5,9 +5,10 @@
 // opencode, and pi session stores — and renders the transcript read-only in a
 // scrollable viewport. It never resumes the session.
 //
-// For non-interactive output, ccrender delegates to ccfmt: pass -format, or
-// pipe stdout (a non-terminal stdout implies -format text). This keeps batch
-// formatting in one place; ccrender itself only owns the interactive view.
+// A piped stdout prints the same transcript the TUI shows, wrapped to $COLUMNS
+// (or 100 columns), so a pager sees what the viewport would. Document formats
+// belong to ccfmt: passing -format delegates there, keeping batch formatting in
+// one place.
 //
 // # Usage
 //
@@ -16,8 +17,8 @@
 //
 // # Flags
 //
-//	-format FMT    Delegate to ccfmt with this format (text, markdown/md,
-//	               json, jsonl) instead of opening the TUI.
+//	-format FMT    Delegate to ccfmt with this format (text, transcript,
+//	               markdown/md, json, jsonl) instead of opening the TUI.
 //	-follow        Tail the session file for new entries (TUI only).
 //	-timestamps    Start with per-entry timestamps shown.
 //	-max N         Render at most the last N entries (default 2000;
@@ -43,8 +44,8 @@
 //
 //	ccrender -follow 763ce2cc
 //
-// Pipe a rendered transcript (delegates to ccfmt):
+// Pipe the rendered transcript, or export a document via ccfmt:
 //
-//	ccrender 00000011 | less
+//	ccrender 00000011 | less -R
 //	ccrender -format md 00000011 > transcript.md
 package main

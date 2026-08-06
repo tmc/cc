@@ -13,14 +13,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/internal/transcript"
 )
 
 var (
-	formatFlag       = flag.String("format", "text", "Output format: text, markdown, json, jsonl")
+	formatFlag       = flag.String("format", "text", "Output format: text, transcript, markdown, json, jsonl")
+	widthFlag        = flag.Int("width", 0, "Wrap width for -format transcript (0 uses $COLUMNS, else 100)")
 	titleFlag        = flag.String("title", "", "Optional document title")
 	includeMeta      = flag.Bool("meta", false, "Include session metadata and injected preamble messages")
 	includeStamp     = flag.Bool("timestamps", false, "Include timestamps in formatted output")
@@ -66,6 +69,8 @@ func run(w io.Writer, args []string) error {
 	switch *formatFlag {
 	case "text":
 		return writeText(w, source, entries)
+	case "transcript":
+		return writeTranscript(w, source, entries)
 	case "markdown", "md":
 		return writeMarkdown(w, source, entries)
 	case "json":
@@ -138,6 +143,31 @@ func writeText(w io.Writer, source string, entries []cc.Entry) error {
 		}
 	}
 	return nil
+}
+
+// writeTranscript renders entries the way the ccrender TUI does, using the
+// native glyphs of the harness that recorded source. Unlike the other formats
+// it is a view, not an export: the document flags (-max-bytes, -tools,
+// -cleanup, ...) do not apply.
+func writeTranscript(w io.Writer, source string, entries []cc.Entry) error {
+	_, err := io.WriteString(w, transcript.Render(entries, transcript.Options{
+		Timestamps: *includeStamp,
+		Width:      transcriptWidth(),
+		Style:      transcript.StyleFor(cc.Harness(source)),
+	}))
+	return err
+}
+
+// transcriptWidth resolves the wrap width: the -width flag, else $COLUMNS,
+// else a terminal-typical 100.
+func transcriptWidth() int {
+	if *widthFlag > 0 {
+		return *widthFlag
+	}
+	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
+		return n
+	}
+	return 100
 }
 
 func writeTextEntry(w io.Writer, e cc.Entry) error {

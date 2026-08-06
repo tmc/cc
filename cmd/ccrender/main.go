@@ -5,8 +5,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,31 +46,59 @@ func run() error {
 		return err
 	}
 
-	// Batch formats belong to ccfmt; a piped stdout implies text format.
+	// A piped stdout prints the same transcript the TUI shows, just without
+	// the viewport. Rendering it here rather than shelling out keeps the two
+	// views in lockstep even when the installed ccfmt is older.
 	format := *formatFlag
-	if format == "" && !isatty.IsTerminal(os.Stdout.Fd()) {
-		format = "text"
-	}
-	if format != "" {
-		cmd := exec.Command("ccfmt", "-format", format, file)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			// A closed downstream pipe (ccrender ... | head) is normal
-			// termination, not a rendering failure.
-			if strings.Contains(err.Error(), "broken pipe") {
-				return nil
-			}
-			return fmt.Errorf("ccfmt: %w", err)
+	if format == "" {
+		if isatty.IsTerminal(os.Stdout.Fd()) {
+			return runTUI(file)
 		}
-		return nil
+		return writeTranscript(file)
 	}
+	// Batch formats belong to ccfmt.
+	cmd := exec.Command("ccfmt", "-format", format, file)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		// A closed downstream pipe (ccrender ... | head) is normal
+		// termination, not a rendering failure.
+		if strings.Contains(err.Error(), "broken pipe") {
+			return nil
+		}
+		return fmt.Errorf("ccfmt: %w", err)
+	}
+	return nil
+}
 
+func runTUI(file string) error {
 	m, err := newModel(file)
 	if err != nil {
 		return err
 	}
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	return err
+}
+
+// writeTranscript prints the transcript the TUI would show, wrapped to
+// $COLUMNS (or 100), for piping into pagers and diffs.
+func writeTranscript(file string) error {
+	entries, err := cc.ReadFile(context.Background(), file)
+	if err != nil {
+		return err
+	}
+	if *maxFlag > 0 && len(entries) > *maxFlag {
+		entries = entries[len(entries)-*maxFlag:]
+	}
+	width := 100
+	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
+		width = n
+	}
+	_, err = io.WriteString(os.Stdout, transcript.Render(entries, transcript.Options{
+		Timestamps: *tsFlag,
+		Width:      width,
+		Style:      transcript.StyleFor(cc.Harness(file)),
+	}))
 	return err
 }
 

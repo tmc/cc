@@ -13,7 +13,12 @@
 //
 // # Flags
 //
-//	-format FMT          Output format: text (default), markdown/md, json, jsonl.
+//	-format FMT          Output format: text (default), transcript, markdown/md,
+//	                     json, jsonl. The transcript format reproduces the
+//	                     recording harness's own TUI (glyphs, folded tool
+//	                     results, color) and ignores the document flags below.
+//	-width N             Wrap width for -format transcript (0 uses $COLUMNS,
+//	                     else 100).
 //	-title TITLE         Optional document title (markdown only).
 //	-meta                Keep injected preamble and session metadata entries.
 //	-timestamps          Include per-entry timestamps in the output.
@@ -41,4 +46,8 @@
 // Get a terminal-friendly transcript with timestamps:
 //
 //	ccfmt -timestamps session.jsonl
+//
+// Reproduce the harness's own TUI rendering (what ccrender shows):
+//
+//	ccfmt -format transcript session.jsonl | less -R
 package main
