@@ -143,6 +143,34 @@ func TestFindSessionFilesOpenCode(t *testing.T) {
 	}
 }
 
+func TestFindSessionFilesOpenCodeNestedActivity(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "opencode")
+	sessionPath := filepath.Join(home, "storage", "session", "proj", "ses_nested.json")
+	writeTestFile(t, sessionPath, `{"id":"ses_nested","directory":"/work/nested"}`)
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(sessionPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(home, "storage", "message", "ses_nested", "msg_new.json"), `{"id":"msg_new","sessionID":"ses_nested"}`)
+	t.Setenv("CLAUDE_HOME", filepath.Join(root, "claude"))
+	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
+	t.Setenv("OPENCODE_HOME", home)
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "antigravity"))
+	if err := os.MkdirAll(filepath.Join(root, "claude", "projects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := FindSessionFiles(context.Background(), 24*time.Hour, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPath(got, sessionPath) {
+		t.Fatalf("FindSessionFiles omitted active nested session: %v", got)
+	}
+}
+
 func writeTestFile(t *testing.T, path, data string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

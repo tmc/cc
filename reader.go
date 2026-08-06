@@ -669,7 +669,11 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 			} else if !strings.HasSuffix(path, ".jsonl") {
 				return nil
 			}
-			if info.ModTime().Before(cutoff) {
+			mod := info.ModTime()
+			if dir.kind == "opencode" {
+				mod = openCodeModTime(path, mod)
+			}
+			if mod.Before(cutoff) {
 				return nil
 			}
 			if project != "" {
@@ -702,6 +706,62 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 		}
 	}
 	return files, nil
+}
+
+// openCodeModTime reports the newest file modification belonging to an
+// opencode session. Its session record is created once, while new messages
+// and parts are written in sibling directories, so the record's mtime alone
+// would hide an active session from a -since query.
+func openCodeModTime(path string, fallback time.Time) time.Time {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fallback
+	}
+	var session struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(data, &session) != nil || session.ID == "" {
+		return fallback
+	}
+	storage := filepath.Dir(filepath.Dir(filepath.Dir(path)))
+	messageDir := filepath.Join(storage, "message", session.ID)
+	infos, err := os.ReadDir(messageDir)
+	if err != nil {
+		return fallback
+	}
+	mod := fallback
+	for _, info := range infos {
+		if info.IsDir() || !strings.HasSuffix(info.Name(), ".json") {
+			continue
+		}
+		messagePath := filepath.Join(messageDir, info.Name())
+		if fi, err := os.Stat(messagePath); err == nil && fi.ModTime().After(mod) {
+			mod = fi.ModTime()
+		}
+		data, err := os.ReadFile(messagePath)
+		if err != nil {
+			continue
+		}
+		var message struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(data, &message) != nil || message.ID == "" {
+			continue
+		}
+		parts, err := os.ReadDir(filepath.Join(storage, "part", message.ID))
+		if err != nil {
+			continue
+		}
+		for _, part := range parts {
+			if part.IsDir() || !strings.HasSuffix(part.Name(), ".json") {
+				continue
+			}
+			if fi, err := os.Stat(filepath.Join(storage, "part", message.ID, part.Name())); err == nil && fi.ModTime().After(mod) {
+				mod = fi.ModTime()
+			}
+		}
+	}
+	return mod
 }
 
 // cwdPathMatchesProject matches a session against a project query for formats
