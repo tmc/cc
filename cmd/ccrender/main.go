@@ -1,4 +1,4 @@
-// Command ccrender renders a single coding-agent session, defaulting to a TUI.
+// Command ccrender renders a single coding-agent session in the pager.
 package main
 
 import (
@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 var (
 	formatFlag = flag.String("format", "", "Delegate to ccfmt with this format instead of the TUI")
 	followFlag = flag.Bool("follow", false, "Tail the session file for new entries (TUI only)")
+	tuiFlag    = flag.Bool("tui", false, "Use the built-in viewport instead of the pager")
 	tsFlag     = flag.Bool("timestamps", false, "Start with per-entry timestamps shown")
 	expandFlag = flag.Bool("expand", false, "Start with folded output (tool results, Explored groups) expanded")
 	maxFlag    = flag.Int("max", 2000, "Render at most the last N entries (0 = no limit)")
@@ -48,15 +48,24 @@ func run() error {
 		return err
 	}
 
-	// A piped stdout prints the same transcript the TUI shows, just without
-	// the viewport. Rendering it here rather than shelling out keeps the two
-	// views in lockstep even when the installed ccfmt is older.
+	// On a terminal the transcript goes through the pager, which already has
+	// the navigation a reader wants (search, marks, line jumps). The viewport
+	// owns what a pager cannot do: follow a live session. A piped stdout gets
+	// the same text with no pager at all, so the two stay in lockstep.
 	format := *formatFlag
 	if format == "" {
-		if isatty.IsTerminal(os.Stdout.Fd()) {
+		switch {
+		case !isatty.IsTerminal(os.Stdout.Fd()):
+			return writeTranscript(os.Stdout, file, 0)
+		case *followFlag || *tuiFlag:
 			return runTUI(file)
+		default:
+			var b strings.Builder
+			if err := writeTranscript(&b, file, termWidth()); err != nil {
+				return err
+			}
+			return runPager(b.String())
 		}
-		return writeTranscript(file)
 	}
 	// Batch formats belong to ccfmt.
 	cmd := exec.Command("ccfmt", "-format", format, file)
@@ -82,9 +91,9 @@ func runTUI(file string) error {
 	return err
 }
 
-// writeTranscript prints the transcript the TUI would show, wrapped to
-// $COLUMNS (or 100), for piping into pagers and diffs.
-func writeTranscript(file string) error {
+// writeTranscript writes the transcript the TUI would show. A width of 0
+// falls back to $COLUMNS, then to a terminal-typical 100.
+func writeTranscript(w io.Writer, file string, width int) error {
 	entries, err := cc.ReadFileWithSubagents(context.Background(), file)
 	if err != nil {
 		return err
@@ -92,11 +101,10 @@ func writeTranscript(file string) error {
 	if *maxFlag > 0 && len(entries) > *maxFlag {
 		entries = entries[len(entries)-*maxFlag:]
 	}
-	width := 100
-	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
-		width = n
+	if width <= 0 {
+		width = termWidth()
 	}
-	_, err = io.WriteString(os.Stdout, transcript.Render(entries, transcript.Options{
+	_, err = io.WriteString(w, transcript.Render(entries, transcript.Options{
 		Timestamps: *tsFlag,
 		Expand:     *expandFlag,
 		Width:      width,
