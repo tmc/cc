@@ -247,6 +247,11 @@ type CompactMetadata struct {
 	Trigger   string `json:"trigger,omitempty"`
 }
 
+// PersistedOutputPrefix begins the placeholder Claude Code inlines in place of
+// a tool result it spilled to a sidecar file named by
+// [ToolUseResult.PersistedOutputPath].
+const PersistedOutputPrefix = "<persisted-output>"
+
 // ToolUseResult holds the result of a tool invocation.
 type ToolUseResult struct {
 	Type    string          `json:"type,omitempty"`
@@ -264,6 +269,13 @@ type ToolUseResult struct {
 	FilePath string      `json:"filePath,omitempty"`
 	File     *FileResult `json:"file,omitempty"`
 	Error    string      `json:"error,omitempty"`
+
+	// PersistedOutputPath names the sidecar file Claude Code writes when a
+	// tool result is too large to inline. The transcript then carries only a
+	// short preview, so a reader that trusts the inline text sees a fraction
+	// of the output; PersistedOutputSize is the sidecar's size in bytes.
+	PersistedOutputPath string `json:"persistedOutputPath,omitempty"`
+	PersistedOutputSize int    `json:"persistedOutputSize,omitempty"`
 
 	// Edit fields.
 	OldString string `json:"oldString,omitempty"`

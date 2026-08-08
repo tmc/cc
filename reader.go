@@ -110,6 +110,11 @@ func (r *Reader) Next() bool {
 	return false
 }
 
+// decodeEntryLine decodes one JSONL line. A decoded entry has its spilled tool
+// output resolved (see resolvePersistedOutput), which reads the sidecar file
+// named by the line itself; making that an invariant of decoding is what keeps
+// every reader — streaming, whole-file, and tailing — from silently rendering a
+// two-kilobyte preview as if it were the whole result.
 func decodeEntryLine(line []byte) (Entry, bool) {
 	if entry, isCodex, ok := codexread.Decode(line); isCodex {
 		return entry, ok
@@ -118,6 +123,7 @@ func decodeEntryLine(line []byte) (Entry, bool) {
 	if err := json.Unmarshal(line, &entry); err != nil {
 		return Entry{}, false
 	}
+	resolvePersistedOutput(&entry)
 	return entry, true
 }
 
