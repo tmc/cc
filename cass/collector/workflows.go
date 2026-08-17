@@ -88,7 +88,7 @@ func ExtractWorkflows(sessionPath string, entries []cc.Entry) []cass.WorkflowRun
 		}
 	}
 
-	readWorkflowState(sessionPath, byRun)
+	states := readWorkflowState(sessionPath, byRun)
 
 	if len(byRun) == 0 {
 		return nil
@@ -97,8 +97,16 @@ func ExtractWorkflows(sessionPath string, entries []cc.Entry) []cass.WorkflowRun
 	for _, w := range byRun {
 		script := enrichWorkflowFromScriptFile(w)
 		if w.TranscriptDir != "" {
-			w.Agents = readWorkflowAgents(*w, script)
-			w.AgentCount = len(w.Agents)
+			var earliest time.Time
+			w.Agents, earliest = readWorkflowAgents(*w, script, states[w.RunID].Progress)
+			if len(w.Agents) > w.AgentCount {
+				w.AgentCount = len(w.Agents)
+			}
+			// A run still in flight has no state file, so its only clock is the
+			// first thing its agents said.
+			if w.StartedAt.IsZero() {
+				w.StartedAt = earliest
+			}
 			w.JournalEventCount = countWorkflowJournalLines(filepath.Join(w.TranscriptDir, "journal.jsonl"))
 		}
 		out = append(out, *w)
@@ -193,52 +201,217 @@ func workflowResultFromMap(raw map[string]any) *cc.ToolUseResult {
 	return &tr
 }
 
-func readWorkflowState(sessionPath string, byRun map[string]*cass.WorkflowRun) {
-	dir := filepath.Join(strings.TrimSuffix(sessionPath, ".jsonl"), "workflows")
+// workflowStateFile is the on-disk state a completed or in-flight native
+// workflow run writes to <session>/workflows/<run_id>.json. It is the
+// authoritative record: the parent JSONL only sees the launch and the async
+// hand-off, and the script source only says what was intended, not what ran.
+type workflowStateFile struct {
+	RunID          string                `json:"runId"`
+	TaskID         string                `json:"taskId"`
+	Timestamp      time.Time             `json:"timestamp"`
+	StartTime      int64                 `json:"startTime"` // unix millis
+	DurationMs     int64                 `json:"durationMs"`
+	Script         string                `json:"script"`
+	ScriptPath     string                `json:"scriptPath"`
+	WorkflowName   string                `json:"workflowName"`
+	Status         string                `json:"status"`
+	Summary        string                `json:"summary"`
+	DefaultModel   string                `json:"defaultModel"`
+	AgentCount     int                   `json:"agentCount"`
+	TotalTokens    int                   `json:"totalTokens"`
+	TotalToolCalls int                   `json:"totalToolCalls"`
+	Logs           []string              `json:"logs"`
+	Phases         []cass.WorkflowPhase  `json:"phases"`
+	Progress       []workflowProgressRec `json:"workflowProgress"`
+	Args           json.RawMessage       `json:"args"`
+	Result         json.RawMessage       `json:"result"`
+}
+
+// workflowProgressRec is one workflowProgress entry. Entries are either a
+// phase marker (type "workflow_phase") or a per-agent record (type
+// "workflow_agent"); the agent records are the harness's own account of each
+// fan-out call and beat anything inferred from the script text.
+type workflowProgressRec struct {
+	Type            string `json:"type"`
+	Index           int    `json:"index"`
+	Title           string `json:"title"`
+	Label           string `json:"label"`
+	PhaseIndex      int    `json:"phaseIndex"`
+	PhaseTitle      string `json:"phaseTitle"`
+	AgentID         string `json:"agentId"`
+	Model           string `json:"model"`
+	State           string `json:"state"`
+	Attempt         int    `json:"attempt"`
+	Isolation       string `json:"isolation"`
+	Tokens          int    `json:"tokens"`
+	ToolCalls       int    `json:"toolCalls"`
+	DurationMs      int64  `json:"durationMs"`
+	LastToolName    string `json:"lastToolName"`
+	LastToolSummary string `json:"lastToolSummary"`
+	PromptPreview   string `json:"promptPreview"`
+	ResultPreview   string `json:"resultPreview"`
+}
+
+// readWorkflowStateFile decodes one workflows/<run_id>.json. A zero RunID
+// means the file was missing or not a workflow state file.
+func readWorkflowStateFile(path string) workflowStateFile {
+	var raw workflowStateFile
+	if path == "" {
+		return raw
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return workflowStateFile{}
+	}
+	if json.Unmarshal(b, &raw) != nil {
+		return workflowStateFile{}
+	}
+	return raw
+}
+
+func readWorkflowState(sessionPath string, byRun map[string]*cass.WorkflowRun) map[string]workflowStateFile {
+	base := strings.TrimSuffix(sessionPath, ".jsonl")
+	states := map[string]workflowStateFile{}
+	infos, err := os.ReadDir(filepath.Join(base, "workflows"))
+	if err == nil {
+		for _, fi := range infos {
+			if fi.IsDir() || !strings.HasSuffix(fi.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(base, "workflows", fi.Name())
+			raw := readWorkflowStateFile(path)
+			if raw.RunID == "" {
+				continue
+			}
+			states[raw.RunID] = raw
+			applyWorkflowState(byRun, base, path, raw)
+		}
+	}
+	// A run in flight (or one that never finished) has a transcript dir but no
+	// state file; index it from the dir alone so it is not invisible. Its
+	// status is unknown rather than "running": the state file is the only
+	// record of completion, and its absence cannot distinguish the two.
+	dirs, err := os.ReadDir(filepath.Join(base, "subagents", "workflows"))
+	if err != nil {
+		return states
+	}
+	scripts := workflowScriptsByRunID(filepath.Join(base, "workflows", "scripts"))
+	for _, fi := range dirs {
+		id := fi.Name()
+		if !fi.IsDir() || !strings.HasPrefix(id, "wf_") || byRun[id] != nil {
+			continue
+		}
+		w := &cass.WorkflowRun{
+			RunID:         id,
+			Status:        "unknown",
+			TranscriptDir: filepath.Join(base, "subagents", "workflows", id),
+		}
+		if s, ok := scripts[id]; ok {
+			w.ScriptPath = s.path
+			w.Name = s.name
+		}
+		byRun[id] = w
+	}
+	return states
+}
+
+// workflowScript is a run's saved script file, whose name encodes the workflow
+// name the run was launched under.
+type workflowScript struct {
+	path string
+	name string
+}
+
+// workflowScriptsByRunID indexes workflows/scripts/<name>-<run_id>.js by run
+// ID. For a run whose state file is missing, this is the only place its name
+// and declared phases survive.
+func workflowScriptsByRunID(dir string) map[string]workflowScript {
+	out := map[string]workflowScript{}
 	infos, err := os.ReadDir(dir)
 	if err != nil {
-		return
+		return out
 	}
 	for _, fi := range infos {
-		if fi.IsDir() || !strings.HasSuffix(fi.Name(), ".json") {
+		name := fi.Name()
+		if fi.IsDir() || !strings.HasSuffix(name, ".js") {
 			continue
 		}
-		path := filepath.Join(dir, fi.Name())
-		b, err := os.ReadFile(path)
-		if err != nil {
+		stem := strings.TrimSuffix(name, ".js")
+		i := strings.LastIndex(stem, "-wf_")
+		if i < 0 {
 			continue
 		}
-		var raw struct {
-			RunID      string          `json:"runId"`
-			TaskID     string          `json:"taskId"`
-			Timestamp  time.Time       `json:"timestamp"`
-			Script     string          `json:"script"`
-			ScriptPath string          `json:"scriptPath"`
-			Result     json.RawMessage `json:"result"`
-		}
-		if json.Unmarshal(b, &raw) != nil || raw.RunID == "" {
-			continue
-		}
-		w := byRun[raw.RunID]
-		if w == nil {
-			w = &cass.WorkflowRun{RunID: raw.RunID}
-			byRun[raw.RunID] = w
-		}
-		w.TaskID = firstNonEmpty(w.TaskID, raw.TaskID)
-		w.ScriptPath = firstNonEmpty(w.ScriptPath, raw.ScriptPath)
-		if w.StartedAt.IsZero() {
-			w.StartedAt = raw.Timestamp
-		}
-		applyWorkflowScriptInfo(w, workflowScriptInfoFromScript(raw.Script))
-		if len(raw.Result) > 0 && string(raw.Result) != "null" {
-			w.Status = "completed"
-			w.CompletedAt = raw.Timestamp
-		}
-		w.SourcePath = path
-		if w.TranscriptDir == "" {
-			w.TranscriptDir = filepath.Join(strings.TrimSuffix(sessionPath, ".jsonl"), "subagents", "workflows", raw.RunID)
+		out[stem[i+1:]] = workflowScript{
+			path: filepath.Join(dir, name),
+			name: stem[:i],
 		}
 	}
+	return out
+}
+
+func applyWorkflowState(byRun map[string]*cass.WorkflowRun, base, path string, raw workflowStateFile) {
+	w := byRun[raw.RunID]
+	if w == nil {
+		w = &cass.WorkflowRun{RunID: raw.RunID}
+		byRun[raw.RunID] = w
+	}
+	w.TaskID = firstNonEmpty(w.TaskID, raw.TaskID)
+	w.ScriptPath = firstNonEmpty(w.ScriptPath, raw.ScriptPath)
+	w.Name = firstNonEmpty(w.Name, raw.WorkflowName)
+	w.Summary = firstNonEmpty(w.Summary, raw.Summary)
+	w.Model = firstNonEmpty(w.Model, raw.DefaultModel)
+	if raw.StartTime > 0 {
+		w.StartedAt = time.UnixMilli(raw.StartTime)
+	} else if w.StartedAt.IsZero() {
+		w.StartedAt = raw.Timestamp
+	}
+	if raw.DurationMs > 0 {
+		w.DurationMs = raw.DurationMs
+	}
+	if raw.AgentCount > 0 {
+		w.AgentCount = raw.AgentCount
+	}
+	w.TotalTokens = raw.TotalTokens
+	w.TotalToolCalls = raw.TotalToolCalls
+	w.Logs = raw.Logs
+	w.Args = rawJSONString(raw.Args)
+	w.Result = rawJSONString(raw.Result)
+	// The state file's phases are what actually ran; the script regex is only a
+	// fallback for runs whose state file predates the phases field.
+	if len(raw.Phases) > 0 {
+		w.Phases = raw.Phases
+	}
+	applyWorkflowScriptInfo(w, workflowScriptInfoFromScript(raw.Script))
+	if raw.Status != "" {
+		w.Status = raw.Status
+	} else if w.Result != "" {
+		w.Status = "completed"
+	}
+	if workflowCompleted(*w) {
+		w.CompletedAt = raw.Timestamp
+	}
+	w.SourcePath = path
+	if w.TranscriptDir == "" {
+		w.TranscriptDir = filepath.Join(base, "subagents", "workflows", raw.RunID)
+	}
+}
+
+// rawJSONString renders a raw JSON value as text, treating absent and null
+// alike so callers can test for emptiness.
+func rawJSONString(b json.RawMessage) string {
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "null" {
+		return ""
+	}
+	// The harness sometimes stores args as a JSON string holding JSON; unwrap
+	// it so the payload is searchable rather than escaped.
+	if strings.HasPrefix(s, `"`) {
+		var unquoted string
+		if json.Unmarshal(b, &unquoted) == nil {
+			return unquoted
+		}
+	}
+	return s
 }
 
 func enrichWorkflowFromScriptFile(w *cass.WorkflowRun) workflowScriptInfo {
@@ -263,7 +436,7 @@ func EnrichWorkflowMetadata(w *cass.WorkflowRun) {
 	}
 	info := enrichWorkflowFromScriptFile(w)
 	if needsWorkflowAgentEnrichment(w) {
-		if agents := readWorkflowAgents(*w, info); len(agents) > 0 {
+		if agents, _ := readWorkflowAgents(*w, info, readWorkflowStateFile(w.SourcePath).Progress); len(agents) > 0 {
 			w.Agents = agents
 			if w.AgentCount == 0 {
 				w.AgentCount = len(agents)
@@ -423,13 +596,20 @@ func workflowAgentType(optionsTail string) string {
 // elsewhere; here we capture just the metadata for tree rendering and per-agent
 // search attribution. Journal start order is preferred; file-name order is the
 // fallback for transcripts missing journal entries.
-func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo) []cass.WorkflowAgent {
+func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo, progress []workflowProgressRec) ([]cass.WorkflowAgent, time.Time) {
 	dir := w.TranscriptDir
+	var earliest time.Time
 	infos, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, earliest
 	}
-	order, statuses := readWorkflowJournal(filepath.Join(dir, "journal.jsonl"))
+	order, journal := readWorkflowJournal(filepath.Join(dir, "journal.jsonl"))
+	byAgent := map[string]workflowProgressRec{}
+	for _, p := range progress {
+		if p.Type == "workflow_agent" && p.AgentID != "" {
+			byAgent[p.AgentID] = p
+		}
+	}
 	files := map[string]string{}
 	var ids []string
 	for _, fi := range infos {
@@ -464,11 +644,15 @@ func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo) []cass.Wo
 	for i, id := range ordered {
 		path := files[id]
 		a := cass.WorkflowAgent{ID: id, SourcePath: path, Title: id}
+		ev := journal[id]
 
 		entries, err := cc.ReadFile(context.Background(), path)
 		if err == nil && len(entries) > 0 {
 			if t := workflowAgentTitle(cc.Summarize(path, entries)); t != "" {
 				a.Title = t
+			}
+			if ts := entries[0].Timestamp; !ts.IsZero() && (earliest.IsZero() || ts.Before(earliest)) {
+				earliest = ts
 			}
 			for _, e := range entries {
 				if e.Message == nil {
@@ -479,10 +663,10 @@ func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo) []cass.Wo
 					a.Tokens += e.Message.Usage.InputTokens + e.Message.Usage.OutputTokens
 				}
 			}
-			a.Status = firstNonEmpty(statuses[id], "completed")
+			a.Status = firstNonEmpty(ev.Status, "completed")
 		}
 		if a.Status == "" {
-			a.Status = statuses[id]
+			a.Status = ev.Status
 		}
 		if a.Status == "" {
 			a.Status = "unknown"
@@ -490,9 +674,12 @@ func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo) []cass.Wo
 		if a.Status == "running" && workflowCompleted(w) {
 			a.Status = "completed"
 		}
-		if meta := readWorkflowAgentMeta(strings.TrimSuffix(path, ".jsonl") + ".meta.json"); meta.AgentType != "" {
-			a.AgentType = meta.AgentType
-		}
+		a.CacheKey = ev.Key
+		a.Result = ev.Result
+		meta := readWorkflowAgentMeta(strings.TrimSuffix(path, ".jsonl") + ".meta.json")
+		a.AgentType = meta.AgentType
+		a.SpawnDepth = meta.SpawnDepth
+		a.WorktreePath = meta.WorktreePath
 		if spec := inferWorkflowAgentSpec(entries, script, i); spec.Label != "" || spec.Phase != "" || spec.AgentType != "" {
 			a.Label = spec.Label
 			a.Phase = spec.Phase
@@ -500,49 +687,124 @@ func readWorkflowAgents(w cass.WorkflowRun, script workflowScriptInfo) []cass.Wo
 				a.AgentType = spec.AgentType
 			}
 		}
+		applyWorkflowProgress(&a, byAgent[id])
 		agents = append(agents, a)
 	}
-	return agents
+	return agents, earliest
+}
+
+// applyWorkflowProgress overlays the harness's own record of an agent call. It
+// wins over script-text inference for label and phase, and over the JSONL
+// streaming-start snapshot for tokens and tool calls, because it is what the
+// run actually reported.
+func applyWorkflowProgress(a *cass.WorkflowAgent, p workflowProgressRec) {
+	if p.AgentID == "" {
+		return
+	}
+	if p.Label != "" {
+		a.Label = p.Label
+	}
+	if p.PhaseTitle != "" {
+		a.Phase = p.PhaseTitle
+	}
+	a.Index = p.Index
+	a.PhaseIndex = p.PhaseIndex
+	a.Model = p.Model
+	a.Attempt = p.Attempt
+	a.Isolation = p.Isolation
+	a.DurationMs = p.DurationMs
+	a.LastToolName = p.LastToolName
+	a.LastToolSummary = p.LastToolSummary
+	a.PromptPreview = p.PromptPreview
+	a.ResultPreview = p.ResultPreview
+	if p.Tokens > 0 {
+		a.Tokens = p.Tokens
+	}
+	if p.ToolCalls > 0 {
+		a.ToolCalls = p.ToolCalls
+	}
+	if s := workflowAgentState(p.State); s != "" {
+		a.Status = s
+	}
+}
+
+// workflowAgentState maps a progress record's state onto the status vocabulary
+// the journal uses.
+func workflowAgentState(state string) string {
+	switch state {
+	case "done":
+		return "completed"
+	case "error", "failed":
+		return "error"
+	case "":
+		return ""
+	default:
+		return state
+	}
 }
 
 func workflowCompleted(w cass.WorkflowRun) bool {
 	return !w.CompletedAt.IsZero() || strings.EqualFold(w.Status, "completed")
 }
 
-func readWorkflowJournal(path string) ([]string, map[string]string) {
+// workflowJournalAgent is what journal.jsonl records about one fan-out agent:
+// its resume cache key, its terminal status, and the value it returned.
+type workflowJournalAgent struct {
+	Key    string
+	Status string
+	Result string
+}
+
+// readWorkflowJournal reads a run's journal.jsonl, returning agent start order
+// and per-agent journal state. The journal is the only place a resumed run's
+// cache key and an agent's structured return value are recorded.
+func readWorkflowJournal(path string) ([]string, map[string]workflowJournalAgent) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil
 	}
 	defer f.Close()
 	var order []string
-	statuses := map[string]string{}
+	agents := map[string]workflowJournalAgent{}
 	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), cc.MaxLineSize)
 	for sc.Scan() {
 		var ev struct {
-			Type    string `json:"type"`
-			AgentID string `json:"agentId"`
+			Type    string          `json:"type"`
+			AgentID string          `json:"agentId"`
+			Key     string          `json:"key"`
+			Result  json.RawMessage `json:"result"`
 		}
 		if json.Unmarshal(sc.Bytes(), &ev) != nil || ev.AgentID == "" {
 			continue
 		}
+		a := agents[ev.AgentID]
+		if ev.Key != "" {
+			a.Key = ev.Key
+		}
 		switch ev.Type {
 		case "started":
 			order = append(order, ev.AgentID)
-			if statuses[ev.AgentID] == "" {
-				statuses[ev.AgentID] = "running"
+			if a.Status == "" {
+				a.Status = "running"
 			}
 		case "result":
-			statuses[ev.AgentID] = "completed"
+			a.Status = "completed"
+			if s := rawJSONString(ev.Result); s != "" {
+				a.Result = s
+			}
 		case "error", "failed":
-			statuses[ev.AgentID] = "error"
+			a.Status = "error"
 		}
+		agents[ev.AgentID] = a
 	}
-	return order, statuses
+	return order, agents
 }
 
 type workflowAgentMeta struct {
-	AgentType string `json:"agentType"`
+	AgentType    string `json:"agentType"`
+	SpawnDepth   int    `json:"spawnDepth"`
+	WorktreePath string `json:"worktreePath"`
 }
 
 func readWorkflowAgentMeta(path string) workflowAgentMeta {
