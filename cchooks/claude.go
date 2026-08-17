@@ -17,9 +17,12 @@ type claudeSettings struct {
 	EnabledPlugins map[string]bool          `json:"enabledPlugins"`
 }
 
-// claudeGroup is one matcher group under an event name.
+// claudeGroup is one matcher group under an event name. If is not a field of a
+// group; it is read only to report that someone put it there, because an agent
+// ignores it silently and every handler in the group then runs unconditionally.
 type claudeGroup struct {
 	Matcher string          `json:"matcher"`
+	If      string          `json:"if"`
 	Hooks   []claudeHandler `json:"hooks"`
 }
 
@@ -134,6 +137,7 @@ func flattenClaude(hooks map[string][]claudeGroup, layer Layer) []Handler {
 					Event:   event,
 					Matcher: g.Matcher,
 					If:      h.If,
+					GroupIf: g.If,
 					Type:    h.Type,
 					Command: expandPluginRoot(h.Command, layer),
 					Args:    h.Args,

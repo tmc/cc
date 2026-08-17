@@ -52,7 +52,8 @@ type Handler struct {
 	Layer   Layer
 	Event   string // "PreToolUse", "SessionStart", ...
 	Matcher string // empty when the group declares none
-	If      string // permission-rule condition, Codex and newer Claude schemas
+	If      string // permission-rule condition, evaluated per handler
+	GroupIf string // an if written on the matcher group, where nothing reads it
 	Type    string // "command"
 	Command string
 	Args    []string
@@ -91,6 +92,7 @@ const (
 	CodeMissing     = "missing-script"
 	CodeNotExec     = "script-not-executable"
 	CodeUnmatchable = "unmatchable-matcher"
+	CodeMisplacedIf = "misplaced-if"
 	CodeSlowShell   = "per-event-subprocess"
 	CodeNoTimeout   = "no-timeout"
 	CodeDuplicate   = "duplicate-handler"
@@ -138,7 +140,10 @@ func Diagnose(handlers []Handler) []Diagnostic {
 			continue
 		}
 		if matcherLooksLikeRule(h.Matcher) {
-			add(CodeUnmatchable, "error", "matcher is permission-rule syntax but is compiled as a regexp against the tool name; it can never match. Use the if field.")
+			add(CodeUnmatchable, "error", "matcher is permission-rule syntax but is compiled as a regexp against the tool name; it can never match. Use the if field on the handler.")
+		}
+		if h.GroupIf != "" {
+			add(CodeMisplacedIf, "error", "if is written on the matcher group, where nothing reads it; the handler runs on every call the matcher admits. Move it onto the handler, beside command.")
 		}
 		if s := h.script(); s != "" && filepath.IsAbs(s) {
 			switch info, err := os.Stat(s); {

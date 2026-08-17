@@ -38,6 +38,11 @@
 //	                        Bash(cmd*). Matchers are compiled as regular
 //	                        expressions and tested against the tool name, so
 //	                        this never matches. The condition belongs in "if".
+//	misplaced-if            An "if" written on the matcher group rather than
+//	                        the handler. Nothing reads it there, so the
+//	                        handler runs on every call the matcher admits.
+//	                        Where an unmatchable matcher fails closed, this
+//	                        fails open.
 //	missing-hooks-wrapper   A Codex hooks.json whose event names sit at the
 //	                        file root. Codex requires a "hooks" object and
 //	                        rejects unknown root keys, dropping every hook

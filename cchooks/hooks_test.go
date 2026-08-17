@@ -107,6 +107,34 @@ func TestDiagnoseDuplicateAcrossLayers(t *testing.T) {
 	}
 }
 
+// TestDiagnoseMisplacedIf covers the inverse of an unmatchable matcher. A
+// rule-shaped matcher fails closed: the handler never runs. An if written on
+// the matcher group instead of the handler fails open: it is ignored, and the
+// handler runs on every call the matcher admits. Measured on claude 2.1.220,
+// where a group-level if of Bash(ls:*) still ran against "echo probe456".
+func TestDiagnoseMisplacedIf(t *testing.T) {
+	h := Handler{
+		Layer:   Layer{Agent: "claude-code", Origin: Manual, Path: "settings.json"},
+		Event:   "PreToolUse",
+		Matcher: "Bash",
+		Command: "tap",
+	}
+	if codes(Diagnose([]Handler{h}))[CodeMisplacedIf] {
+		t.Error("a handler with no group-level if must not be reported")
+	}
+
+	h.GroupIf = "Bash(it2 session send-text:*)"
+	diags := Diagnose([]Handler{h})
+	if !codes(diags)[CodeMisplacedIf] {
+		t.Fatalf("want %q diagnostic, got %v", CodeMisplacedIf, diags)
+	}
+	for _, d := range diags {
+		if d.Code == CodeMisplacedIf && d.Severity != "error" {
+			t.Errorf("severity = %q, want error: the condition is silently dropped", d.Severity)
+		}
+	}
+}
+
 func TestDiagnoseCommandSubstitution(t *testing.T) {
 	handlers := []Handler{{
 		Layer:   Layer{Agent: "claude-code", Origin: Manual},
