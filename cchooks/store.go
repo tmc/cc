@@ -106,7 +106,7 @@ func (st StoreStats) diagnose(diag func(code, sev, msg string) Diagnostic) []Dia
 	var out []Diagnostic
 	if st.Twinned > 0 {
 		out = append(out, diag(CodeStoreTwinned, "warn", fmt.Sprintf(
-			"%d session ids hold more than one directory: a writer stamped the wNtNpN: pane-position prefix, which is a location and goes stale when a pane moves. Canonicalize to the bare UUID and merge the twins", st.Twinned)))
+			"%d session ids hold more than one directory: a writer stamped the wNtNpN: pane-position prefix, which is a location and goes stale when a pane moves. Fix the writer; do not merge the directories. A reader that canonicalizes already folds both, and the twins hold files of the same name, so moving one onto the other destroys events", st.Twinned)))
 	}
 	switch {
 	case st.Dirs == 0:

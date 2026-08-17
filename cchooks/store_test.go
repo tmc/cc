@@ -91,4 +91,11 @@ func TestReadStoreTwinned(t *testing.T) {
 	if !codes(diags)[CodeStoreTwinned] {
 		t.Errorf("want %q, got %v", CodeStoreTwinned, keys(codes(diags)))
 	}
+	// Twins are a writer defect, not a reader one, and the advice must not
+	// send anyone to merge directories that hold identically named files.
+	for _, d := range diags {
+		if d.Code == CodeStoreTwinned && strings.Contains(d.Message, "merge the twins") {
+			t.Error("twinned advice must not recommend merging: a canonicalizing reader already folds both, and a move destroys events")
+		}
+	}
 }
