@@ -8,15 +8,24 @@
 //
 // cchooks never writes. Installing hooks is a separate, and riskier, job.
 //
+// A hook that runs and a store that fills are two different claims, and only
+// the second means the pipeline works. The store subcommand counts the event
+// store at each stage a record must survive to become a pane binding — written,
+// non-empty, carrying both identifiers, grouped into an interval — and names
+// the first stage that yields nothing. status checks it too, because the
+// failure it catches went unnoticed for nine months here, behind readers that
+// answer zero exactly the way they answer a real result.
+//
 // # Usage
 //
-//	cchooks [status] [flags]
+//	cchooks [status|store] [flags]
 //
 // # Flags
 //
 //	-agent NAME   Only report this agent (claude-code, codex).
 //	-dir DIRS     Comma-separated directories whose .claude/settings.json
 //	              to include (default: the working directory).
+//	-store DIR    Event store root (default: ~/.it2/sessions).
 //	-json         Emit handlers and diagnostics as JSON.
 //	-v            Include informational diagnostics.
 //
@@ -58,6 +67,19 @@
 //	                        gone. The agent refuses to load it, so none of its
 //	                        hooks run even when a readable copy of the same
 //	                        plugin remains elsewhere on disk.
+//
+//	store-unwritten         Session directories exist but none holds an events
+//	                        file: no handler is registered, or the registered
+//	                        command is not on PATH.
+//	store-empty             Events files exist and are all empty.
+//	store-unbound           Records exist but none carries both a session id
+//	                        and an it2 session id, so no reader can use them.
+//	                        This is what a writer predating the binding field
+//	                        looks like from the far end.
+//	store-unresolved        Bound records that group into no interval.
+//	store-twinned           One conversation held under both a bare UUID and a
+//	                        wNtNpN:-prefixed directory. The prefix is a pane
+//	                        position, which goes stale when a pane moves.
 //
 // Handlers that cannot run are still listed, marked PARKED (inside a
 // disabled-by-rename block) or DEAD (belonging to an uninstalled plugin), so

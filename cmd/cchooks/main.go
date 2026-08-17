@@ -17,6 +17,7 @@ var (
 	jsonFlag  = flag.Bool("json", false, "Emit JSON instead of a table")
 	dirFlag   = flag.String("dir", "", "Include project settings from these directories (comma-separated; default cwd)")
 	allFlag   = flag.Bool("v", false, "Include informational diagnostics")
+	rootFlag  = flag.String("store", "", "Event store root to inspect (default ~/.it2/sessions)")
 )
 
 // Exit statuses. They are the point of running status from a loop, so they are
@@ -38,16 +39,18 @@ func main() {
 	// first non-flag argument, so drop it before parsing rather than making
 	// "cchooks status -json" silently ignore the flag.
 	args := os.Args[1:]
+	cmd := "status"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		if args[0] != "status" {
+		if args[0] != "status" && args[0] != "store" {
 			fmt.Fprintf(os.Stderr, "cchooks: unknown command %q\n", args[0])
 			os.Exit(exitFailed)
 		}
-		args = args[1:]
+		cmd, args = args[0], args[1:]
 	}
 	flag.CommandLine.Parse(args)
 	// Accept the subcommand on either side of the flags.
-	if flag.NArg() == 1 && flag.Arg(0) == "status" {
+	if flag.NArg() == 1 && (flag.Arg(0) == "status" || flag.Arg(0) == "store") {
+		cmd = flag.Arg(0)
 		flag.CommandLine.Parse(nil)
 	}
 	if flag.NArg() > 0 {
@@ -55,20 +58,43 @@ func main() {
 		os.Exit(exitFailed)
 	}
 
-	if err := run(); err != nil {
+	if err := run(cmd); err != nil {
 		fmt.Fprintln(os.Stderr, "cchooks:", err)
 		os.Exit(exitFailed)
 	}
 }
 
-func run() error {
+func run(cmd string) error {
 	report, err := cchooks.Read(projectDirs())
 	if err != nil {
 		return err
 	}
 	handlers, diags := filterAgent(report, *agentFlag)
+
+	// A hook that runs and a store that fills are two different claims, and
+	// only the second one means the pipeline works. Check both by default:
+	// the failure this reports went unnoticed for nine months precisely
+	// because it lived behind a command nobody had reason to run.
+	st, storeDiags := cchooks.ReadStore(*rootFlag)
+	diags = append(diags, storeDiags...)
 	if !*allFlag {
 		diags = withoutInfo(diags)
+		storeDiags = withoutInfo(storeDiags)
+	}
+	if cmd == "store" {
+		if *jsonFlag {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(struct {
+				Store       cchooks.StoreStats   `json:"store"`
+				Diagnostics []cchooks.Diagnostic `json:"diagnostics"`
+			}{st, storeDiags}); err != nil {
+				return err
+			}
+		} else {
+			printStore(st, storeDiags)
+		}
+		return exitFor(storeDiags)
 	}
 
 	if *jsonFlag {
@@ -84,6 +110,10 @@ func run() error {
 		printTable(handlers, diags)
 	}
 
+	return exitFor(diags)
+}
+
+func exitFor(diags []cchooks.Diagnostic) error {
 	switch cchooks.Worst(diags) {
 	case "error":
 		os.Exit(exitBroken)
@@ -92,6 +122,38 @@ func run() error {
 	}
 	os.Exit(exitHealthy)
 	return nil
+}
+
+// printStore shows the counts narrowing stage by stage, so the reader can see
+// which one falls to zero rather than being told only that the answer is none.
+func printStore(st cchooks.StoreStats, diags []cchooks.Diagnostic) {
+	fmt.Println("event store", shorten(st.Root))
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	for _, row := range []struct {
+		label string
+		n     int
+	}{
+		{"session directories", st.Dirs},
+		{"  with an events file", st.Files},
+		{"non-blank lines", st.Lines},
+		{"  carrying both ids", st.Bound},
+		{"pane bindings resolved", st.Intervals},
+	} {
+		fmt.Fprintf(w, "  %s\t%d\n", row.label, row.n)
+	}
+	if st.Twinned > 0 {
+		fmt.Fprintf(w, "  ids with twinned dirs\t%d\n", st.Twinned)
+	}
+	w.Flush()
+
+	if len(diags) > 0 {
+		fmt.Println()
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		for _, d := range diags {
+			fmt.Fprintf(w, "%s\t%s\t%s\n", d.Severity, d.Code, d.Message)
+		}
+		w.Flush()
+	}
 }
 
 func projectDirs() []string {
