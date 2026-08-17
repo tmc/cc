@@ -29,6 +29,7 @@ var (
 	expandFlag = flag.Bool("expand", false, "Start with folded output (tool results, Explored groups) expanded")
 	maxFlag    = flag.Int("max", 2000, "Render at most the last N entries (0 = no limit)")
 	sinceFlag  = flag.String("since", "30d", "How far back to search when resolving an ID")
+	searchFlag = flag.String("search", "", "Open the pager at the first match of this pattern")
 )
 
 func main() {

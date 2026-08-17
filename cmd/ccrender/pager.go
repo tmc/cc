@@ -46,8 +46,8 @@ func runPager(text string) error {
 	cmd.Stdin = strings.NewReader(text)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if _, ok := os.LookupEnv("LESS"); !ok {
-		cmd.Env = append(os.Environ(), "LESS=FRX")
+	if less, ok := lessEnv(os.LookupEnv, *searchFlag); ok {
+		cmd.Env = append(os.Environ(), "LESS="+less)
 	}
 	if err := cmd.Run(); err != nil {
 		// Quitting the pager early closes the pipe; that is how a reader
@@ -59,6 +59,23 @@ func runPager(text string) error {
 		return fmt.Errorf("%s: %w", argv[0], err)
 	}
 	return nil
+}
+
+// lessEnv builds the LESS value to run the pager under, or reports false to
+// leave the environment alone. An existing LESS is the user's own display
+// configuration and is kept; a search pattern is a per-invocation action, so
+// it composes onto whatever LESS says. The +/ action must come last.
+func lessEnv(look func(string) (string, bool), pattern string) (string, bool) {
+	less, ok := look("LESS")
+	if !ok {
+		less = "FRX"
+	} else if pattern == "" {
+		return "", false
+	}
+	if pattern != "" {
+		less += " +/" + pattern
+	}
+	return less, true
 }
 
 // termWidth reports the width to wrap to: the terminal's own width, else

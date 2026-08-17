@@ -30,3 +30,31 @@ func TestPagerCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestLessEnv(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     map[string]string
+		pattern string
+		want    string
+		wantOK  bool
+	}{
+		{name: "default", want: "FRX", wantOK: true},
+		{name: "default with search", pattern: "panic", want: "FRX +/panic", wantOK: true},
+		{name: "user LESS kept", env: map[string]string{"LESS": "R"}},
+		{name: "user LESS composes", env: map[string]string{"LESS": "R"}, pattern: "panic", want: "R +/panic", wantOK: true},
+		{name: "alternation", pattern: "retry|policy", want: "FRX +/retry|policy", wantOK: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			look := func(k string) (string, bool) {
+				v, ok := tt.env[k]
+				return v, ok
+			}
+			got, ok := lessEnv(look, tt.pattern)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("lessEnv = %q, %v; want %q, %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}

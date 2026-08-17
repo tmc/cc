@@ -34,6 +34,8 @@
 //	               0 means no limit).
 //	-since DUR     How far back to search when resolving an ID
 //	               (default 30d).
+//	-search PAT    Open the pager at the first match of PAT (pager only;
+//	               n and N walk the rest).
 //
 // # Keys
 //
