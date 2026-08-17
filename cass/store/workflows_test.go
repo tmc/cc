@@ -40,14 +40,35 @@ func sessionWithWorkflows() cass.Session {
 				ScriptPath:        "/p/scripts/workflows/wf_aaa.js",
 				TranscriptDir:     "/p/subagents/workflows/wf_aaa",
 				SourcePath:        "/p/workflows/wf_aaa.json",
+				Model:             "claude-opus-5[1m]",
+				DurationMs:        2438054,
+				TotalTokens:       437741,
+				TotalToolCalls:    182,
+				Logs:              []string{"ground: gen=f88a756", "typedegrade: not fixing"},
+				Args:              `{"postregen":{"fixed":0}}`,
+				Result:            `{"ok":true}`,
 				Agents: []cass.WorkflowAgent{
 					{
-						ID:        "agent-1",
-						Label:     "lens:architecture",
-						Phase:     "Lenses",
-						AgentType: "Explore",
-						Title:     "Architecture review",
-						Status:    "completed",
+						ID:              "agent-1",
+						Label:           "lens:architecture",
+						Phase:           "Lenses",
+						AgentType:       "Explore",
+						Title:           "Architecture review",
+						Status:          "completed",
+						Index:           1,
+						PhaseIndex:      1,
+						Model:           "claude-opus-5[1m]",
+						Attempt:         1,
+						DurationMs:      16327,
+						Isolation:       "worktree",
+						WorktreePath:    "/repo/.claude/worktrees/wf_aaa-1",
+						SpawnDepth:      1,
+						PromptPreview:   "YOU ARE WORKING IN /repo",
+						ResultPreview:   `{"gen_head":"f88a756"}`,
+						LastToolName:    "StructuredOutput",
+						LastToolSummary: "f88a756",
+						CacheKey:        "v2:aaakey",
+						Result:          `{"gen_head":"f88a756"}`,
 					},
 					{
 						ID:        "agent-2",
@@ -768,5 +789,62 @@ func TestDeleteCascadesWorkflows(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("after delete, workflow count = %d, want 0", n)
+	}
+}
+
+// TestWorkflowStateFieldsRoundTrip covers the run- and agent-level fields the
+// workflow state file contributes, which are what make a run searchable by
+// what it actually did rather than only by its name.
+func TestWorkflowStateFieldsRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.BatchIndex(ctx, []cass.Session{sessionWithWorkflows()}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Workflows(ctx, "sess1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := got[0]
+	if w.Model != "claude-opus-5[1m]" || w.DurationMs != 2438054 || w.TotalTokens != 437741 || w.TotalToolCalls != 182 {
+		t.Errorf("run totals = %q %d %d %d", w.Model, w.DurationMs, w.TotalTokens, w.TotalToolCalls)
+	}
+	if w.Args != `{"postregen":{"fixed":0}}` || w.Result != `{"ok":true}` {
+		t.Errorf("args/result = %q %q", w.Args, w.Result)
+	}
+	var logs []string
+	if err := json.Unmarshal([]byte(w.LogsJSON), &logs); err != nil {
+		t.Fatalf("unmarshal logs: %v", err)
+	}
+	if len(logs) != 2 || logs[0] != "ground: gen=f88a756" {
+		t.Errorf("logs = %q", logs)
+	}
+
+	var agents []cass.WorkflowAgent
+	if err := json.Unmarshal([]byte(w.AgentsJSON), &agents); err != nil {
+		t.Fatal(err)
+	}
+	a := agents[0]
+	if a.Model != "claude-opus-5[1m]" || a.Attempt != 1 || a.DurationMs != 16327 ||
+		a.Isolation != "worktree" || a.WorktreePath != "/repo/.claude/worktrees/wf_aaa-1" ||
+		a.SpawnDepth != 1 || a.CacheKey != "v2:aaakey" || a.LastToolName != "StructuredOutput" {
+		t.Errorf("agent state fields = %+v", a)
+	}
+
+	// The run's own words reach FTS: a term that appears only in a log line
+	// finds the parent session.
+	res, err := s.Search(ctx, cass.SearchRequest{Query: "typedegrade", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].SessionID != "sess1" {
+		t.Fatalf("search for a workflow log term = %+v, want sess1", res.Hits)
+	}
+	res, err = s.Search(ctx, cass.SearchRequest{Query: "postregen", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 {
+		t.Fatalf("search for a workflow args term = %d hits, want 1", len(res.Hits))
 	}
 }

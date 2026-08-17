@@ -32,6 +32,18 @@ type WorkflowRow struct {
 	// AgentsJSON is the JSON-encoded []cass.WorkflowAgent for this run; a small
 	// bounded blob, mirroring goals_json/skills_json. Defaults to "[]".
 	AgentsJSON string `json:"agents_json"`
+	// Model, DurationMs, TotalTokens and TotalToolCalls come from the run's
+	// state file and cover the whole run, including agents whose transcript is
+	// no longer on disk.
+	Model          string `json:"model"`
+	DurationMs     int64  `json:"duration_ms"`
+	TotalTokens    int    `json:"total_tokens"`
+	TotalToolCalls int    `json:"total_tool_calls"`
+	// LogsJSON is the JSON-encoded []string of the script's log() lines.
+	LogsJSON string `json:"logs_json"`
+	// Args and Result are the run's JSON-encoded input and return value.
+	Args   string `json:"args"`
+	Result string `json:"result"`
 }
 
 const workflowsSchema = `
@@ -52,6 +64,13 @@ const workflowsSchema = `
 		completed_at INTEGER NOT NULL DEFAULT 0,
 		indexed_at INTEGER NOT NULL DEFAULT 0,
 		phases_json TEXT NOT NULL DEFAULT '[]',
+		model TEXT NOT NULL DEFAULT '',
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		total_tool_calls INTEGER NOT NULL DEFAULT 0,
+		logs_json TEXT NOT NULL DEFAULT '[]',
+		args TEXT NOT NULL DEFAULT '',
+		result TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (parent_session_id, run_id),
 		FOREIGN KEY (parent_session_id) REFERENCES sessions(id) ON DELETE CASCADE
 	);
@@ -110,7 +129,8 @@ func (s *DB) WorkflowsByParentIDs(ctx context.Context, parentSessionIDs []string
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path, agent_count, journal_event_count,
-			started_at, completed_at, phases_json, agents_json
+			started_at, completed_at, phases_json, agents_json,
+			model, duration_ms, total_tokens, total_tool_calls, logs_json, args, result
 		FROM workflows WHERE parent_session_id IN (`+placeholders+`)
 		ORDER BY started_at, run_id`, args...)
 	if err != nil {
@@ -124,6 +144,7 @@ func (s *DB) WorkflowsByParentIDs(ctx context.Context, parentSessionIDs []string
 			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
 			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
 			&w.StartedAt, &w.CompletedAt, &w.PhasesJSON, &w.AgentsJSON,
+			&w.Model, &w.DurationMs, &w.TotalTokens, &w.TotalToolCalls, &w.LogsJSON, &w.Args, &w.Result,
 		); err != nil {
 			return nil, fmt.Errorf("scan workflow by parent ids: %w", err)
 		}
@@ -143,7 +164,8 @@ func workflowsSelect() string {
 	return `
 		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path, agent_count, journal_event_count,
-			started_at, completed_at, phases_json, agents_json
+			started_at, completed_at, phases_json, agents_json,
+			model, duration_ms, total_tokens, total_tool_calls, logs_json, args, result
 		FROM workflows`
 }
 
@@ -155,6 +177,7 @@ func scanWorkflowRows(rows *sql.Rows) ([]WorkflowRow, error) {
 			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
 			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
 			&w.StartedAt, &w.CompletedAt, &w.PhasesJSON, &w.AgentsJSON,
+			&w.Model, &w.DurationMs, &w.TotalTokens, &w.TotalToolCalls, &w.LogsJSON, &w.Args, &w.Result,
 		); err != nil {
 			return nil, fmt.Errorf("scan workflow: %w", err)
 		}

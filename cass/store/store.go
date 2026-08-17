@@ -440,6 +440,15 @@ func (s *DB) migrate() error {
 		// Script-declared workflow phase metadata (JSON []cass.WorkflowPhase), for
 		// TUI-like phase rendering in the web detail panel.
 		"ALTER TABLE workflows ADD COLUMN phases_json TEXT NOT NULL DEFAULT '[]'",
+		// Run-level totals and payloads from the workflow state file, which
+		// cover agents whose transcripts are no longer on disk.
+		"ALTER TABLE workflows ADD COLUMN model TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE workflows ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE workflows ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE workflows ADD COLUMN total_tool_calls INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE workflows ADD COLUMN logs_json TEXT NOT NULL DEFAULT '[]'",
+		"ALTER TABLE workflows ADD COLUMN args TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE workflows ADD COLUMN result TEXT NOT NULL DEFAULT ''",
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
@@ -510,9 +519,10 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path,
 			agent_count, journal_event_count, started_at, completed_at, indexed_at,
-			phases_json, agents_json
+			phases_json, agents_json,
+			model, duration_ms, total_tokens, total_tool_calls, logs_json, args, result
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare workflows: %w", err)
@@ -652,6 +662,12 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 					agentsJSON = string(b)
 				}
 			}
+			logsJSON := "[]"
+			if len(wf.Logs) > 0 {
+				if b, err := json.Marshal(wf.Logs); err == nil {
+					logsJSON = string(b)
+				}
+			}
 			if _, err := wfStmt.ExecContext(ctx,
 				sess.ID,
 				wf.RunID,
@@ -670,6 +686,13 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 				now,
 				phasesJSON,
 				agentsJSON,
+				wf.Model,
+				wf.DurationMs,
+				wf.TotalTokens,
+				wf.TotalToolCalls,
+				logsJSON,
+				wf.Args,
+				wf.Result,
 			); err != nil {
 				return fmt.Errorf("insert workflow %s/%s: %w", sess.ID, wf.RunID, err)
 			}
@@ -998,7 +1021,7 @@ func (s *DB) foldWorkflowMatches(ctx context.Context, hits []cass.Hit, query str
 		}
 		var matchedAgents int
 		for i, a := range agents {
-			if termsMatch(strings.ToLower(a.Title+" "+a.Label+" "+a.Phase+" "+a.AgentType), terms) {
+			if termsMatch(strings.ToLower(strings.Join([]string{a.Title, a.Label, a.Phase, a.AgentType, a.Model, a.LastToolName, a.LastToolSummary, a.PromptPreview, a.ResultPreview}, " ")), terms) {
 				h.MatchedWorkflowAgentIDs = append(h.MatchedWorkflowAgentIDs, a.ID)
 				h.MatchedWorkflowAgentNames = append(h.MatchedWorkflowAgentNames, workflowAgentGraphTitle(a, i))
 				matchedAgents++
@@ -1045,7 +1068,8 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT parent_session_id, run_id, task_id, name, description, status, summary,
 			script_path, transcript_dir, source_path, agent_count, journal_event_count,
-			started_at, completed_at, phases_json, agents_json
+			started_at, completed_at, phases_json, agents_json,
+			model, duration_ms, total_tokens, total_tool_calls, logs_json, args, result
 		FROM workflows WHERE parent_session_id IN (`+placeholders+`)
 		ORDER BY started_at, run_id`, args...)
 	if err != nil {
@@ -1060,6 +1084,7 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 			&w.ParentSessionID, &w.RunID, &w.TaskID, &w.Name, &w.Description, &w.Status, &w.Summary,
 			&w.ScriptPath, &w.TranscriptDir, &w.SourcePath, &w.AgentCount, &w.JournalEventCount,
 			&w.StartedAt, &w.CompletedAt, &w.PhasesJSON, &w.AgentsJSON,
+			&w.Model, &w.DurationMs, &w.TotalTokens, &w.TotalToolCalls, &w.LogsJSON, &w.Args, &w.Result,
 		); err != nil {
 			return fmt.Errorf("scan folded workflow: %w", err)
 		}
@@ -1074,6 +1099,10 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 		var phases []cass.WorkflowPhase
 		if w.PhasesJSON != "" && w.PhasesJSON != "[]" {
 			_ = json.Unmarshal([]byte(w.PhasesJSON), &phases)
+		}
+		var logs []string
+		if w.LogsJSON != "" && w.LogsJSON != "[]" {
+			_ = json.Unmarshal([]byte(w.LogsJSON), &logs)
 		}
 		h.Workflows = append(h.Workflows, cass.WorkflowRun{
 			RunID:             w.RunID,
@@ -1091,6 +1120,13 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 			StartedAt:         unixOrZero(w.StartedAt),
 			CompletedAt:       unixOrZero(w.CompletedAt),
 			Agents:            agents,
+			Model:             w.Model,
+			DurationMs:        w.DurationMs,
+			TotalTokens:       w.TotalTokens,
+			TotalToolCalls:    w.TotalToolCalls,
+			Logs:              logs,
+			Args:              w.Args,
+			Result:            w.Result,
 		})
 		if len(terms) == 0 {
 			continue
@@ -1100,7 +1136,7 @@ func (s *DB) foldWorkflows(ctx context.Context, hits []cass.Hit, query string) e
 		// this drives the "matched in N workflow agents" badge.
 		var matchedAgents int
 		for i, a := range agents {
-			if termsMatch(strings.ToLower(a.Title+" "+a.Label+" "+a.Phase+" "+a.AgentType), terms) {
+			if termsMatch(strings.ToLower(strings.Join([]string{a.Title, a.Label, a.Phase, a.AgentType, a.Model, a.LastToolName, a.LastToolSummary, a.PromptPreview, a.ResultPreview}, " ")), terms) {
 				h.MatchedWorkflowAgentIDs = append(h.MatchedWorkflowAgentIDs, a.ID)
 				h.MatchedWorkflowAgentNames = append(h.MatchedWorkflowAgentNames, workflowAgentGraphTitle(a, i))
 				matchedAgents++
@@ -1146,7 +1182,10 @@ func queryTerms(query string) []string {
 // workflowMatches reports whether every query term appears in the workflow's
 // searchable text (name, description, phases, run id, status).
 func workflowMatches(w WorkflowRow, terms []string) bool {
-	hay := strings.ToLower(w.Name + " " + w.Description + " " + w.PhasesJSON + " " + w.RunID + " " + w.Status)
+	hay := strings.ToLower(strings.Join([]string{
+		w.Name, w.Description, w.PhasesJSON, w.RunID, w.Status, w.Summary,
+		w.Model, w.LogsJSON, w.Args, w.Result,
+	}, " "))
 	return termsMatch(hay, terms)
 }
 
@@ -3097,6 +3136,46 @@ func buildContent(sess cass.Session) string {
 			b.WriteString(wf.Description)
 		}
 		b.WriteByte('\n')
+		for _, p := range wf.Phases {
+			if p.Title == "" {
+				continue
+			}
+			b.WriteString("workflow phase ")
+			b.WriteString(p.Title)
+			if p.Detail != "" {
+				b.WriteByte(' ')
+				b.WriteString(p.Detail)
+			}
+			b.WriteByte('\n')
+		}
+		for _, a := range wf.Agents {
+			b.WriteString("workflow agent ")
+			b.WriteString(a.ID)
+			for _, s := range []string{a.Label, a.Phase, a.AgentType, a.Model, a.LastToolName, a.LastToolSummary} {
+				if s != "" {
+					b.WriteByte(' ')
+					b.WriteString(s)
+				}
+			}
+			b.WriteByte('\n')
+		}
+		for _, line := range wf.Logs {
+			b.WriteString("workflow log ")
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+		// The run's input and return value are where a workflow's conclusions
+		// live; without them a run is only searchable by its label.
+		if wf.Args != "" {
+			b.WriteString("workflow args ")
+			b.WriteString(wf.Args)
+			b.WriteByte('\n')
+		}
+		if wf.Result != "" {
+			b.WriteString("workflow result ")
+			b.WriteString(wf.Result)
+			b.WriteByte('\n')
+		}
 	}
 	for _, art := range sess.Artifacts {
 		if art.URL == "" {
