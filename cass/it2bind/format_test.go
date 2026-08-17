@@ -3,6 +3,7 @@ package it2bind
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestFormatFixtures runs the shared conformance corpus in
@@ -66,6 +67,14 @@ func TestFormatFixtures(t *testing.T) {
 			}
 			if got := events[0].SessionID; got != tt.wantHarn {
 				t.Errorf("SessionID = %q, want %q", got, tt.wantHarn)
+			}
+			// The writer stamps _it2.ts with milliseconds. Assert it is read,
+			// because a reader that misses it does not fail — it substitutes
+			// something plausible, and the substitution is invisible.
+			if got := events[0].Ts(); got == "" {
+				t.Error("Ts() is empty: _it2.ts was not read")
+			} else if _, err := time.Parse("2006-01-02T15:04:05.000Z", got); err != nil {
+				t.Errorf("Ts() = %q does not parse as the writer's layout: %v", got, err)
 			}
 		})
 	}

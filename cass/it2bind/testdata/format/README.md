@@ -39,6 +39,27 @@ corrupt line — so a reader that reports only "no bindings" cannot tell a
 redeploy from a data-repair job. See `cchooks store` in this repo for a
 diagnostic that separates them.
 
+## Normative field names
+
+These names are the format. They are listed because the drift they prevent is
+not hypothetical: on 2026-08-17 `it2`'s `internal/agentbind` read
+`_it2.session_id` and `_it2.timestamp` while the writer emitted `it2_sid` and
+`ts`, so its `At` silently fell back to file mtime — "when this file was last
+touched" substituted for "when this binding happened."
+
+    session_id        string  required, top level
+    transcript_path   string  optional, top level
+    cwd               string  optional, top level
+    hook_event_name   string  optional, top level
+    _it2.it2_sid      string  required
+    _it2.ts           string  required, "2006-01-02T15:04:05.000Z"
+    _it2.boot_id      string  optional
+
+`_it2.ts` carries **milliseconds**. A reader parsing a layout without them
+rejects every real record and falls back to whatever its error path does. The
+fixtures here stamp milliseconds for exactly this reason: a corpus whose values
+do not match what the writer emits cannot police the drift it exists to catch.
+
 ## Field notes
 
 - `session_id` is the agent's own session id (the transcript filename stem).
