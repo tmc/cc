@@ -961,6 +961,13 @@ type workflowListEntry struct {
 	CompletedAt       int64                `json:"completed_at,omitempty"`
 	Phases            []cass.WorkflowPhase `json:"phases,omitempty"`
 	Agents            []cass.WorkflowAgent `json:"agents,omitempty"`
+	Model             string               `json:"model,omitempty"`
+	DurationMs        int64                `json:"duration_ms,omitempty"`
+	TotalTokens       int                  `json:"total_tokens,omitempty"`
+	TotalToolCalls    int                  `json:"total_tool_calls,omitempty"`
+	Logs              []string             `json:"logs,omitempty"`
+	Args              string               `json:"args,omitempty"`
+	Result            string               `json:"result,omitempty"`
 }
 
 func workflowEntryFromRow(r store.WorkflowRow) workflowListEntry {
@@ -979,12 +986,21 @@ func workflowEntryFromRow(r store.WorkflowRow) workflowListEntry {
 		JournalEventCount: r.JournalEventCount,
 		StartedAt:         positiveUnix(r.StartedAt),
 		CompletedAt:       positiveUnix(r.CompletedAt),
+		Model:             r.Model,
+		DurationMs:        r.DurationMs,
+		TotalTokens:       r.TotalTokens,
+		TotalToolCalls:    r.TotalToolCalls,
+		Args:              r.Args,
+		Result:            r.Result,
 	}
 	if r.PhasesJSON != "" && r.PhasesJSON != "[]" {
 		_ = json.Unmarshal([]byte(r.PhasesJSON), &e.Phases)
 	}
 	if r.AgentsJSON != "" && r.AgentsJSON != "[]" {
 		_ = json.Unmarshal([]byte(r.AgentsJSON), &e.Agents)
+	}
+	if r.LogsJSON != "" && r.LogsJSON != "[]" {
+		_ = json.Unmarshal([]byte(r.LogsJSON), &e.Logs)
 	}
 	return e
 }
@@ -1057,6 +1073,12 @@ func runWorkflows(ctx context.Context, svc *service.Service, args []string, json
 		meta := fmt.Sprintf("%d phases  %d agents", len(w.Phases), agentCount)
 		if w.JournalEventCount > 0 {
 			meta += fmt.Sprintf("  %d events", w.JournalEventCount)
+		}
+		if w.TotalTokens > 0 {
+			meta += fmt.Sprintf("  %s tok", formatTokens(w.TotalTokens))
+		}
+		if w.DurationMs > 0 {
+			meta += "  " + (time.Duration(w.DurationMs) * time.Millisecond).Round(time.Second).String()
 		}
 		fmt.Printf("%s  %-8s  %-12s  %-28s  %s\n",
 			started, short(w.ParentSessionID), statusOrDash(w.Status), trimText(name, 28), meta)
