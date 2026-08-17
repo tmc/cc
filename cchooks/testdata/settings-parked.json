@@ -1,0 +1,47 @@
+{
+  "model": "opusplan",
+  "permissions": {
+    "allow": ["Bash(git status:*)"]
+  },
+  "enabledPlugins": {
+    "memory@mem-network": true,
+    "lsp-only@mem-network": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/nonexistent-cchooks-testdata/block-fs-wide-scan.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "xhooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p ~/.it2/sessions/$(it2 session current) && jq -r . >> ~/.it2/sessions/$(it2 session current)/claude-code-hook-events.jsonl"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p ~/.it2/sessions/$(it2 session current) && jq -r . >> ~/.it2/sessions/$(it2 session current)/claude-code-hook-events.jsonl"
+          }
+        ]
+      }
+    ]
+  }
+}
