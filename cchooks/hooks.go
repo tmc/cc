@@ -157,7 +157,7 @@ func Diagnose(handlers []Handler) []Diagnostic {
 			add(CodeShellSubst, "error", "command substitution in a handler: a resolution failure becomes an empty path segment")
 		}
 		if isPerEvent(h.Event) && mentionsSlowCommand(h.Command) {
-			add(CodeSlowShell, "warn", "shells out to a terminal command on a per-event hook; resolve identity once at session start")
+			add(CodeSlowShell, "warn", "shells out to a terminal command on a per-event hook; resolve identity once per session and reuse it, but re-resolve on every SessionStart including resume: a value cached across a resume into a different pane misattributes every later event")
 		}
 		if h.Timeout == 0 && !h.Async {
 			add(CodeNoTimeout, "info", "no timeout set; the agent's default applies")
