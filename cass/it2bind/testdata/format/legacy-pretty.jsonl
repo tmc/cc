@@ -1,0 +1,14 @@
+{
+  "session_id": "00000001-1200-4000-8000-000000000001",
+  "transcript_path": "/Users/u/.claude/projects/-src/00000001-1200-4000-8000-000000000001.jsonl",
+  "cwd": "/src",
+  "hook_event_name": "SessionStart",
+  "source": "startup"
+}
+{
+  "session_id": "00000001-1200-4000-8000-000000000001",
+  "transcript_path": "/Users/u/.claude/projects/-src/00000001-1200-4000-8000-000000000001.jsonl",
+  "cwd": "/src",
+  "hook_event_name": "Stop",
+  "stop_hook_active": false
+}

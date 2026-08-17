@@ -1,6 +1,9 @@
 package it2bind
 
 import (
+	"encoding/json"
+	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -48,6 +51,12 @@ func TestFormatFixtures(t *testing.T) {
 		// A blank line and a truncated one. Skipped without failing the file:
 		// one torn record must not discard the good records around it.
 		{file: "malformed.ndjson", want: 0},
+
+		// The older store, which is not this format: pretty-printed payloads
+		// under a .jsonl name, so no single line is a record. A line reader
+		// recovers nothing, and must say so rather than list the path and
+		// return "no stream" — see testdata/format/README.md.
+		{file: "legacy-pretty.jsonl", want: 0},
 	}
 
 	for _, tt := range tests {
@@ -77,6 +86,49 @@ func TestFormatFixtures(t *testing.T) {
 				t.Errorf("Ts() = %q does not parse as the writer's layout: %v", got, err)
 			}
 		})
+	}
+}
+
+// TestLegacyStoreIsHiddenByFraming is the discrimination control for the
+// legacy-pretty.jsonl case above. "Zero records" is a claim two very different
+// files satisfy — an empty one, and a full one whose framing a line reader
+// cannot see. Asserting only the zero would pass either way, so this asserts
+// the other half: the records are really in there, and only the framing hides
+// them. Without this, a reader could be pointed at an empty file and the
+// corpus would call it conformant.
+func TestLegacyStoreIsHiddenByFraming(t *testing.T) {
+	f, err := os.Open(filepath.Join("testdata", "format", "legacy-pretty.jsonl"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+
+	// A streaming decoder reads concatenated JSON values, which is what the
+	// old writer produced when it pretty-printed each payload.
+	dec := json.NewDecoder(f)
+	var got []struct {
+		SessionID string `json:"session_id"`
+	}
+	for {
+		var rec struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := dec.Decode(&rec); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		got = append(got, rec)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("concatenated decode = %d records, want 2: the fixture must hold real data, or the zero above proves nothing", len(got))
+	}
+	const want = "00000001-1200-4000-8000-000000000001"
+	for i, rec := range got {
+		if rec.SessionID != want {
+			t.Errorf("record %d session_id = %q, want %q", i, rec.SessionID, want)
+		}
 	}
 }
 
