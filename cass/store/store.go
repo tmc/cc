@@ -736,6 +736,24 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 	return nil
 }
 
+const (
+	defaultSnippetTokens = 40
+	maxSnippetTokens     = 64 // FTS5 documents nToken as 1..64
+	snippetPreviewBytes  = 5  // browse-mode preview characters per token
+)
+
+// snippetTokens clamps a requested snippet width to the range FTS5 documents.
+// Zero and negative values yield the store default.
+func snippetTokens(n int) int {
+	switch {
+	case n <= 0:
+		return defaultSnippetTokens
+	case n > maxSnippetTokens:
+		return maxSnippetTokens
+	}
+	return n
+}
+
 // Search executes a full-text query and returns matching results.
 func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchResult, error) {
 	if req.Limit <= 0 {
@@ -827,10 +845,15 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		statsCols = ", s." + strings.ReplaceAll(hitSummaryCols, ", ", ", s.")
 		apiRequestCountCol = "0"
 	}
+	tokens := snippetTokens(req.SnippetTokens)
+	var snipArg any = tokens
+	if req.Query == "" {
+		snipArg = tokens * snippetPreviewBytes
+	}
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
-			SELECT s.id, s.agent, s.title, snippet(session_fts, 1, '>>>', '<<<', '...', 40) as snip,
+			SELECT s.id, s.agent, s.title, snippet(session_fts, 1, '>>>', '<<<', '...', ?) as snip,
 				bm25(session_fts, 5.0, 1.0, 2.0) as score, s.workspace, s.source_path, s.started_at,
 				%s AS api_request_count%s
 			FROM session_fts
@@ -841,7 +864,7 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		`, apiRequestCountCol, statsCols, whereClause, orderClause)
 	} else {
 		query = fmt.Sprintf(`
-			SELECT s.id, s.agent, s.title, substr(s.content, 1, 200) as snip,
+			SELECT s.id, s.agent, s.title, substr(s.content, 1, ?) as snip,
 				0.0 as score, s.workspace, s.source_path, s.started_at,
 				%s AS api_request_count%s
 			FROM sessions s
@@ -854,9 +877,10 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 	if req.SkipCount {
 		queryLimit++
 	}
-	args = append(args, queryLimit, req.Offset)
+	rowArgs := append([]any{snipArg}, args...)
+	rowArgs = append(rowArgs, queryLimit, req.Offset)
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, query, rowArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
@@ -891,7 +915,7 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 	if !req.SkipCount {
 		// Count total matches.
 		var countQuery string
-		countArgs := args[:len(args)-2] // strip LIMIT/OFFSET
+		countArgs := args
 		if req.Query != "" {
 			countQuery = fmt.Sprintf(`
 				SELECT count(*) FROM session_fts
@@ -1366,9 +1390,9 @@ func (s *DB) BackfillArtifactEvents(ctx context.Context, sessionID string, artif
 
 // Session returns indexed metadata for a single session.
 func (s *DB) Session(ctx context.Context, id string) (cass.Hit, error) {
-	query := `SELECT s.id, s.agent, s.title, substr(s.content, 1, 200) as snip, 0.0 as score, s.workspace, s.source_path, s.started_at, ` +
+	query := `SELECT s.id, s.agent, s.title, substr(s.content, 1, ?) as snip, 0.0 as score, s.workspace, s.source_path, s.started_at, ` +
 		hitAPIRequestCountCol + ` AS api_request_count, s.` + strings.ReplaceAll(hitStatsCols, ", ", ", s.") + ` FROM sessions s WHERE s.id = ?`
-	hit, err := scanHit(s.db.QueryRowContext(ctx, query, id))
+	hit, err := scanHit(s.db.QueryRowContext(ctx, query, defaultSnippetTokens*snippetPreviewBytes, id))
 	if err != nil {
 		return cass.Hit{}, err
 	}
@@ -3074,6 +3098,33 @@ func (s *DB) TeamMembers(ctx context.Context, teamName string) ([]TeamMember, er
 	return out, rows.Err()
 }
 
+// buildIdentity returns the project-identity lines of the FTS blob:
+// workspace, source path, git common dir and branch. These trail the blob so
+// that browse-mode previews, which read the first bytes of the content column,
+// show conversation text instead of path boilerplate. FTS matching is
+// position-independent.
+//
+// The FTS5 unicode61 tokenizer splits on '/' and '-', so a raw path also
+// yields its basename as a token; no basename is emitted separately.
+func buildIdentity(sess cass.Session) string {
+	var b strings.Builder
+	for _, f := range []struct{ label, value string }{
+		{"workspace", sess.Workspace},
+		{"source", sess.SourcePath},
+		{"git", sess.GitCommonDir},
+		{"branch", sess.Branch},
+	} {
+		if f.value == "" {
+			continue
+		}
+		b.WriteString(f.label)
+		b.WriteByte(' ')
+		b.WriteString(f.value)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // buildContent concatenates all message content for full-text indexing.
 func buildContent(sess cass.Session) string {
 	var b strings.Builder
@@ -3198,6 +3249,7 @@ func buildContent(sess cass.Session) string {
 		b.WriteString(msg.Content)
 		b.WriteByte('\n')
 	}
+	b.WriteString(buildIdentity(sess))
 	return b.String()
 }
 

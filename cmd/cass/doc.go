@@ -31,6 +31,17 @@
 //	-json       Emit machine-readable JSON instead of text.
 //	-v          Verbose logging.
 //
+// # Search flags
+//
+// These apply to both search and resume:
+//
+//	-snippet N  Tokens of surrounding text in each match snippet, 0 to 64
+//	            (default 40). FTS5 documents 64 tokens as the maximum and
+//	            returns one snippet per row, so that is the ceiling. 0
+//	            omits the snippet line.
+//	-render     Open the top hit's transcript in ccrender, positioned at
+//	            the first match of the query.
+//
 // # Examples
 //
 // Detect agents and index their sessions:
@@ -43,6 +54,8 @@
 //
 //	cass search "retry policy"
 //	cass search --git-common-dir /path/to/repo "retry policy"
+//	cass search -snippet 64 "retry policy"
+//	cass search -render "retry policy"
 //
 // List subagent runs for a session:
 //

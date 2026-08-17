@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1632,5 +1633,208 @@ func TestBackfillArtifactEventsDoesNotRewriteSession(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("artifact events after backfill = %d, want 1", count)
+	}
+}
+
+func TestBuildContentIncludesProjectIdentity(t *testing.T) {
+	sess := cass.Session{
+		ID:           "s1",
+		Workspace:    "/Volumes/example/go/src/github.com/tmc/misc/fixture-project",
+		SourcePath:   "/Users/example/.claude/projects/-Volumes-example-go-src-github-com-tmc-cc/abc.jsonl",
+		GitCommonDir: "/Volumes/example/go/src/github.com/tmc/cc/.git",
+		Branch:       "ccresume-sendtext",
+		Messages:     []cass.Message{{Role: "user", Content: "hello"}},
+	}
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"workspace path", sess.Workspace},
+		{"workspace basename", "fixture-project"},
+		{"source path", sess.SourcePath},
+		{"git common dir", sess.GitCommonDir},
+		{"branch", sess.Branch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildContent(sess); !strings.Contains(got, tt.want) {
+				t.Errorf("buildContent() missing %q", tt.want)
+			}
+			if got := buildContentCapped(sess, 0); !strings.Contains(got, tt.want) {
+				t.Errorf("buildContentCapped() missing %q", tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildContentCappedKeepsIdentityWhenTruncating(t *testing.T) {
+	sess := cass.Session{
+		ID:        "s1",
+		Workspace: "/Volumes/example/go/src/github.com/tmc/misc/fixture-project",
+		Messages:  []cass.Message{{Role: "user", Content: strings.Repeat("x", 4096)}},
+	}
+	got := buildContentCapped(sess, 512)
+	if len(got) > 512 {
+		t.Fatalf("len = %d, want <= 512", len(got))
+	}
+	if !strings.Contains(got, "fixture-project") {
+		t.Errorf("capped content missing workspace basename: %q", got)
+	}
+}
+
+func TestBuildContentIdentityTrailsPreview(t *testing.T) {
+	sess := cass.Session{
+		ID:           "s1",
+		Workspace:    "/Volumes/example/go/src/github.com/tmc/misc/fixture-project",
+		SourcePath:   "/Users/example/.claude/projects/-Volumes-example-go-src-github-com-tmc-cc/abc.jsonl",
+		GitCommonDir: "/Volumes/example/go/src/github.com/tmc/cc/.git",
+		Branch:       "ccresume-sendtext",
+		Messages:     []cass.Message{{Role: "user", Content: strings.Repeat("the quick brown fox. ", 40)}},
+	}
+	builders := []struct {
+		name string
+		got  string
+	}{
+		{"buildContent", buildContent(sess)},
+		{"buildContentCapped", buildContentCapped(sess, 4096)},
+	}
+	for _, b := range builders {
+		t.Run(b.name, func(t *testing.T) {
+			preview := b.got[:200]
+			for _, boilerplate := range []string{"workspace ", "source ", "git ", "branch "} {
+				if strings.Contains(preview, boilerplate) {
+					t.Errorf("preview contains identity %q: %q", boilerplate, preview)
+				}
+			}
+			if !strings.HasSuffix(b.got, "branch ccresume-sendtext\n") {
+				t.Errorf("identity is not at the tail: %q", b.got[len(b.got)-64:])
+			}
+		})
+	}
+}
+
+func TestBuildContentCappedIdentityLargerThanCap(t *testing.T) {
+	sess := cass.Session{
+		ID:        "s1",
+		Workspace: "/Volumes/example/go/src/github.com/tmc/misc/fixture-project",
+		Messages:  []cass.Message{{Role: "user", Content: "hello"}},
+	}
+	id := buildIdentity(sess)
+	for _, maxBytes := range []int{8, len(id) - 1, len(id)} {
+		got := buildContentCapped(sess, maxBytes)
+		if len(got) != maxBytes {
+			t.Errorf("buildContentCapped(_, %d) len = %d, want %d", maxBytes, len(got), maxBytes)
+		}
+		if got != id[:maxBytes] {
+			t.Errorf("buildContentCapped(_, %d) = %q, want identity prefix", maxBytes, got)
+		}
+	}
+}
+
+func TestSnippetTokens(t *testing.T) {
+	tests := []struct {
+		name string
+		in   int
+		want int
+	}{
+		{"zero is default", 0, defaultSnippetTokens},
+		{"negative is default", -5, defaultSnippetTokens},
+		{"in range", 12, 12},
+		{"at max", maxSnippetTokens, maxSnippetTokens},
+		{"above max clamps", 1000, maxSnippetTokens},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := snippetTokens(tt.in); got != tt.want {
+				t.Errorf("snippetTokens(%d) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchSnippetTokensWidensSnippet(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess := cass.Session{
+		ID:        "s1",
+		Agent:     "claude-code",
+		StartedAt: time.Now(),
+		EndedAt:   time.Now(),
+		Messages: []cass.Message{{
+			Role:    "user",
+			Content: strings.Repeat("alpha beta gamma delta ", 20) + "needle " + strings.Repeat("epsilon zeta eta theta ", 20),
+		}},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+	narrow, err := s.Search(ctx, cass.SearchRequest{Query: "needle", Limit: 10, SnippetTokens: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wide, err := s.Search(ctx, cass.SearchRequest{Query: "needle", Limit: 10, SnippetTokens: 64})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(narrow.Hits) != 1 || len(wide.Hits) != 1 {
+		t.Fatalf("hits = %d, %d, want 1 each", len(narrow.Hits), len(wide.Hits))
+	}
+	if len(wide.Hits[0].Snippet) <= len(narrow.Hits[0].Snippet) {
+		t.Errorf("wide snippet %d bytes, narrow %d, want wider", len(wide.Hits[0].Snippet), len(narrow.Hits[0].Snippet))
+	}
+}
+
+func TestSearchBrowsePreviewSkipsIdentity(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess := cass.Session{
+		ID:         "s1",
+		Agent:      "claude-code",
+		Workspace:  "/Volumes/example/go/src/github.com/tmc/misc/fixture-project",
+		SourcePath: "/Users/example/.claude/projects/-Volumes-example-go-src-github-com-tmc-cc/abc.jsonl",
+		StartedAt:  time.Now(),
+		EndedAt:    time.Now(),
+		Messages:   []cass.Message{{Role: "user", Content: strings.Repeat("the quick brown fox. ", 40)}},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.Search(ctx, cass.SearchRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("hits = %d, want 1", len(result.Hits))
+	}
+	snip := result.Hits[0].Snippet
+	if strings.Contains(snip, "workspace ") || strings.Contains(snip, "source ") {
+		t.Errorf("browse preview shows identity boilerplate: %q", snip)
+	}
+	if !strings.HasPrefix(snip, "the quick brown fox.") {
+		t.Errorf("browse preview = %q, want session text", snip)
+	}
+}
+
+func TestSearchFindsSessionByWorkspaceBasename(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	sess := cass.Session{
+		ID:        "s1",
+		Agent:     "claude-code",
+		Title:     "unrelated title",
+		Workspace: "/Volumes/example/go/src/github.com/tmc/misc/fixture-project",
+		StartedAt: time.Now(),
+		EndedAt:   time.Now(),
+		Messages:  []cass.Message{{Role: "user", Content: "hello"}},
+	}
+	if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.Search(ctx, cass.SearchRequest{Query: "fixture-project", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 1 || result.Hits[0].SessionID != "s1" {
+		t.Fatalf("Search(fixture-project) hits = %+v, want session s1", result.Hits)
 	}
 }

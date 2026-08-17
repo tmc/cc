@@ -416,3 +416,94 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 	}
 	return string(read.b), read.err
 }
+
+func TestBuildSearchRequestSnippet(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    int
+		opts    searchOptions
+		wantErr bool
+	}{
+		{name: "default", args: []string{"retry"}, want: 40, opts: searchOptions{snippet: 40}},
+		{name: "narrow", args: []string{"-snippet", "8", "retry"}, want: 8, opts: searchOptions{snippet: 8}},
+		{name: "max", args: []string{"-snippet", "64", "retry"}, want: 64, opts: searchOptions{snippet: 64}},
+		{name: "zero", args: []string{"-snippet", "0", "retry"}, want: 0, opts: searchOptions{snippet: 0}},
+		{name: "render", args: []string{"-render", "retry"}, want: 40, opts: searchOptions{snippet: 40, render: true}},
+		{name: "too wide", args: []string{"-snippet", "65", "retry"}, wantErr: true},
+		{name: "negative", args: []string{"-snippet", "-1", "retry"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, opts, err := buildSearchRequest(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("buildSearchRequest(%q) = nil error, want error", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("buildSearchRequest(%q): %v", tt.args, err)
+			}
+			if req.SnippetTokens != tt.want {
+				t.Errorf("SnippetTokens = %d, want %d", req.SnippetTokens, tt.want)
+			}
+			if opts != tt.opts {
+				t.Errorf("opts = %+v, want %+v", opts, tt.opts)
+			}
+			if req.Query != "retry" {
+				t.Errorf("Query = %q, want %q", req.Query, "retry")
+			}
+		})
+	}
+}
+
+func TestSearchPattern(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"", ""},
+		{"retry", "retry"},
+		{"retry policy", "retry|policy"},
+		{"  retry   policy  ", "retry|policy"},
+	}
+	for _, tt := range tests {
+		if got := searchPattern(tt.in); got != tt.want {
+			t.Errorf("searchPattern(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestFormatSnippet(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "no markers", in: "plain text here", want: "plain text here"},
+		{name: "one pair", in: "a >>>hit<<< b", want: "a hit b"},
+		{name: "several pairs", in: ">>>a<<< b >>>c<<<", want: "a b c"},
+		{name: "unterminated", in: "a >>>b c", want: "a b c"},
+		{name: "punctuation", in: "(>>>hit<<<)", want: "(hit)"},
+		{name: "newlines fold out", in: "a\nb\tc", want: "a b c"},
+		{name: "multibyte", in: "café → 日本語 🎉", want: "café → 日本語 🎉"},
+		{name: "multibyte match", in: "a >>>café<<< b", want: "a café b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatSnippet(tt.in, 100, 4); got != tt.want {
+				t.Errorf("formatSnippet(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatSnippetWraps(t *testing.T) {
+	got := formatSnippet("aaa bbb ccc ddd", 20, 4)
+	want := "aaa bbb ccc ddd"
+	if got != want {
+		t.Fatalf("formatSnippet = %q, want %q", got, want)
+	}
+	got = formatSnippet(strings.Repeat("word ", 8), 20, 4)
+	if !strings.Contains(got, "\n    ") {
+		t.Fatalf("formatSnippet did not fold with indent: %q", got)
+	}
+}

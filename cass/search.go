@@ -59,6 +59,11 @@ type SearchRequest struct {
 	// SkipCount avoids the exact total-count query. SearchResult.TotalCount is
 	// then the visible lower bound unless TotalCountExact is true.
 	SkipCount bool
+
+	// SnippetTokens sets how many tokens of surrounding text Hit.Snippet
+	// carries. Zero means the store default. FTS5 documents 64 tokens as the
+	// maximum and returns one snippet per row, so larger values are clamped.
+	SnippetTokens int
 }
 
 // Filters constrains search results.

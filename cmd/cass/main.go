@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -362,7 +363,15 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	return nil
 }
 
-func buildSearchRequest(args []string) (cass.SearchRequest, error) {
+// searchOptions holds the search flags that shape output rather than the
+// query. snippet is the requested snippet width in tokens; zero suppresses
+// the snippet line entirely and never reaches SQL.
+type searchOptions struct {
+	snippet int
+	render  bool
+}
+
+func buildSearchRequest(args []string) (cass.SearchRequest, searchOptions, error) {
 	fs := flag.NewFlagSet("search", flag.ExitOnError)
 	agent := fs.String("agent", "", "filter by agent slug")
 	workspace := fs.String("workspace", "", "filter by workspace path or project name")
@@ -376,6 +385,8 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 	before := fs.String("before", "", "sessions before date (RFC3339 or YYYY-MM-DD)")
 	sort := fs.String("sort", "", "sort order: recent, relevance, started, oldest")
 	limit := fs.Int("n", 20, "max results")
+	snippet := fs.Int("snippet", 40, "tokens of surrounding text in the match snippet (0-64, 0 disables)")
+	render := fs.Bool("render", false, "open the top hit's transcript in ccrender")
 	fs.Parse(args)
 
 	query := strings.Join(fs.Args(), " ")
@@ -393,10 +404,18 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 		}
 	}
 
+	opts := searchOptions{snippet: *snippet, render: *render}
+	if opts.snippet < 0 || opts.snippet > 64 {
+		return cass.SearchRequest{}, opts, fmt.Errorf("bad -snippet: %d not in 0..64", opts.snippet)
+	}
+
 	req := cass.SearchRequest{
 		Query: query,
 		Sort:  cass.SortMode(*sort),
 		Limit: *limit,
+		// Zero means "no snippet line", a display choice; the store keeps
+		// its default width so browse-mode previews stay unchanged.
+		SnippetTokens: opts.snippet,
 		Filters: cass.Filters{
 			Agent:             *agent,
 			Workspace:         ws,
@@ -413,18 +432,18 @@ func buildSearchRequest(args []string) (cass.SearchRequest, error) {
 	if *after != "" {
 		t, err := parseTime(*after)
 		if err != nil {
-			return req, fmt.Errorf("bad -after: %w", err)
+			return req, opts, fmt.Errorf("bad -after: %w", err)
 		}
 		req.Filters.After = t
 	}
 	if *before != "" {
 		t, err := parseTime(*before)
 		if err != nil {
-			return req, fmt.Errorf("bad -before: %w", err)
+			return req, opts, fmt.Errorf("bad -before: %w", err)
 		}
 		req.Filters.Before = t
 	}
-	return req, nil
+	return req, opts, nil
 }
 
 func runSearch(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
@@ -439,7 +458,7 @@ func runSearch(ctx context.Context, svc *service.Service, args []string, jsonOut
 		}
 	}
 
-	req, err := buildSearchRequest(filtered)
+	req, opts, err := buildSearchRequest(filtered)
 	if err != nil {
 		return err
 	}
@@ -463,15 +482,50 @@ func runSearch(ctx context.Context, svc *service.Service, args []string, jsonOut
 	}
 
 	for i, h := range result.Hits {
-		printHit(i+1, h)
+		printHit(i+1, h, opts.snippet > 0)
 	}
 	fmt.Println(countStyle.Render(fmt.Sprintf("(%d results)", result.TotalCount)))
+	if opts.render {
+		return renderHit(result.Hits[0], req.Query)
+	}
 	return nil
+}
+
+// renderHit opens a hit's transcript in ccrender, positioned at the first
+// match of the query. Transcript rendering belongs to ccrender: the FTS blob
+// has no roles, timestamps, or turn boundaries, and the pager already walks
+// every occurrence.
+func renderHit(h cass.Hit, query string) error {
+	target := h.SourcePath
+	if target == "" {
+		target = h.SessionID
+	}
+	if target == "" {
+		return fmt.Errorf("no session to render")
+	}
+	args := []string{}
+	if pat := searchPattern(query); pat != "" {
+		args = append(args, "-search", pat)
+	}
+	args = append(args, target)
+	cmd := exec.Command("ccrender", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("ccrender: %w", err)
+	}
+	return nil
+}
+
+// searchPattern turns a query into a less pattern matching any of its terms.
+func searchPattern(query string) string {
+	return strings.Join(strings.Fields(query), "|")
 }
 
 // runResume searches sessions and lets the user pick one to resume interactively.
 func runResume(ctx context.Context, svc *service.Service, args []string) error {
-	req, err := buildSearchRequest(args)
+	req, opts, err := buildSearchRequest(args)
 	if err != nil {
 		return err
 	}
@@ -491,7 +545,7 @@ func runResume(ctx context.Context, svc *service.Service, args []string) error {
 
 	// Display numbered results.
 	for i, h := range result.Hits {
-		printHit(i+1, h)
+		printHit(i+1, h, opts.snippet > 0)
 	}
 	fmt.Println(countStyle.Render(fmt.Sprintf("(%d results)", result.TotalCount)))
 	fmt.Println()
@@ -525,7 +579,7 @@ func runResume(ctx context.Context, svc *service.Service, args []string) error {
 	return nil
 }
 
-func printHit(num int, h cass.Hit) {
+func printHit(num int, h cass.Hit, snippet bool) {
 	project := shortProject(h.Workspace)
 	when := relativeTime(h.StartedAt)
 
@@ -538,8 +592,8 @@ func printHit(num int, h cass.Hit) {
 	fmt.Println()
 
 	// Line 2: snippet.
-	if h.Snippet != "" {
-		fmt.Printf("    %s\n", formatSnippet(h.Snippet))
+	if snippet && h.Snippet != "" {
+		fmt.Printf("    %s\n", formatSnippet(h.Snippet, termWidth()-4, 4))
 	}
 	if len(h.Goals) > 0 {
 		goal := h.Goals[len(h.Goals)-1]

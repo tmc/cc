@@ -242,24 +242,30 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 	}
 
 	statsCols := `, s.ended_at, s.tool_calls, s.turns, s.input_tokens, s.output_tokens, s.files_edited, s.lines_written, s.duration_secs, s.sparkline, s.it2_sends, s.it2_screens, s.it2_splits, s.stats_json, s.team_name, s.agent_name, s.is_team_lead, s.git_common_dir, s.branch, s.goals_json, s.goal_count, s.active_goal_count, s.completed_goal_count, s.skills_json, s.skill_count, s.selected_skill_count, s.loaded_skill_count`
+	tokens := snippetTokens(req.SnippetTokens)
+	var snipArg any = tokens
+	if req.Query == "" {
+		snipArg = tokens * snippetPreviewBytes
+	}
 	var query string
 	if req.Query != "" {
 		query = fmt.Sprintf(`
-			SELECT s.id, s.agent, s.title, snippet(session_fts, 1, '>>>', '<<<', '...', 40) as snip,
+			SELECT s.id, s.agent, s.title, snippet(session_fts, 1, '>>>', '<<<', '...', ?) as snip,
 				bm25(session_fts, 5.0, 1.0, 2.0) as score, s.workspace, s.source_path, s.started_at%s
 			FROM session_fts
 			JOIN sessions s ON s.rowid = session_fts.rowid
 			%s %s LIMIT ? OFFSET ?`, statsCols, whereClause, orderClause)
 	} else {
 		query = fmt.Sprintf(`
-			SELECT s.id, s.agent, s.title, substr(s.content, 1, 200) as snip,
+			SELECT s.id, s.agent, s.title, substr(s.content, 1, ?) as snip,
 				0.0 as score, s.workspace, s.source_path, s.started_at%s
 			FROM sessions s
 			%s %s LIMIT ? OFFSET ?`, statsCols, whereClause, orderClause)
 	}
-	args = append(args, req.Limit, req.Offset)
+	rowArgs := append([]any{snipArg}, args...)
+	rowArgs = append(rowArgs, req.Limit, req.Offset)
 
-	rows, err := b.db.QueryContext(ctx, query, args...)
+	rows, err := b.db.QueryContext(ctx, query, rowArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
@@ -304,7 +310,7 @@ func (b *sqliteBackend) Search(ctx context.Context, req cass.SearchRequest) (*ca
 		return nil, fmt.Errorf("rows: %w", err)
 	}
 
-	countArgs := args[:len(args)-2]
+	countArgs := args
 	var countQuery string
 	if req.Query != "" {
 		countQuery = fmt.Sprintf(`SELECT count(*) FROM session_fts JOIN sessions s ON s.rowid = session_fts.rowid %s`, whereClause)
@@ -354,9 +360,34 @@ func (b *sqliteBackend) BackendStats(ctx context.Context) (Stats, error) {
 }
 
 // buildContentCapped concatenates message content for FTS indexing.
-// When maxBytes is 0 the full content is indexed (no cap).
+// When maxBytes is 0 the full content is indexed (no cap). The identity block
+// is reserved from the cap and appended last so it survives truncation.
 func buildContentCapped(sess cass.Session, maxBytes int) string {
+	id := buildIdentity(sess)
+	if maxBytes > 0 && len(id) >= maxBytes {
+		return id[:maxBytes]
+	}
+	limit := maxBytes
+	if maxBytes > 0 {
+		limit -= len(id)
+	}
 	var b strings.Builder
+	write := func(s string) bool {
+		if limit > 0 {
+			remaining := limit - b.Len()
+			if remaining <= 0 {
+				return false
+			}
+			if len(s) > remaining {
+				b.WriteString(s[:remaining])
+				return false
+			}
+		}
+		b.WriteString(s)
+		return true
+	}
+	full := false
+goals:
 	for _, goal := range sess.Goals {
 		if goal.Objective == "" {
 			continue
@@ -365,12 +396,10 @@ func buildContentCapped(sess cass.Session, maxBytes int) string {
 		if status := cass.GoalEffectiveStatus(goal); status != "" {
 			line += status + " "
 		}
-		line += goal.Objective + "\n"
-		if maxBytes > 0 && b.Len()+len(line) > maxBytes {
-			b.WriteString(line[:maxBytes-b.Len()])
-			return b.String()
+		if !write(line + goal.Objective + "\n") {
+			full = true
+			break goals
 		}
-		b.WriteString(line)
 		for _, gate := range goal.CompletionGates {
 			if gate.Name == "" {
 				continue
@@ -379,31 +408,23 @@ func buildContentCapped(sess cass.Session, maxBytes int) string {
 			if gate.Status != "" {
 				line += gate.Status + " "
 			}
-			line += gate.Name + "\n"
-			if maxBytes > 0 && b.Len()+len(line) > maxBytes {
-				b.WriteString(line[:maxBytes-b.Len()])
-				return b.String()
+			if !write(line + gate.Name + "\n") {
+				full = true
+				break goals
 			}
-			b.WriteString(line)
 		}
 	}
-	for _, msg := range sess.Messages {
-		if msg.Content == "" {
-			continue
-		}
-		if maxBytes > 0 {
-			remaining := maxBytes - b.Len()
-			if remaining <= 0 {
-				break
+	if !full {
+		for _, msg := range sess.Messages {
+			if msg.Content == "" {
+				continue
 			}
-			if len(msg.Content) > remaining {
-				b.WriteString(msg.Content[:remaining])
+			if !write(msg.Content + "\n") {
 				break
 			}
 		}
-		b.WriteString(msg.Content)
-		b.WriteByte('\n')
 	}
+	b.WriteString(id)
 	return b.String()
 }
 

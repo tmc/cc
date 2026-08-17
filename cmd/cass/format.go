@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/term"
 )
 
 // Color styles for terminal output.
@@ -49,7 +51,7 @@ func configureColor(force bool) {
 }
 
 // shortProject extracts a short project name from a workspace path.
-// "/Volumes/tmc/go/src/github.com/tmc/cc" -> "tmc/cc"
+// "/Volumes/example/go/src/github.com/tmc/cc" -> "tmc/cc"
 // "/home/user/my-project" -> "my-project"
 func shortProject(workspace string) string {
 	if workspace == "" {
@@ -69,16 +71,95 @@ func shortProject(workspace string) string {
 	return filepath.Join(filepath.Base(filepath.Dir(workspace)), filepath.Base(workspace))
 }
 
-// formatSnippet highlights FTS5 snippet markers (>>> and <<<) with color.
-func formatSnippet(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > 120 {
-		s = s[:120] + "..."
+// termWidth reports the width to wrap to: the terminal's own width, else
+// $COLUMNS, else a terminal-typical 100.
+func termWidth() int {
+	if w, _, err := term.GetSize(os.Stdout.Fd()); err == nil && w > 0 {
+		return w
 	}
-	// Replace FTS5 markers with color escapes.
-	s = strings.ReplaceAll(s, ">>>", highlightStyle.Render(""))
-	s = strings.ReplaceAll(s, "<<<", lipgloss.NewStyle().Render(""))
-	return snippetStyle.Render(s)
+	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
+		return n
+	}
+	return 100
+}
+
+// formatSnippet renders an FTS5 snippet, colorizing the text between the
+// >>> and <<< markers and folding to width columns. Continuation lines are
+// indented by indent spaces to line up under the first.
+func formatSnippet(s string, width, indent int) string {
+	if width < 20 {
+		width = 20
+	}
+	var b strings.Builder
+	col := 0
+	for _, w := range snippetWords(s) {
+		n := len([]rune(w.plain))
+		switch {
+		case col == 0:
+		case col+1+n <= width:
+			b.WriteString(" ")
+			col++
+		default:
+			b.WriteString("\n" + strings.Repeat(" ", indent))
+			col = 0
+		}
+		b.WriteString(w.rendered)
+		col += n
+	}
+	return b.String()
+}
+
+// snippetWord is one whitespace-delimited word of a snippet: plain is its
+// text without markers, rendered is the same text with match spans colored.
+type snippetWord struct {
+	plain    string
+	rendered string
+}
+
+// snippetWords splits s into words, stripping the FTS5 markers and coloring
+// the text they enclosed. An unterminated >>> runs to the end: FTS5 can
+// truncate mid-span at the ellipsis boundary, and the tail still matched.
+func snippetWords(s string) []snippetWord {
+	var words []snippetWord
+	var w snippetWord
+	seg, match := "", false
+	endSeg := func() {
+		if seg == "" {
+			return
+		}
+		if match {
+			w.rendered += highlightStyle.Render(seg)
+		} else {
+			w.rendered += snippetStyle.Render(seg)
+		}
+		w.plain += seg
+		seg = ""
+	}
+	endWord := func() {
+		endSeg()
+		if w.plain != "" {
+			words = append(words, w)
+		}
+		w = snippetWord{}
+	}
+	for i := 0; i < len(s); {
+		switch {
+		case strings.HasPrefix(s[i:], ">>>"):
+			endSeg()
+			match, i = true, i+3
+		case strings.HasPrefix(s[i:], "<<<"):
+			endSeg()
+			match, i = false, i+3
+		case s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r':
+			endWord()
+			i++
+		default:
+			seg += s[i : i+1]
+			i++
+		}
+	}
+	endWord()
+	return words
 }
 
 // durationStyle renders session duration.

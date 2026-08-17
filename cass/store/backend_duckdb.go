@@ -266,7 +266,7 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 
 	query := fmt.Sprintf(`
 		SELECT id, agent, title,
-			CASE WHEN ? != '' THEN substr(content, 1, 300) ELSE substr(content, 1, 200) END as snip,
+			substr(content, 1, ?) as snip,
 			COALESCE(match_bm25(id, ?), 0.0) as score,
 			workspace, source_path, started_at, ended_at,
 			tool_calls, turns, input_tokens, output_tokens,
@@ -278,8 +278,8 @@ func (b *duckBackend) Search(ctx context.Context, req cass.SearchRequest) (*cass
 		%s %s LIMIT ? OFFSET ?`,
 		whereClause, orderClause)
 
-	// Prepend two args for the CASE/COALESCE query parameters.
-	qargs := append([]any{req.Query, req.Query}, args...)
+	// Prepend the snippet width and the COALESCE query parameter.
+	qargs := append([]any{snippetTokens(req.SnippetTokens) * snippetPreviewBytes, req.Query}, args...)
 	qargs = append(qargs, req.Limit, req.Offset)
 
 	rows, err := b.db.QueryContext(ctx, query, qargs...)
