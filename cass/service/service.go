@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -135,30 +136,68 @@ func (s *Service) Detect(ctx context.Context) ([]cass.DetectionResult, error) {
 	return results, nil
 }
 
+// scanSince returns the modified-since floor for an incremental scan given the
+// stored last_indexed_at value. It returns the zero time (full walk) when the
+// cursor is missing, unparseable, or dated in the future, which a clock jump can
+// leave behind and which would otherwise skip every file until the clock catches
+// up. The cursor is only ever written after a walk that completed without error,
+// so an old cursor is trustworthy: it names ground already fully covered.
+func scanSince(meta string, now time.Time) time.Time {
+	unix, err := strconv.ParseInt(meta, 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	since := time.Unix(unix, 0)
+	if now.Before(since) {
+		return time.Time{}
+	}
+	return since
+}
+
 // Index runs all collectors and indexes found sessions.
 // If force is true, it reindexes everything regardless of last scan time.
 // Returns the number of sessions indexed.
+//
+// last_indexed_at advances only when every collector detected, scanned, and
+// indexed without error. A partial walk that stamped the cursor would claim
+// coverage it does not have, and every file it missed with an older mtime would
+// stay invisible to later incremental runs. Index reports such failures to the
+// caller rather than only logging them, alongside the sessions it did index.
 func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (int, error) {
+	// The cursor records when the walk started, not when it ended: a file
+	// written while the walk was already past its directory must still look
+	// newer than the cursor to the next run.
+	start := time.Now()
+
 	var since time.Time
 	if !force {
 		if ts, err := s.store.Meta(ctx, "last_indexed_at"); err == nil && ts != "" {
-			if unix, err := strconv.ParseInt(ts, 10, 64); err == nil {
-				since = time.Unix(unix, 0)
-			}
+			since = scanSince(ts, start)
 		}
 	}
 
 	var (
 		total int
+		errs  []error
 		mu    sync.Mutex
 		write sync.Mutex
 		wg    sync.WaitGroup
 	)
 
+	fail := func(err error) {
+		mu.Lock()
+		errs = append(errs, err)
+		mu.Unlock()
+	}
+
 	for _, c := range s.collectors {
 		var paths []string
 		det, err := c.Detect(ctx)
-		if err == nil && det != nil && det.Found {
+		switch {
+		case err != nil:
+			s.log.Error("detect", "agent", c.Name(), "err", err)
+			fail(fmt.Errorf("detect %s: %w", c.Name(), err))
+		case det != nil && det.Found:
 			paths = append(paths, det.Paths...)
 		}
 
@@ -190,13 +229,16 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 				batch = append(batch, sess)
 				if len(batch) >= 100 {
 					write.Lock()
-					if err := s.store.BatchIndex(ctx, batch); err != nil {
-						s.log.Error("batch index", "agent", col.Name(), "err", err)
-					}
+					err := s.store.BatchIndex(ctx, batch)
 					write.Unlock()
-					mu.Lock()
-					total += len(batch)
-					mu.Unlock()
+					if err != nil {
+						s.log.Error("batch index", "agent", col.Name(), "err", err)
+						fail(fmt.Errorf("index %s: %w", col.Name(), err))
+					} else {
+						mu.Lock()
+						total += len(batch)
+						mu.Unlock()
+					}
 					batch = batch[:0]
 				}
 			}
@@ -204,26 +246,35 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 			// Flush remaining.
 			if len(batch) > 0 {
 				write.Lock()
-				if err := s.store.BatchIndex(ctx, batch); err != nil {
-					s.log.Error("batch index", "agent", col.Name(), "err", err)
-				}
+				err := s.store.BatchIndex(ctx, batch)
 				write.Unlock()
-				mu.Lock()
-				total += len(batch)
-				mu.Unlock()
+				if err != nil {
+					s.log.Error("batch index", "agent", col.Name(), "err", err)
+					fail(fmt.Errorf("index %s: %w", col.Name(), err))
+				} else {
+					mu.Lock()
+					total += len(batch)
+					mu.Unlock()
+				}
 			}
 
 			if scanErr := <-errCh; scanErr != nil {
 				s.log.Error("scan", "agent", col.Name(), "err", scanErr)
+				fail(fmt.Errorf("scan %s: %w", col.Name(), scanErr))
 			}
 		}(c, paths)
 	}
 
 	wg.Wait()
 
-	// Record last indexed time.
-	if err := s.store.SetMeta(ctx, "last_indexed_at", strconv.FormatInt(time.Now().Unix(), 10)); err != nil {
-		s.log.Warn("set last_indexed_at", "err", err)
+	if len(errs) > 0 {
+		return total, errors.Join(errs...)
+	}
+
+	// Record last indexed time. Only reached by a walk that covered every
+	// detected path, so the cursor is a truthful coverage claim.
+	if err := s.store.SetMeta(ctx, "last_indexed_at", strconv.FormatInt(start.Unix(), 10)); err != nil {
+		return total, fmt.Errorf("set last_indexed_at: %w", err)
 	}
 
 	return total, nil
