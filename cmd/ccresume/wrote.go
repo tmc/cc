@@ -71,6 +71,14 @@ func writtenPathsForTool(tu cc.ContentBlock) []string {
 		}
 		return nil
 	}
+	// codex unified-exec blocks carry a JS harness string ("const r = await
+	// tools.exec_command({\"cmd\": ...})") that embeds shell commands and
+	// apply_patch bodies as escaped text; normalize the escaping and scan the
+	// whole text for both shell writes and patch markers.
+	if strings.EqualFold(tu.Name, "exec") || strings.EqualFold(tu.Name, "exec_command") {
+		text := strings.ReplaceAll(patchText(tu.Input), `\n`, "\n")
+		return append(bashWrittenFiles(text), applyPatchPaths(text)...)
+	}
 	if cmd := tu.BashCommand(); cmd != "" {
 		paths := bashWrittenFiles(cmd)
 		// A shell heredoc apply_patch writes files too; catch its markers.
