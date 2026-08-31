@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -422,6 +423,38 @@ func resetFlagsForTest() {
 	*inlineImagesFlag = true
 	*redactImagesFlag = true
 	*redactFlag = true
+	*sinceFlag = "30d"
+}
+
+func TestRunResolvesSessionID(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_HOME", root)
+	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini-empty"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex-empty"))
+	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode-empty"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi-empty"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "antigravity-empty"))
+
+	dir := filepath.Join(root, "projects", "-work-repo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "c82a34fb-042b-48f2-8b00-023df3309812.jsonl"),
+		`{"type":"user","timestamp":"2026-04-10T21:03:53Z","sessionId":"c82a34fb-042b-48f2-8b00-023df3309812","cwd":"/work/repo","message":{"role":"user","content":"hello from a resolved session"}}`+"\n")
+
+	resetFlagsForTest()
+
+	var out bytes.Buffer
+	if err := run(&out, []string{"c82a34fb"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "hello from a resolved session") {
+		t.Fatalf("output missing resolved session body:\n%s", got)
+	}
+
+	if err := run(io.Discard, []string{"deadbeef"}); err == nil || !strings.Contains(err.Error(), "no session matches") {
+		t.Fatalf("run(unknown ID) err = %v; want no-match error", err)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {

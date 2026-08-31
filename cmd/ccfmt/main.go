@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/internal/transcript"
 )
 
@@ -35,6 +36,7 @@ var (
 	inlineImagesFlag = flag.Bool("inline-images", true, "Inline message images as data URLs in markdown when possible")
 	redactImagesFlag = flag.Bool("redact-images", false, "Redact sensitive text from inline images (requires an external redactor via redactImageDataFunc; default no-op)")
 	redactFlag       = flag.Bool("redact", true, "Redact obvious secrets such as Stripe test keys")
+	sinceFlag        = flag.String("since", "30d", "How far back to search when resolving a session ID")
 )
 
 var defaultRedactions = []struct {
@@ -98,20 +100,28 @@ func readEntries(args []string) ([]cc.Entry, string, error) {
 		entries, err := cc.ReadAll(context.Background(), os.Stdin)
 		return entries, "stdin", err
 	}
-	if len(args) == 1 {
-		entries, err := cc.ReadFileWithSubagents(context.Background(), args[0])
-		return entries, args[0], err
+
+	since, err := ccpaths.ParseDuration(*sinceFlag)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse -since: %w", err)
+	}
+	files := make([]string, len(args))
+	for i, arg := range args {
+		files[i], err = cc.ResolveSessionFile(context.Background(), arg, since)
+		if err != nil {
+			return nil, "", err
+		}
 	}
 
 	var all []cc.Entry
-	for _, path := range args {
+	for _, path := range files {
 		entries, err := cc.ReadFileWithSubagents(context.Background(), path)
 		if err != nil {
 			return nil, "", err
 		}
 		all = append(all, entries...)
 	}
-	return all, strings.Join(args, ", "), nil
+	return all, strings.Join(files, ", "), nil
 }
 
 func writeText(w io.Writer, source string, entries []cc.Entry) error {

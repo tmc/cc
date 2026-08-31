@@ -7,9 +7,11 @@
 //
 // # Usage
 //
-//	ccfmt [flags] [session.jsonl ...]
+//	ccfmt [flags] [session.jsonl | SESSION_ID ...]
 //
-// With no positional arguments, ccfmt reads from stdin. Subagent
+// With no positional arguments, ccfmt reads from stdin. An argument that is
+// not an existing file is treated as a session ID (or ID prefix) and resolved
+// against the harness session stores, the same lookup ccrender uses. Subagent
 // JSONL files alongside the session are loaded automatically.
 //
 // # Flags
@@ -33,6 +35,8 @@
 //	-inline-images       Inline message images as base64 data URLs (default true).
 //	-redact              Redact obvious secrets (e.g. Stripe test keys, default true).
 //	-redact-images       Pass image bytes through redactImageDataFunc (default no-op).
+//	-since DUR           How far back to search when resolving a session ID
+//	                     (default 30d).
 //
 // # Examples
 //
@@ -51,4 +55,8 @@
 // Reproduce the harness's own TUI rendering (what ccrender shows):
 //
 //	ccfmt -format transcript session.jsonl | less -R
+//
+// Render a session by ID instead of path:
+//
+//	ccfmt -format text c82a34fb
 package main
