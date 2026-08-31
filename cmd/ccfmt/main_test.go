@@ -426,6 +426,53 @@ func resetFlagsForTest() {
 	*sinceFlag = "30d"
 }
 
+func TestRunSkipsBodylessEntries(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "session.jsonl")
+	writeFile(t, path, strings.Join([]string{
+		`{"type":"mode","timestamp":"2026-04-10T21:03:52Z","sessionId":"sid-1"}`,
+		`{"type":"bridge-session","timestamp":"2026-04-10T21:03:52Z","sessionId":"sid-1"}`,
+		`{"type":"user","timestamp":"2026-04-10T21:03:53Z","sessionId":"sid-1","cwd":"/work/repo","message":{"role":"user","content":"hello"}}`,
+	}, "\n")+"\n")
+
+	// Bookkeeping entries with no body render as bare labels; the default
+	// output drops them.
+	resetFlagsForTest()
+	var out bytes.Buffer
+	if err := run(&out, []string{path}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got := out.String()
+	if strings.Contains(got, "[mode]") || strings.Contains(got, "[bridge-session]") {
+		t.Errorf("text output includes body-less entries:\n%s", got)
+	}
+	if !strings.Contains(got, "hello") {
+		t.Errorf("text output missing user message:\n%s", got)
+	}
+
+	// -meta keeps the raw record stream, labels and all.
+	resetFlagsForTest()
+	*includeMeta = true
+	out.Reset()
+	if err := run(&out, []string{path}); err != nil {
+		t.Fatalf("run -meta: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "[mode]") {
+		t.Errorf("-meta output missing [mode] entry:\n%s", got)
+	}
+
+	// Markdown drops them too.
+	resetFlagsForTest()
+	*formatFlag = "markdown"
+	out.Reset()
+	if err := run(&out, []string{path}); err != nil {
+		t.Fatalf("run markdown: %v", err)
+	}
+	if got := out.String(); strings.Contains(got, "## Mode") {
+		t.Errorf("markdown output includes body-less entries:\n%s", got)
+	}
+}
+
 func TestRunResolvesSessionID(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CLAUDE_HOME", root)

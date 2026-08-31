@@ -181,50 +181,48 @@ func transcriptWidth() int {
 }
 
 func writeTextEntry(w io.Writer, e cc.Entry) error {
-	label := textLabel(e)
-	if *includeStamp && !e.Timestamp.IsZero() {
-		label += " " + e.Timestamp.Local().Format("15:04:05")
-	}
-	fmt.Fprintf(w, "[%s]\n", label)
-
+	var body strings.Builder
 	switch {
 	case e.Type == "system" && e.Subtype == "compact_boundary":
-		_, err := fmt.Fprintln(w, "Conversation compacted.")
-		if err != nil {
-			return err
-		}
+		fmt.Fprintln(&body, "Conversation compacted.")
 	case e.IsCompactSummary:
-		_, err := fmt.Fprintln(w, compactText(e))
-		if err != nil {
-			return err
-		}
+		fmt.Fprintln(&body, compactText(e))
 	case isToolResultEntry(e):
 		if *toolResultsFlag == "omit" {
 			return nil
 		}
 		for _, block := range e.Message.ToolResults() {
-			body := toolResultText(block)
-			if strings.TrimSpace(body) == "" {
+			text := toolResultText(block)
+			if strings.TrimSpace(text) == "" {
 				continue
 			}
-			if _, err := fmt.Fprintln(w, body); err != nil {
-				return err
-			}
+			fmt.Fprintln(&body, text)
 		}
 	default:
-		text := entryBody(e)
-		if text != "" {
-			if _, err := fmt.Fprintln(w, limitText(text)); err != nil {
-				return err
-			}
+		if text := entryBody(e); text != "" {
+			fmt.Fprintln(&body, limitText(text))
 		}
 		if e.Message != nil && e.Type == "assistant" && *toolsFlag != "omit" {
 			for _, tool := range e.Message.ToolUses() {
-				fmt.Fprintln(w, textToolLine(tool))
+				fmt.Fprintln(&body, textToolLine(tool))
 			}
 		}
 	}
+	// Harness bookkeeping records (mode changes, bridge sessions, prompt
+	// snapshots) render no body; a bare label helps no one, so drop them
+	// unless -meta asks for the raw record stream.
+	if body.Len() == 0 && !*includeMeta {
+		return nil
+	}
 
+	label := textLabel(e)
+	if *includeStamp && !e.Timestamp.IsZero() {
+		label += " " + e.Timestamp.Local().Format("15:04:05")
+	}
+	fmt.Fprintf(w, "[%s]\n", label)
+	if _, err := io.WriteString(w, body.String()); err != nil {
+		return err
+	}
 	_, err := fmt.Fprintln(w)
 	return err
 }
@@ -266,11 +264,23 @@ func writeMarkdown(w io.Writer, source string, entries []cc.Entry) error {
 }
 
 func writeMarkdownEntry(w io.Writer, e cc.Entry) error {
+	var body bytes.Buffer
+	if err := writeMarkdownEntryBody(&body, e); err != nil {
+		return err
+	}
+	// Same as writeTextEntry: a body-less entry would be a bare heading.
+	if body.Len() == 0 && !*includeMeta {
+		return nil
+	}
 	fmt.Fprintf(w, "## %s\n\n", markdownLabel(e))
 	if *includeStamp && !e.Timestamp.IsZero() {
 		fmt.Fprintf(w, "_%s_\n\n", e.Timestamp.Local().Format(time.RFC3339))
 	}
+	_, err := w.Write(body.Bytes())
+	return err
+}
 
+func writeMarkdownEntryBody(w io.Writer, e cc.Entry) error {
 	switch {
 	case e.Type == "system" && e.Subtype == "compact_boundary":
 		if _, err := fmt.Fprintln(w, "_Conversation compacted._"); err != nil {
