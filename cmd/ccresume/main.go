@@ -161,42 +161,43 @@ func run() error {
 		return fmt.Errorf("invalid -sort %q (want relevance or recency)", *sortFlag)
 	}
 
-	// Try index first
+	// The index scan and the content grep look at disjoint data, and the grep
+	// is only needed when the index misses; run it speculatively alongside so a
+	// miss costs one scan's latency rather than two. Its result is discarded
+	// (and the goroutine abandoned at exit) when the index hits.
+	contentQuery := query
+	switch {
+	case filepath.IsAbs(query):
+		contentQuery = jsonCWDField(query)
+	case query == wrote:
+		// A -wrote pattern is a path or glob, not free text; narrow candidates
+		// with a since-bounded literal grep (the dedicated block below then
+		// checks which actually wrote a matching file). Never fall through to
+		// the unbounded grepMatches, which would scan all history for a glob.
+		contentQuery = literalToken(wrote)
+	}
+	type contentResult struct {
+		matches []cc.IndexEntry
+		err     error
+	}
+	// Bound the content grep by -since: candidate files are selected by mtime
+	// before rg runs, so old history is never scanned or resolved.
+	contentCh := make(chan contentResult, 1)
+	go func() {
+		m, err := recentContentMatches(contentQuery, since)
+		contentCh <- contentResult{m, err}
+	}()
+
 	matches, err := findMatches(query, since)
 	if err != nil {
 		return err
 	}
-
-	// Fall back to content search if no matches in index
 	if len(matches) == 0 {
-		switch {
-		case filepath.IsAbs(query):
-			matches, err = recentContentMatches(jsonCWDField(query), since)
-			if err != nil {
-				return err
-			}
-		case query == has || query == cmdText || query == resultText:
-			matches, err = recentContentMatches(query, since)
-			if err != nil {
-				return err
-			}
-		case query == wrote:
-			// A -wrote pattern is a path or glob, not free text; narrow candidates
-			// with a since-bounded literal grep (the dedicated block below then
-			// checks which actually wrote a matching file). Never fall through to
-			// the unbounded grepMatches, which would scan all history for a glob.
-			matches, err = recentContentMatches(literalToken(wrote), since)
-			if err != nil {
-				return err
-			}
-		default:
-			// Bound the content grep by -since: find selects candidate files by
-			// mtime before rg runs, so old history is never scanned or resolved.
-			matches, err = recentContentMatches(query, since)
-			if err != nil {
-				return err
-			}
+		res := <-contentCh
+		if res.err != nil {
+			return res.err
 		}
+		matches = res.matches
 	}
 	if has != "" {
 		matches, err = filterContentMatches(matches, has)
@@ -1431,51 +1432,168 @@ func fileHasSessionCWD(path, cwd string) (bool, error) {
 }
 
 func recentMatchingPaths(roots []searchRoot, query string, minutes int) ([]string, error) {
-	args := make([]string, 0, len(roots)+7)
-	for _, root := range roots {
-		args = append(args, root.dir)
+	// One find per root, concurrently: a single find serializes behind the
+	// slowest tree (antigravity's brain/ is by far the largest).
+	lists := make([][]string, len(roots))
+	errs := make([]error, len(roots))
+	var wg sync.WaitGroup
+	for i, root := range roots {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lists[i], errs[i] = recentFiles(root, minutes)
+		}()
 	}
-	args = append(args, "-type", "f", "(", "-name", "*.jsonl", "-o", "-name", "ses_*.json", ")", "-mmin", fmt.Sprintf("-%d", minutes), "-print")
-	cmd := exec.Command("find", args...)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("find: %w", err)
-	}
+	wg.Wait()
 	var paths []string
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
-	for scanner.Scan() {
-		paths = append(paths, scanner.Text())
+	for i := range roots {
+		if errs[i] != nil {
+			return nil, errs[i]
+		}
+		paths = append(paths, lists[i]...)
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	var matches []string
+
+	// Grep the candidates in parallel batches: rg is fast per file, but a
+	// serial walk over thousands of transcripts is not.
 	const batchSize = 200
+	var batches [][]string
 	for len(paths) > 0 {
 		n := batchSize
 		if len(paths) < n {
 			n = len(paths)
 		}
-		batch := paths[:n]
+		batches = append(batches, paths[:n])
 		paths = paths[n:]
-		args := append([]string{"-l", "-F", "--", query}, batch...)
-		cmd := exec.Command("rg", args...)
-		out, err := cmd.Output()
-		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-				continue
-			}
-			return nil, fmt.Errorf("rg: %w", err)
+	}
+	found := make([][]string, len(batches))
+	berrs := make([]error, len(batches))
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	for i, batch := range batches {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			found[i], berrs[i] = grepFiles(query, batch)
+		}()
+	}
+	wg.Wait()
+	var matches []string
+	for i := range batches {
+		if berrs[i] != nil {
+			return nil, berrs[i]
 		}
-		scanner := bufio.NewScanner(strings.NewReader(string(out)))
-		for scanner.Scan() {
-			matches = append(matches, scanner.Text())
-		}
-		if err := scanner.Err(); err != nil {
-			return nil, err
-		}
+		matches = append(matches, found[i]...)
 	}
 	return matches, nil
+}
+
+// recentFiles lists the session files under root modified within the last
+// minutes. Antigravity's chunked transcripts are skipped: they duplicate the
+// conversation's transcript.jsonl, which resolves to the same session.
+func recentFiles(root searchRoot, minutes int) ([]string, error) {
+	cutoff := time.Now().Add(-time.Duration(minutes) * time.Minute)
+	skipChunks := root.kind == "antigravity"
+
+	// The trees are wide and shallow (one directory per project or
+	// conversation), and the walk is stat-bound, so scan the top-level
+	// directories concurrently.
+	top, err := os.ReadDir(root.dir)
+	if err != nil {
+		return nil, nil
+	}
+	var files []string
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 2*runtime.GOMAXPROCS(0))
+	add := func(paths []string) {
+		if len(paths) == 0 {
+			return
+		}
+		mu.Lock()
+		files = append(files, paths...)
+		mu.Unlock()
+	}
+	for _, e := range top {
+		name := e.Name()
+		path := filepath.Join(root.dir, name)
+		if !e.IsDir() {
+			if info, err := e.Info(); err == nil && isRecentSessionFile(name, info, cutoff) {
+				add([]string{path})
+			}
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			add(walkRecentFiles(path, cutoff, skipChunks))
+		}()
+	}
+	wg.Wait()
+	return files, nil
+}
+
+// walkRecentFiles returns the session files under dir modified since cutoff.
+func walkRecentFiles(dir string, cutoff time.Time, skipChunks bool) []string {
+	var files []string
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, e := range ents {
+		name := e.Name()
+		path := filepath.Join(dir, name)
+		if e.IsDir() {
+			if skipChunks && name == "chunks" {
+				continue
+			}
+			files = append(files, walkRecentFiles(path, cutoff, skipChunks)...)
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if isRecentSessionFile(name, info, cutoff) {
+			files = append(files, path)
+		}
+	}
+	return files
+}
+
+func isRecentSessionFile(name string, info os.FileInfo, cutoff time.Time) bool {
+	if !info.Mode().IsRegular() || info.ModTime().Before(cutoff) {
+		return false
+	}
+	return strings.HasSuffix(name, ".jsonl") ||
+		(strings.HasPrefix(name, "ses_") && strings.HasSuffix(name, ".json"))
+}
+
+// grepFiles returns the files among paths that contain the literal query.
+func grepFiles(query string, paths []string) ([]string, error) {
+	args := append([]string{"-l", "-F", "--", query}, paths...)
+	out, err := exec.Command("rg", args...).Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("rg: %w", err)
+	}
+	return splitLines(out), nil
+}
+
+func splitLines(out []byte) []string {
+	var lines []string
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for scanner.Scan() {
+		if t := scanner.Text(); t != "" {
+			lines = append(lines, t)
+		}
+	}
+	return lines
 }
 
 func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.IndexEntry, bool) {
