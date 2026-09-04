@@ -475,7 +475,7 @@ type resolvedMatch struct {
 func resolveMatch(query string, m cc.IndexEntry) resolvedMatch {
 	r := resolvedMatch{entry: m, target: m.ProjectPath}
 	r.occurrences = countIndexOccurrences(query, m)
-	summary, err := cc.SummarizeFile(context.Background(), m.FullPath)
+	summary, err := cc.SummarizeFileCached(context.Background(), m.FullPath)
 	if err != nil {
 		return r
 	}
@@ -580,12 +580,43 @@ func countIndexOccurrences(query string, m cc.IndexEntry) int {
 		countOccurrences(query, m.GitBranch)
 }
 
+// countFileOccurrences counts case-insensitive occurrences of query in the file
+// at path. Transcripts reach hundreds of megabytes, so the count comes from rg,
+// which ccresume already relies on for the content search; reading the file
+// into memory is the fallback.
 func countFileOccurrences(query, path string) int {
+	if n, ok := rgCountMatches(query, path); ok {
+		return n
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0
 	}
 	return countOccurrences(query, string(data))
+}
+
+// rgCountMatches counts the non-overlapping case-insensitive matches of the
+// literal query in path, reporting whether rg produced an answer.
+func rgCountMatches(query, path string) (int, bool) {
+	if query == "" {
+		return 0, true
+	}
+	out, err := exec.Command("rg", "--count-matches", "--no-filename", "-a", "-F", "-i", "--", query, path).Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return 0, true // no match
+		}
+		return 0, false
+	}
+	n := 0
+	for _, line := range splitLines(out) {
+		c, err := strconv.Atoi(line)
+		if err != nil {
+			return 0, false
+		}
+		n += c
+	}
+	return n, true
 }
 
 // annotateLine appends the enabled annotations to a rendered resume command as
@@ -1493,11 +1524,12 @@ func recentMatchingPaths(roots []searchRoot, query string, minutes int) ([]strin
 // conversation's transcript.jsonl, which resolves to the same session.
 func recentFiles(root searchRoot, minutes int) ([]string, error) {
 	cutoff := time.Now().Add(-time.Duration(minutes) * time.Minute)
-	skipChunks := root.kind == "antigravity"
+	if root.kind == "antigravity" {
+		return antigravityRecentFiles(root.dir, cutoff), nil
+	}
 
-	// The trees are wide and shallow (one directory per project or
-	// conversation), and the walk is stat-bound, so scan the top-level
-	// directories concurrently.
+	// The trees are wide and shallow (one directory per project), and the walk
+	// is stat-bound, so scan the top-level directories concurrently.
 	top, err := os.ReadDir(root.dir)
 	if err != nil {
 		return nil, nil
@@ -1528,15 +1560,65 @@ func recentFiles(root searchRoot, minutes int) ([]string, error) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			add(walkRecentFiles(path, cutoff, skipChunks))
+			add(walkRecentFiles(path, cutoff))
 		}()
 	}
 	wg.Wait()
 	return files, nil
 }
 
+// antigravityRecentFiles lists the recently modified transcripts under an
+// antigravity brain directory. A conversation keeps its transcripts in one
+// known place, brain/<id>/.system_generated/logs, so read those directly:
+// walking a conversation costs hundreds of stats for the artifacts it holds,
+// and the chunks/ subdirectory only duplicates transcript.jsonl.
+func antigravityRecentFiles(root string, cutoff time.Time) []string {
+	convs, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 2*runtime.GOMAXPROCS(0))
+	for _, c := range convs {
+		if !c.IsDir() {
+			continue
+		}
+		logs := filepath.Join(root, c.Name(), ".system_generated", "logs")
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			ents, err := os.ReadDir(logs)
+			if err != nil {
+				return
+			}
+			var found []string
+			for _, e := range ents {
+				if e.IsDir() {
+					continue
+				}
+				info, err := e.Info()
+				if err != nil || !isRecentSessionFile(e.Name(), info, cutoff) {
+					continue
+				}
+				found = append(found, filepath.Join(logs, e.Name()))
+			}
+			if len(found) > 0 {
+				mu.Lock()
+				files = append(files, found...)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return files
+}
+
 // walkRecentFiles returns the session files under dir modified since cutoff.
-func walkRecentFiles(dir string, cutoff time.Time, skipChunks bool) []string {
+func walkRecentFiles(dir string, cutoff time.Time) []string {
 	var files []string
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -1546,10 +1628,7 @@ func walkRecentFiles(dir string, cutoff time.Time, skipChunks bool) []string {
 		name := e.Name()
 		path := filepath.Join(dir, name)
 		if e.IsDir() {
-			if skipChunks && name == "chunks" {
-				continue
-			}
-			files = append(files, walkRecentFiles(path, cutoff, skipChunks)...)
+			files = append(files, walkRecentFiles(path, cutoff)...)
 			continue
 		}
 		info, err := e.Info()
