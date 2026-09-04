@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tmc/cc/ccpaths"
@@ -75,16 +77,22 @@ func FindIndexFiles() ([]string, error) {
 		dirs = append(dirs, filepath.Join(gh, "projects"))
 	}
 
+	// Each project directory holds its own sessions-index.json; the transcripts
+	// beside it are far more numerous, so read one level rather than walking.
 	for _, dir := range dirs {
-		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			if !e.IsDir() {
+				continue
 			}
-			if info.Name() == "sessions-index.json" {
-				files = append(files, path)
+			f := filepath.Join(dir, e.Name(), "sessions-index.json")
+			if _, err := os.Stat(f); err == nil {
+				files = append(files, f)
 			}
-			return nil
-		})
+		}
 	}
 	return files, nil
 }
@@ -113,23 +121,31 @@ func AllIndexEntries(since time.Duration, project string) ([]IndexEntry, error) 
 			all = append(all, e)
 		}
 	}
-	openCodeEntries, err := openCodeIndexEntries(cutoff, project)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, openCodeEntries...)
 
-	piEntries, err := piIndexEntries(cutoff, project)
-	if err != nil {
-		return nil, err
+	// The other harnesses have no index file: each scan parses transcripts, so
+	// run them concurrently.
+	scans := []func(time.Time, string) ([]IndexEntry, error){
+		openCodeIndexEntries,
+		piIndexEntries,
+		antigravityIndexEntries,
 	}
-	all = append(all, piEntries...)
-
-	antigravityEntries, err := antigravityIndexEntries(cutoff, project)
-	if err != nil {
-		return nil, err
+	out := make([][]IndexEntry, len(scans))
+	errs := make([]error, len(scans))
+	var wg sync.WaitGroup
+	for i, scan := range scans {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out[i], errs[i] = scan(cutoff, project)
+		}()
 	}
-	all = append(all, antigravityEntries...)
+	wg.Wait()
+	for i := range scans {
+		if errs[i] != nil {
+			return nil, errs[i]
+		}
+		all = append(all, out[i]...)
+	}
 	return all, nil
 }
 
@@ -249,49 +265,74 @@ func antigravityIndexEntries(cutoff time.Time, project string) ([]IndexEntry, er
 		}
 	}
 
-	var entries []IndexEntry
+	var paths []string
 	for _, r := range roots {
-		err = filepath.Walk(r, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info == nil {
+		filepath.Walk(r, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info == nil || !info.IsDir() {
 				return nil
 			}
-			if info.IsDir() {
-				if antigravityread.IsSessionPath(path) {
-					if info.ModTime().Before(cutoff) {
-						return filepath.SkipDir
-					}
-					if !antigravityPathMatchesProject(context.Background(), path, strings.ToLower(project)) {
-						return filepath.SkipDir
-					}
-					parsed, err := ReadFile(context.Background(), path)
-					if err != nil {
-						return filepath.SkipDir
-					}
-					s := Summarize(path, parsed)
-					if s.TotalLines == 0 || s.LastTime.Before(cutoff) {
-						return filepath.SkipDir
-					}
-					modified := s.LastTime.Format(time.RFC3339Nano)
-					created := modified
-					if !s.FirstTime.IsZero() {
-						created = s.FirstTime.Format(time.RFC3339Nano)
-					}
-					entries = append(entries, IndexEntry{
-						SessionID:    s.SessionID,
-						FullPath:     path,
-						ProjectPath:  s.CWD,
-						GitBranch:    s.GitBranch,
-						FirstPrompt:  s.FirstPrompt,
-						Summary:      s.CustomTitle,
-						MessageCount: s.UserMessages + s.AsstMessages,
-						Created:      created,
-						Modified:     modified,
-					})
-					return filepath.SkipDir
-				}
+			if !antigravityread.IsSessionPath(path) {
+				return nil
 			}
-			return nil
+			if !info.ModTime().Before(cutoff) {
+				paths = append(paths, path)
+			}
+			return filepath.SkipDir
 		})
 	}
+
+	// Each session is a separate transcript parse, so summarize them in
+	// parallel; the walk above is only a stat pass.
+	found := make([]*IndexEntry, len(paths))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	for i, path := range paths {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			found[i] = antigravityIndexEntry(path, cutoff, project)
+		}()
+	}
+	wg.Wait()
+
+	var entries []IndexEntry
+	for _, e := range found {
+		if e != nil {
+			entries = append(entries, *e)
+		}
+	}
 	return entries, nil
+}
+
+func antigravityIndexEntry(path string, cutoff time.Time, project string) *IndexEntry {
+	ctx := context.Background()
+	if !antigravityPathMatchesProject(ctx, path, strings.ToLower(project)) {
+		return nil
+	}
+	parsed, err := ReadFile(ctx, path)
+	if err != nil {
+		return nil
+	}
+	s := Summarize(path, parsed)
+	if s.TotalLines == 0 || s.LastTime.Before(cutoff) {
+		return nil
+	}
+	modified := s.LastTime.Format(time.RFC3339Nano)
+	created := modified
+	if !s.FirstTime.IsZero() {
+		created = s.FirstTime.Format(time.RFC3339Nano)
+	}
+	return &IndexEntry{
+		SessionID:    s.SessionID,
+		FullPath:     path,
+		ProjectPath:  s.CWD,
+		GitBranch:    s.GitBranch,
+		FirstPrompt:  s.FirstPrompt,
+		Summary:      s.CustomTitle,
+		MessageCount: s.UserMessages + s.AsstMessages,
+		Created:      created,
+		Modified:     modified,
+	}
 }

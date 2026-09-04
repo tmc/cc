@@ -813,6 +813,9 @@ func openCodeModTime(path string, fallback time.Time) time.Time {
 // extra, when non-nil, contributes additional per-entry strings to match (e.g.
 // opencode's custom title).
 func cwdPathMatchesProject(ctx context.Context, path, query string, extra func(Entry) string) bool {
+	if query == "" {
+		return true
+	}
 	entries, err := ReadFile(ctx, path)
 	if err != nil {
 		return strings.Contains(strings.ToLower(path), query)
