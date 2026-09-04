@@ -296,6 +296,7 @@ func antigravityIndexEntries(cutoff time.Time, project string) ([]IndexEntry, er
 		}()
 	}
 	wg.Wait()
+	sessionCache.flush()
 
 	var entries []IndexEntry
 	for _, e := range found {
@@ -308,6 +309,21 @@ func antigravityIndexEntries(cutoff time.Time, project string) ([]IndexEntry, er
 
 func antigravityIndexEntry(path string, cutoff time.Time, project string) *IndexEntry {
 	ctx := context.Background()
+	// Parsing a conversation is expensive, so reuse the entry derived from the
+	// same transcripts last time. The cache is only consulted for an unfiltered
+	// scan: a project query matches against the whole transcript, not just the
+	// fields an entry keeps.
+	logs := filepath.Join(path, ".system_generated", "logs")
+	stamp := ""
+	if project == "" {
+		stamp = stampFiles(filepath.Join(logs, "transcript.jsonl"), filepath.Join(logs, "transcript_full.jsonl"))
+		if e, ok := sessionCache.get(path, stamp); ok {
+			if e.ModifiedTime().Before(cutoff) {
+				return nil
+			}
+			return &e
+		}
+	}
 	if !antigravityPathMatchesProject(ctx, path, strings.ToLower(project)) {
 		return nil
 	}
@@ -324,7 +340,7 @@ func antigravityIndexEntry(path string, cutoff time.Time, project string) *Index
 	if !s.FirstTime.IsZero() {
 		created = s.FirstTime.Format(time.RFC3339Nano)
 	}
-	return &IndexEntry{
+	e := IndexEntry{
 		SessionID:    s.SessionID,
 		FullPath:     path,
 		ProjectPath:  s.CWD,
@@ -335,4 +351,6 @@ func antigravityIndexEntry(path string, cutoff time.Time, project string) *Index
 		Created:      created,
 		Modified:     modified,
 	}
+	sessionCache.put(path, stamp, e)
+	return &e
 }
