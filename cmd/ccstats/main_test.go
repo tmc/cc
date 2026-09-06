@@ -128,7 +128,7 @@ func TestOutputRedactsJSON(t *testing.T) {
 	stats := []sessionStats{
 		{
 			SessionID:         "session-123",
-			File:              "/Users/tmc/.claude/projects/x/session.jsonl",
+			File:              "/Users/example/.claude/projects/x/session.jsonl",
 			Slug:              "visible-slug",
 			InputTokens:       111,
 			OutputTokens:      22,
@@ -146,7 +146,7 @@ func TestOutputRedactsJSON(t *testing.T) {
 	got := captureStdout(t, func() error {
 		return output(stats)
 	})
-	if strings.Contains(got, "\"session_id\"") || strings.Contains(got, "/Users/tmc/.claude/projects/") {
+	if strings.Contains(got, "\"session_id\"") || strings.Contains(got, "/Users/example/.claude/projects/") {
 		t.Fatalf("redacted JSON leaked identifiers:\n%s", got)
 	}
 	if !strings.Contains(got, "\"slug\": \"visible-slug\"") {
@@ -615,7 +615,9 @@ func TestRunCharacteristicsLoadsPricingFileFlag(t *testing.T) {
 	if err := json.Unmarshal([]byte(gotJSON), &report); err != nil {
 		t.Fatalf("decode JSON report: %v\n%s", err, gotJSON)
 	}
-	if got, want := report.Totals.Weight, 50*2.0; got != want {
+	// 50 input at the sonnet override's rate, plus the one output token
+	// ccusage estimates for a request the transcript reports none for.
+	if got, want := report.Totals.Weight, 50*2.0+1*2.0; got != want {
 		t.Fatalf("weight = %f, want %f", got, want)
 	}
 }
@@ -1089,4 +1091,76 @@ func naiveParallelActiveAt(windows []parallelWindow, at time.Time) int {
 		}
 	}
 	return len(active)
+}
+
+func TestAgentForFileFallsBackToClaudeCode(t *testing.T) {
+	if got, want := agentForFile(filepath.Join(t.TempDir(), "a.jsonl"), nil), "claude-code"; got != want {
+		t.Fatalf("agentForFile = %q, want %q", got, want)
+	}
+}
+
+func TestCodexAgentTellsCLIFromApp(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []ccpkg.Entry
+		want    string
+	}{
+		{"cli", []ccpkg.Entry{{Originator: "codex_cli_rs"}}, "codex-cli"},
+		{"app", []ccpkg.Entry{{Originator: "Codex Desktop"}}, "codex-app"},
+		{"vscode source", []ccpkg.Entry{{Source: "vscode"}}, "codex-app"},
+		{"unmarked", []ccpkg.Entry{{}}, "codex-cli"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := codexAgent(tt.entries); got != tt.want {
+				t.Fatalf("codexAgent = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunReportWeekdayAndReposCoverEveryRequest(t *testing.T) {
+	oldUnit, oldFormat, oldTop := *unitFlag, *formatFlag, *topNFlag
+	t.Cleanup(func() { *unitFlag, *formatFlag, *topNFlag = oldUnit, oldFormat, oldTop })
+	*unitFlag = "tokens"
+	*formatFlag = "json"
+	*topNFlag = 20
+
+	files := writeCharacteristicsFixture(t)
+	for _, mode := range []string{"weekday", "repos"} {
+		out := captureStdout(t, func() error { return runReport(mode, files) })
+		var report struct {
+			View    string `json:"view"`
+			Unit    string `json:"unit"`
+			Summary struct {
+				Sessions int `json:"sessions"`
+				Requests int `json:"requests"`
+			} `json:"summary"`
+		}
+		if err := json.Unmarshal([]byte(out), &report); err != nil {
+			t.Fatalf("%s: decode: %v\n%s", mode, err, out)
+		}
+		if report.View != mode {
+			t.Fatalf("view = %q, want %q", report.View, mode)
+		}
+		if report.Unit != "total" {
+			t.Fatalf("%s: unit = %q, want total", mode, report.Unit)
+		}
+		if report.Summary.Sessions != 4 || report.Summary.Requests != 5 {
+			t.Fatalf("%s: %d sessions, %d requests; want 4 and 5", mode, report.Summary.Sessions, report.Summary.Requests)
+		}
+	}
+}
+
+func TestReportUsageMentionsSubcommand(t *testing.T) {
+	oldUsage := flag.Usage
+	t.Cleanup(func() { flag.Usage = oldUsage })
+
+	for _, mode := range []string{"weekday", "repos"} {
+		configureUsage(mode)
+		got := captureStderr(t, func() { flag.Usage() })
+		if !strings.Contains(got, "ccstats "+mode+" [flags] [file...]") {
+			t.Fatalf("usage for %s missing its own line:\n%s", mode, got)
+		}
+	}
 }

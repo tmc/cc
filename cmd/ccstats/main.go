@@ -25,6 +25,7 @@ var (
 	parallelWindowFlag       = flag.Duration("parallel-window", 2*time.Minute, "Parallelism lookback window")
 	contextThresholdFlag     = flag.Int("context-threshold", 150000, "Context size threshold for the hosted UI characteristic")
 	longRunningThresholdFlag = flag.Duration("long-running-threshold", 8*time.Hour, "Session duration threshold for the long-running characteristic")
+	topNFlag                 = flag.Int("n", 20, "Rows to print in the repos report")
 )
 
 const watchRefreshInterval = 60 * time.Second
@@ -62,7 +63,7 @@ func main() {
 	mode := "sessions"
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "characteristics", "watch":
+		case "characteristics", "watch", "weekday", "repos":
 			mode = os.Args[1]
 			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
 		}
@@ -89,6 +90,9 @@ func run(mode string) error {
 	}
 	if mode == "watch" {
 		return runWatch(files)
+	}
+	if mode == "weekday" || mode == "repos" {
+		return runReport(mode, files)
 	}
 
 	var allStats []sessionStats
@@ -138,6 +142,19 @@ func configureUsage(mode string) {
 			fmt.Fprintln(os.Stderr, "Examples:")
 			fmt.Fprintln(os.Stderr, "  ccstats watch -since 24h ~/.claude/projects/*/*.jsonl")
 			fmt.Fprintln(os.Stderr, "  ccstats watch -since 7d -format json")
+		case "weekday", "repos":
+			fmt.Fprintln(os.Stderr, "Usage:")
+			fmt.Fprintf(os.Stderr, "  ccstats %s [flags] [file...]\n", mode)
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Reports usage over the files, normalized the way the cass index")
+			fmt.Fprintln(os.Stderr, "normalizes it, so every harness's tokens are counted the same way.")
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Flags:")
+			flag.PrintDefaults()
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "Examples:")
+			fmt.Fprintf(os.Stderr, "  ccstats %s -since 12w\n", mode)
+			fmt.Fprintf(os.Stderr, "  ccstats %s -since 7d -unit cost -format json\n", mode)
 		default:
 			fmt.Fprintln(os.Stderr, "Usage:")
 			fmt.Fprintln(os.Stderr, "  ccstats [flags] [file...]")
@@ -149,6 +166,7 @@ func configureUsage(mode string) {
 			fmt.Fprintln(os.Stderr, "  ccstats ~/.claude/projects/*/44fc759a*.jsonl")
 			fmt.Fprintln(os.Stderr, "  ccstats -since 16h -format json")
 			fmt.Fprintln(os.Stderr, "  ccstats characteristics -since 24h")
+			fmt.Fprintln(os.Stderr, "  ccstats weekday -since 12w")
 		}
 	}
 }

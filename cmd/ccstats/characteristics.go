@@ -144,6 +144,15 @@ func analyzeCharacteristics(files []string, pricingCfg pricingConfig) (*characte
 			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", path, err)
 			continue
 		}
+		agent := agentForFile(path, entries)
+
+		// Tool counts and the compaction and loop markers come from the
+		// entries; the token counts come from ccusage, which folds a streamed
+		// message's entries into one request and normalizes each harness's
+		// convention, so a Codex request stops counting its cached and
+		// cache-written tokens twice.
+		tools := make(map[string]int)
+		var unmeasured []requestRecord
 		for _, e := range entries {
 			if e.SessionID == "" {
 				continue
@@ -174,37 +183,68 @@ func analyzeCharacteristics(files []string, pricingCfg pricingConfig) (*characte
 			if e.Message == nil || e.Message.Role != "assistant" {
 				continue
 			}
-
-			req := requestRecord{
-				SessionID:    e.SessionID,
-				Timestamp:    e.Timestamp,
-				Model:        e.Message.Model,
-				IsSidechain:  e.IsSidechain,
-				ToolUseCount: len(e.Message.ToolUses()),
+			uses := e.Message.ToolUses()
+			tools[e.Message.ID] += len(uses)
+			if e.Message.Usage == nil {
+				// A request the harness recorded no usage for. It carries no
+				// weight, but it happened, so it stays in the request and
+				// session counts the report divides by.
+				unmeasured = append(unmeasured, requestRecord{
+					SessionID: e.SessionID, Timestamp: e.Timestamp, Model: e.Message.Model,
+					IsSidechain: e.IsSidechain, ToolUseCount: len(uses),
+				})
 			}
-			if usage := e.Message.Usage; usage != nil {
-				req.InputTokens = usage.InputTokens
-				req.OutputTokens = usage.OutputTokens
-				req.CacheRead = usage.CacheReadInputTokens
-				req.CacheCreate = usage.CacheCreationInputTokens
-				req.ContextSize = req.InputTokens + req.CacheRead + req.CacheCreate
-				req.Weight = requestWeight(req, pricingCfg)
-			}
-			if family := modelFamily(req.Model); family == req.Model && family != "" && family != "unknown" {
-				unknownModels[req.Model] = struct{}{}
-			}
-			if compactBudgets[e.SessionID] > 0 {
-				req.CompactFollow = true
-				compactBudgets[e.SessionID]--
-			}
-
-			for _, tu := range e.Message.ToolUses() {
+			for _, tu := range uses {
 				name := strings.ToLower(tu.Name)
 				if strings.Contains(name, "schedulewakeup") || strings.Contains(name, "croncreate") {
 					agg.HasLoop = true
 				}
 			}
+		}
 
+		for _, req := range unmeasured {
+			agg := sessions[req.SessionID]
+			if agg == nil {
+				agg = &sessionAgg{}
+				sessions[req.SessionID] = agg
+			}
+			agg.RequestCount++
+			if req.IsSidechain {
+				agg.SidechainCount++
+			}
+			agg.ToolUseCount += req.ToolUseCount
+			requests = append(requests, req)
+		}
+
+		for _, rec := range ccusage.FromEntries(agent, entries) {
+			if rec.SessionID == "" {
+				continue
+			}
+			agg := sessions[rec.SessionID]
+			if agg == nil {
+				agg = &sessionAgg{}
+				sessions[rec.SessionID] = agg
+			}
+			req := requestRecord{
+				SessionID:    rec.SessionID,
+				Timestamp:    rec.Time,
+				Model:        rec.Model,
+				IsSidechain:  rec.IsSidechain,
+				ToolUseCount: tools[rec.RequestID],
+				InputTokens:  rec.Input,
+				OutputTokens: rec.Output,
+				CacheRead:    rec.CacheRead,
+				CacheCreate:  rec.CacheCreate,
+				ContextSize:  rec.Context(),
+			}
+			req.Weight = requestWeight(req, pricingCfg)
+			if family := modelFamily(req.Model); family == req.Model && family != "" && family != "unknown" {
+				unknownModels[req.Model] = struct{}{}
+			}
+			if compactBudgets[rec.SessionID] > 0 {
+				req.CompactFollow = true
+				compactBudgets[rec.SessionID]--
+			}
 			agg.RequestCount++
 			if req.IsSidechain {
 				agg.SidechainCount++

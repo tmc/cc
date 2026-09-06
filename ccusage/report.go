@@ -615,3 +615,75 @@ func ZoneName(loc *time.Location) string {
 	}
 	return time.Now().In(loc).Format("MST")
 }
+
+// Aggregate rolls records up the way the store's queries do, so that a caller
+// holding transcripts rather than an index -- ccstats over a list of files --
+// draws its reports from the same functions. Repositories are the recorded
+// working directory: a file has no git resolution behind it, and a record with
+// no cwd falls in the unattributed bucket, as it does in the index.
+func Aggregate(recs []Record) (hours []Hour, groups []Group, spans []SessionSpan) {
+	type groupKey struct{ repo, agent, vendor, model string }
+	byHour := make(map[int64]*Hour)
+	byGroup := make(map[groupKey]*Group)
+	groupSessions := make(map[groupKey]map[string]bool)
+	bySession := make(map[string]*SessionSpan)
+	for _, r := range recs {
+		t := Tokens{Input: r.Input, CacheRead: r.CacheRead, CacheCreate: r.CacheCreate, Output: r.Output}
+		est := 0
+		if r.OutputEstimated {
+			est = 1
+		}
+
+		h := r.Time.Unix() / 3600
+		cur, ok := byHour[h]
+		if !ok {
+			cur = &Hour{Hour: h}
+			byHour[h] = cur
+		}
+		cur.Requests, cur.Estimated = cur.Requests+1, cur.Estimated+est
+		cur.Add(t)
+
+		k := groupKey{r.CWD, r.Agent, r.Vendor, r.Model}
+		g, ok := byGroup[k]
+		if !ok {
+			g = &Group{Repo: r.CWD, Agent: r.Agent, Vendor: r.Vendor, Model: r.Model, First: r.Time}
+			byGroup[k], groupSessions[k] = g, make(map[string]bool)
+		}
+		g.Requests, g.Estimated = g.Requests+1, g.Estimated+est
+		g.Add(t)
+		if r.Time.Before(g.First) {
+			g.First = r.Time
+		}
+		if r.Time.After(g.Last) {
+			g.Last = r.Time
+		}
+		groupSessions[k][r.SessionID] = true
+
+		sp, ok := bySession[r.SessionID]
+		if !ok {
+			sp = &SessionSpan{SessionID: r.SessionID, First: r.Time, Last: r.Time}
+			bySession[r.SessionID] = sp
+		}
+		sp.Requests++
+		if r.Time.Before(sp.First) {
+			sp.First = r.Time
+		}
+		if r.Time.After(sp.Last) {
+			sp.Last = r.Time
+		}
+	}
+	for _, h := range byHour {
+		hours = append(hours, *h)
+	}
+	sort.Slice(hours, func(i, j int) bool { return hours[i].Hour < hours[j].Hour })
+	for k, g := range byGroup {
+		g.Sessions = len(groupSessions[k])
+		groups = append(groups, *g)
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].Total() > groups[j].Total() })
+	for _, sp := range bySession {
+		spans = append(spans, *sp)
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].First.Before(spans[j].First) })
+	return hours, groups, spans
+}
