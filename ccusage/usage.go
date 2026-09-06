@@ -65,6 +65,10 @@ func (r Record) Total() int { return r.Context() + r.Output }
 // measurement: when the request has text, Output is estimated by tokenizing
 // every entry folded into it and OutputEstimated is set. This is the estimate
 // the cass collector has always applied; see [EstimateOutput].
+// syntheticModel is the model Claude Code stamps on a message it wrote
+// itself rather than received from a provider.
+const syntheticModel = "<synthetic>"
+
 func FromEntries(agent string, entries []cc.Entry) []Record {
 	cacheInInput := cacheInInput(agent)
 	var (
@@ -89,6 +93,13 @@ func FromEntries(agent string, entries []cc.Entry) []Record {
 			Output:      u.OutputTokens,
 		}
 		if m != nil {
+			if m.Model == syntheticModel {
+				// Claude Code writes an assistant message of its own when it
+				// has something to say without asking the model -- a rate
+				// limit notice, an API error. Its usage is all zeros and its
+				// text is not a completion, so it is not a request.
+				continue
+			}
 			r.Model, r.Vendor = m.Model, Vendor(m.Model)
 			r.RequestID = m.ID
 		}

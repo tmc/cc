@@ -190,6 +190,24 @@ func TestFromEntriesSkipsNonRequests(t *testing.T) {
 	}
 }
 
+// TestFromEntriesSkipsSynthetic checks that Claude Code's own injected
+// assistant messages -- a rate limit notice, an API error -- are not counted
+// as requests. Their usage is all zeros, so counting them would add a request
+// and, once the output estimate ran over their text, tokens that were never
+// generated.
+func TestFromEntriesSkipsSynthetic(t *testing.T) {
+	synth := entry("msg_synth", "<synthetic>", 0, 0, 0, 0)
+	synth.Message.Content = json.RawMessage(
+		`[{"type":"text","text":"You've hit your session limit · resets 12:50am"}]`)
+	recs := FromEntries("claude-code", []cc.Entry{
+		synth,
+		entry("msg1", "claude-opus-5", 7, 0, 0, 9),
+	})
+	if len(recs) != 1 || recs[0].Model != "claude-opus-5" {
+		t.Fatalf("records = %+v, want only the real request", recs)
+	}
+}
+
 // TestFromEntriesCarriesEntryFields checks the fields a Record takes from the
 // entry rather than from the usage: the sidechain tag decides whether a
 // request can be filtered out of a total, and the timestamp is what every
