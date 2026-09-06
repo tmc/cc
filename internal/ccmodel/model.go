@@ -50,6 +50,13 @@ type Entry struct {
 	SourceToolAssistantUUID string          `json:"sourceToolAssistantUUID,omitempty"`
 	Usage                   *Usage          `json:"usage,omitempty"`
 
+	// UsageTotal is the session-to-date running total that accompanies Usage
+	// in harnesses reporting a counter rather than a per-request delta (Codex
+	// token_count events). Readers use it to tell a re-emitted counter from a
+	// new request: two events with equal UsageTotal describe the same tokens
+	// twice. It is never present in Claude Code JSONL and is not serialized.
+	UsageTotal *Usage `json:"-"`
+
 	// Custom title set via /rename command.
 	CustomTitle string `json:"customTitle,omitempty"`
 
@@ -225,14 +232,33 @@ func (b *ContentBlock) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Usage holds token usage information.
+// Usage holds token usage information for one model request, in the Anthropic
+// convention: the four counts are disjoint, so the prompt the model read is
+// InputTokens+CacheReadInputTokens+CacheCreationInputTokens and the whole
+// request is that plus OutputTokens.
+//
+// Providers do not agree on this. Codex and Gemini report cached prompt tokens
+// as a subset of their input count; their readers record that number verbatim,
+// so a Usage from those formats is provider-shaped, not normalized. Package
+// ccusage does the subtraction and is the only place a cross-provider total
+// should be summed from. A future reader must either subtract the cached
+// tokens itself or be added to ccusage's list of formats that have not.
 type Usage struct {
-	InputTokens              int                  `json:"input_tokens"`
-	OutputTokens             int                  `json:"output_tokens"`
-	CacheReadInputTokens     int                  `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens int                  `json:"cache_creation_input_tokens,omitempty"`
-	ServiceTier              string               `json:"service_tier,omitempty"`
-	CacheCreation            *CacheCreationDetail `json:"cache_creation,omitempty"`
+	// InputTokens counts prompt tokens the provider processed uncached.
+	// It never includes cache reads or cache creations.
+	InputTokens int `json:"input_tokens"`
+	// OutputTokens counts completion tokens, reasoning included. Claude Code
+	// writes a streaming-start snapshot of 1 for the first entry of a
+	// message; later entries for the same message id carry the grown count.
+	OutputTokens int `json:"output_tokens"`
+	// CacheReadInputTokens counts prompt tokens served from a provider cache.
+	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
+	// CacheCreationInputTokens counts prompt tokens written to a provider
+	// cache. It is 0 for providers with no such notion.
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+
+	ServiceTier   string               `json:"service_tier,omitempty"`
+	CacheCreation *CacheCreationDetail `json:"cache_creation,omitempty"`
 }
 
 // CacheCreationDetail holds ephemeral cache token counts.

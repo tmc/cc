@@ -34,6 +34,74 @@ type Reader struct {
 	hasPending       bool
 	buffered         Entry
 	hasBuffered      bool
+	usage            usageFold
+}
+
+// usageFold attaches the usage carried by standalone token_count entries to the
+// assistant message they follow. Codex reports usage that way, one event per
+// request rather than a field on the message, and the events do not line up
+// one-to-one with assistant entries: several can arrive between two of them,
+// tool calls and reasoning sit in between, and a rate-limit refresh re-sends
+// the last counter unchanged. So the fold sums successive events into the most
+// recent assistant message and skips a repeat whose running total has not
+// moved, which would otherwise count one request's tokens twice.
+type usageFold struct {
+	assistant *Message
+	total     *Usage
+}
+
+// see records entry as the message later token_count entries belong to.
+func (f *usageFold) see(entry Entry) {
+	if entry.Message != nil && entry.Message.Role == "assistant" {
+		f.assistant = entry.Message
+	}
+}
+
+// add folds one token_count entry into the preceding assistant message and
+// reports whether it counted. Because Message is a pointer, an entry already
+// returned to the caller gains the usage too — the alternative is dropping it,
+// since the counter always arrives after the message it describes.
+func (f *usageFold) add(entry Entry) bool {
+	if sameUsage(f.total, entry.UsageTotal) {
+		return false // running total unmoved: the same request, reported twice.
+	}
+	if entry.UsageTotal != nil {
+		f.total = entry.UsageTotal
+	}
+	if f.assistant == nil {
+		return false
+	}
+	f.assistant.Usage = addUsage(f.assistant.Usage, entry.Usage)
+	return true
+}
+
+// sameUsage reports whether a and b are both present and carry the same four
+// token counts.
+func sameUsage(a, b *Usage) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.InputTokens == b.InputTokens && a.OutputTokens == b.OutputTokens &&
+		a.CacheReadInputTokens == b.CacheReadInputTokens &&
+		a.CacheCreationInputTokens == b.CacheCreationInputTokens
+}
+
+// addUsage returns the sum of dst and src without mutating either: the usage a
+// token_count entry carries is handed to callers as part of that entry, so it
+// must not become an accumulator.
+func addUsage(dst, src *Usage) *Usage {
+	if src == nil {
+		return dst
+	}
+	sum := *src
+	if dst != nil {
+		sum = *dst
+		sum.InputTokens += src.InputTokens
+		sum.OutputTokens += src.OutputTokens
+		sum.CacheReadInputTokens += src.CacheReadInputTokens
+		sum.CacheCreationInputTokens += src.CacheCreationInputTokens
+	}
+	return &sum
 }
 
 // NewReader creates a Reader from an io.Reader. The context is checked
@@ -79,11 +147,10 @@ func (r *Reader) Next() bool {
 			entry.SessionID = r.currentSessionID
 		}
 		if entry.Type == "system" && entry.Subtype == "token_count" && entry.Usage != nil {
-			if r.hasPending && r.pending.Message != nil && r.pending.Message.Role == "assistant" && r.pending.Message.Usage == nil {
-				r.pending.Message.Usage = entry.Usage
-			}
+			r.usage.add(entry)
 			continue
 		}
+		r.usage.see(entry)
 		if r.hasPending {
 			r.buffered = entry
 			r.hasBuffered = true
@@ -295,7 +362,7 @@ func readComplete(ctx context.Context, r io.Reader) (entries []Entry, consumed i
 	br := bufio.NewReaderSize(r, initialBufferSize)
 	n := 0
 	currentSessionID := ""
-	lastAssistant := -1
+	var usage usageFold
 	for {
 		line, complete, readErr := readLine(br)
 		if readErr != nil && readErr != io.EOF {
@@ -319,17 +386,11 @@ func readComplete(ctx context.Context, r io.Reader) (entries []Entry, consumed i
 					entry.SessionID = currentSessionID
 				}
 				if entry.Type == "system" && entry.Subtype == "token_count" && entry.Usage != nil {
-					if lastAssistant >= 0 && lastAssistant < len(entries) {
-						if msg := entries[lastAssistant].Message; msg != nil && msg.Role == "assistant" {
-							msg.Usage = entry.Usage
-						}
-					}
+					usage.add(entry)
 					continue
 				}
 				entries = append(entries, entry)
-				if entry.Message != nil && entry.Message.Role == "assistant" {
-					lastAssistant = len(entries) - 1
-				}
+				usage.see(entry)
 			}
 		} else if len(line) > 0 {
 			// An unterminated final line: decode it for the returned set

@@ -12,6 +12,7 @@ import (
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/ccusage"
 )
 
 type requestRecord struct {
@@ -28,11 +29,6 @@ type requestRecord struct {
 	Weight         float64
 	ParallelActive int
 	CompactFollow  bool
-}
-
-type pricingConfig struct {
-	Default *pricing           `json:"default,omitempty"`
-	Models  map[string]pricing `json:"models,omitempty"`
 }
 
 type sessionAgg struct {
@@ -383,15 +379,14 @@ func clearWatchScreen() {
 }
 
 func requestWeight(req requestRecord, pricingCfg pricingConfig) float64 {
-	rates := pricingForModel(req.Model, pricingCfg)
-	switch strings.ToLower(*unitFlag) {
-	case "requests":
-		return 1
-	case "tokens":
-		return float64(req.InputTokens + req.OutputTokens + req.CacheRead + req.CacheCreate)
-	default:
-		return float64(req.InputTokens)*rates.Input + float64(req.OutputTokens)*rates.Output + float64(req.CacheRead)*rates.CacheRead + float64(req.CacheCreate)*rates.CacheCreate
+	r := ccusage.Record{
+		Model:       req.Model,
+		Input:       req.InputTokens,
+		Output:      req.OutputTokens,
+		CacheRead:   req.CacheRead,
+		CacheCreate: req.CacheCreate,
 	}
+	return ccusage.Weight(r, *unitFlag, ccusage.PricingForModel(req.Model, pricingCfg))
 }
 
 func effectiveParallelWindow() time.Duration {
@@ -409,69 +404,20 @@ func effectiveParallelWindow() time.Duration {
 	return window
 }
 
-type pricing struct {
-	Input       float64 `json:"input"`
-	Output      float64 `json:"output"`
-	CacheRead   float64 `json:"cache_read"`
-	CacheCreate float64 `json:"cache_create"`
-}
+// The pricing table lives in ccusage so the index and the file-mode reports
+// weight a request the same way; these names stay for the call sites here.
+type (
+	pricing       = ccusage.Pricing
+	pricingConfig = ccusage.PricingConfig
+)
 
-var defaultPricing = pricing{Input: 1.0, Output: 1.0, CacheRead: 0.10, CacheCreate: 0.20}
-
-func loadPricingConfig(path string) (pricingConfig, error) {
-	cfg := pricingConfig{Models: make(map[string]pricing)}
-	if path == "" {
-		return cfg, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return pricingConfig{}, fmt.Errorf("read pricing file: %w", err)
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return pricingConfig{}, fmt.Errorf("parse pricing file: %w", err)
-	}
-	if cfg.Models == nil {
-		cfg.Models = make(map[string]pricing)
-	}
-	return cfg, nil
-}
+func loadPricingConfig(path string) (pricingConfig, error) { return ccusage.LoadPricing(path) }
 
 func pricingForModel(model string, cfg pricingConfig) pricing {
-	if p, ok := cfg.Models[model]; ok {
-		return p
-	}
-	if p, ok := cfg.Models[modelFamily(model)]; ok {
-		return p
-	}
-	if cfg.Default != nil {
-		return *cfg.Default
-	}
-	switch modelFamily(model) {
-	case "opus":
-		return pricing{Input: 1.5, Output: 1.5, CacheRead: 0.15, CacheCreate: 0.30}
-	case "haiku":
-		return pricing{Input: 0.3, Output: 0.3, CacheRead: 0.03, CacheCreate: 0.06}
-	default:
-		return defaultPricing
-	}
+	return ccusage.PricingForModel(model, cfg)
 }
 
-func modelFamily(model string) string {
-	lower := strings.ToLower(model)
-	switch {
-	case strings.Contains(lower, "opus"):
-		return "opus"
-	case strings.Contains(lower, "haiku"):
-		return "haiku"
-	case strings.Contains(lower, "sonnet"):
-		return "sonnet"
-	default:
-		if lower == "" {
-			return "unknown"
-		}
-		return lower
-	}
-}
+func modelFamily(model string) string { return ccusage.ModelFamily(model) }
 
 func renderUnitLabel(unit string) string {
 	switch strings.ToLower(unit) {

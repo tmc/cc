@@ -4,30 +4,12 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
-	"github.com/tmc/tokencount/anthropictokenizer"
+	"github.com/tmc/cc/ccusage"
 )
-
-// tokenCounter is lazily initialized for output token estimation.
-var (
-	tokenCounterOnce sync.Once
-	tokenCounter     *anthropictokenizer.Counter
-)
-
-// getTokenCounter returns the shared token counter, or nil if initialization failed.
-func getTokenCounter() *anthropictokenizer.Counter {
-	tokenCounterOnce.Do(func() {
-		c, err := anthropictokenizer.NewCounter()
-		if err == nil {
-			tokenCounter = c
-		}
-	})
-	return tokenCounter
-}
 
 // it2 command patterns for stats extraction.
 var it2StatsPatterns = []struct {
@@ -118,15 +100,10 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 			// We estimate it via BPE tokenization of the text content.
 			if e.Message.Usage != nil {
 				s.InputTokens += e.Message.Usage.InputTokens
-				out := e.Message.Usage.OutputTokens
 				// If output is undercounted (streaming-start = 1), estimate from content.
-				if out <= 1 {
-					if tc := getTokenCounter(); tc != nil {
-						if text := e.Message.TextContent(); text != "" {
-							out = tc.Count(text)
-							s.OutputTokensEstimated = true
-						}
-					}
+				out, estimated := ccusage.EstimateOutput(e.Message.Usage.OutputTokens, e.Message)
+				if estimated {
+					s.OutputTokensEstimated = true
 				}
 				s.OutputTokensSnapshot += out
 				s.CacheReads += e.Message.Usage.CacheReadInputTokens

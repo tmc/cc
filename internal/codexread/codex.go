@@ -361,13 +361,8 @@ func decodeCodexEventMsg(env codexEnvelope) (ccmodel.Entry, bool) {
 	var payload struct {
 		Type string `json:"type"`
 		Info struct {
-			LastTokenUsage struct {
-				InputTokens           int `json:"input_tokens"`
-				CachedInputTokens     int `json:"cached_input_tokens"`
-				OutputTokens          int `json:"output_tokens"`
-				ReasoningOutputTokens int `json:"reasoning_output_tokens"`
-				TotalTokens           int `json:"total_tokens"`
-			} `json:"last_token_usage"`
+			LastTokenUsage  codexTokenUsage `json:"last_token_usage"`
+			TotalTokenUsage codexTokenUsage `json:"total_token_usage"`
 		} `json:"info"`
 	}
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
@@ -376,21 +371,45 @@ func decodeCodexEventMsg(env codexEnvelope) (ccmodel.Entry, bool) {
 	if payload.Type != "token_count" {
 		return ccmodel.Entry{}, false
 	}
-	u := &ccmodel.Usage{
-		InputTokens:              payload.Info.LastTokenUsage.InputTokens,
-		OutputTokens:             payload.Info.LastTokenUsage.OutputTokens,
-		CacheReadInputTokens:     payload.Info.LastTokenUsage.CachedInputTokens,
-		CacheCreationInputTokens: 0,
-	}
+	u := payload.Info.LastTokenUsage.usage()
 	if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadInputTokens == 0 {
 		return ccmodel.Entry{}, false
 	}
-	return ccmodel.Entry{
+	entry := ccmodel.Entry{
 		Type:      "system",
 		Subtype:   "token_count",
 		Timestamp: env.Timestamp,
 		Usage:     u,
-	}, true
+	}
+	if total := payload.Info.TotalTokenUsage; total.TotalTokens != 0 {
+		entry.UsageTotal = total.usage()
+	}
+	return entry, true
+}
+
+// codexTokenUsage is one of the two counters a token_count event reports:
+// last_token_usage, the tokens of the request just finished, and
+// total_token_usage, the session-to-date running total. InputTokens is
+// cache-inclusive here (CachedInputTokens is a subset of it) and is carried
+// through verbatim; see the ccmodel.Usage doc comment for where that is
+// normalized. Codex folds reasoning tokens into OutputTokens already, so
+// ReasoningOutputTokens is a breakdown, not an addend.
+type codexTokenUsage struct {
+	InputTokens           int `json:"input_tokens"`
+	CachedInputTokens     int `json:"cached_input_tokens"`
+	CacheWriteInputTokens int `json:"cache_write_input_tokens"`
+	OutputTokens          int `json:"output_tokens"`
+	ReasoningOutputTokens int `json:"reasoning_output_tokens"`
+	TotalTokens           int `json:"total_tokens"`
+}
+
+func (c codexTokenUsage) usage() *ccmodel.Usage {
+	return &ccmodel.Usage{
+		InputTokens:              c.InputTokens,
+		OutputTokens:             c.OutputTokens,
+		CacheReadInputTokens:     c.CachedInputTokens,
+		CacheCreationInputTokens: c.CacheWriteInputTokens,
+	}
 }
 
 func codexTextBlocks(raw json.RawMessage) []ccmodel.ContentBlock {
