@@ -1,6 +1,8 @@
 package ccusage
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,6 +86,24 @@ func TestFromEntriesPerHarness(t *testing.T) {
 			in: 1, cacheRead: 13288, cacheCreate: 81, out: 26,
 			wantIn: 1, wantRead: 13288, wantCreate: 81, wantOut: 26,
 			wantVendor: "anthropic",
+		},
+		{
+			// A real codex token_count that wrote to the cache: input_tokens
+			// 34143 contains both the 32976 it read and the 1164 it wrote, so
+			// 3 tokens were new. The event's own total_tokens, 34296, is
+			// input+output, which is what proves both are subsets.
+			name: "codex cache write", agent: "codex-cli", model: "gpt-5.4-codex",
+			in: 34143, cacheRead: 32976, cacheCreate: 1164, out: 153,
+			wantIn: 3, wantRead: 32976, wantCreate: 1164, wantOut: 153,
+			wantVendor: "openai",
+		},
+		{
+			// A cold cache: the whole prompt is a cache write. Subtracting
+			// only the read would report the prompt twice.
+			name: "codex cold cache", agent: "codex-cli", model: "gpt-5.4-codex",
+			in: 239670, cacheRead: 0, cacheCreate: 239667, out: 220,
+			wantIn: 3, wantRead: 0, wantCreate: 239667, wantOut: 220,
+			wantVendor: "openai",
 		},
 		{
 			// Cached exceeding input cannot happen upstream, but a floor is
@@ -226,27 +246,35 @@ func TestVendor(t *testing.T) {
 	}
 }
 
+// TestWeight checks each unit's weighting beside the label a report prints for
+// it. The two switches are tested together because they drifted apart once:
+// Weight grew units that the label did not, so a report headed "cost-weighted
+// tokens" printed raw output counts.
 func TestWeight(t *testing.T) {
 	r := Record{Input: 10, CacheRead: 100, CacheCreate: 20, Output: 5}
 	p := Pricing{Input: 1, Output: 2, CacheRead: 0.1, CacheCreate: 0.5}
 	tests := []struct {
-		unit string
-		want float64
+		unit  string
+		want  float64
+		label string
 	}{
-		{"requests", 1},
-		{"input", 10},
-		{"output", 5},
-		{"context", 130},
-		{"total", 135},
-		{"tokens", 135},
-		{"TOTAL", 135},
+		{"requests", 1, "requests"},
+		{"input", 10, "uncached input tokens"},
+		{"output", 5, "output tokens"},
+		{"context", 130, "context tokens"},
+		{"total", 135, "tokens"},
+		{"tokens", 135, "tokens"},
+		{"TOTAL", 135, "tokens"},
 		// 10*1 + 5*2 + 100*0.1 + 20*0.5 = 40.
-		{"cost", 40},
-		{"nonsense", 40},
+		{"cost", 40, "cost-weighted tokens"},
+		{"nonsense", 40, "cost-weighted tokens"},
 	}
 	for _, tt := range tests {
 		if got := Weight(r, tt.unit, p); got != tt.want {
 			t.Errorf("Weight(unit %q) = %v, want %v", tt.unit, got, tt.want)
+		}
+		if got := UnitLabel(tt.unit); got != tt.label {
+			t.Errorf("UnitLabel(%q) = %q, want %q", tt.unit, got, tt.label)
 		}
 	}
 }
@@ -309,4 +337,87 @@ func TestLoadPricing(t *testing.T) {
 	if _, err := LoadPricing("/nonexistent/pricing.json"); err == nil {
 		t.Error("LoadPricing of a missing file succeeded, want an error")
 	}
+}
+
+// TestFromEntriesUnattributedUsage checks that a token_count entry the reader
+// could not attach to an assistant message still counts. Codex emits the
+// counter after the request, and the message it describes is missing from the
+// file for a sub-agent turn and for a tail read that starts mid-session;
+// dropping those events lost whole runs of requests.
+func TestFromEntriesUnattributedUsage(t *testing.T) {
+	entries := []cc.Entry{
+		{
+			Type:      "system",
+			Subtype:   "token_count",
+			SessionID: "s1",
+			Timestamp: time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC),
+			Usage: &cc.Usage{
+				InputTokens:          1050,
+				OutputTokens:         50,
+				CacheReadInputTokens: 1000,
+			},
+		},
+		entry("msg1", "gpt-5.4-codex", 2060, 2000, 0, 60),
+	}
+	recs := FromEntries("codex-cli", entries)
+	if len(recs) != 2 {
+		t.Fatalf("FromEntries returned %d records, want 2", len(recs))
+	}
+	if recs[0].Input != 50 || recs[0].CacheRead != 1000 || recs[0].Output != 50 {
+		t.Errorf("unattributed record = in %d, read %d, out %d; want 50, 1000, 50",
+			recs[0].Input, recs[0].CacheRead, recs[0].Output)
+	}
+	if recs[0].Model != "" || recs[0].Vendor != "" {
+		t.Errorf("unattributed record = model %q, vendor %q; want both empty",
+			recs[0].Model, recs[0].Vendor)
+	}
+	if recs[0].SessionID != "s1" || !recs[0].Time.Equal(recs[1].Time) {
+		t.Errorf("unattributed record = session %q, time %v; want the entry's own",
+			recs[0].SessionID, recs[0].Time)
+	}
+	if recs[0].OutputEstimated {
+		t.Error("OutputEstimated = true: an entry with no message has no text to tokenize")
+	}
+}
+
+// TestFromEntriesEstimatesWholeMessage checks that the output estimate covers
+// every entry folded into one request. Claude Code writes a message a block at
+// a time and each entry can carry the same streaming-start snapshot, so
+// picking the largest-output entry picks the first one, and tokenizing only it
+// misses the rest of the same request's output.
+func TestFromEntriesEstimatesWholeMessage(t *testing.T) {
+	first := entry("msg1", "claude-opus-5", 2, 100, 0, 1)
+	first.Message.Content = textContent("the short first block")
+	second := entry("msg1", "claude-opus-5", 2, 100, 0, 1)
+	second.Message.Content = textContent(strings.Repeat("a much longer second block ", 40))
+
+	recs := FromEntries("claude-code", []cc.Entry{first, second})
+	if len(recs) != 1 {
+		t.Fatalf("FromEntries returned %d records, want 1", len(recs))
+	}
+	if !recs[0].OutputEstimated {
+		t.Fatal("OutputEstimated = false, want true (both entries reported the snapshot)")
+	}
+
+	whole := entry("msg1", "claude-opus-5", 2, 100, 0, 1)
+	whole.Message.Content = textContent(first.Message.TextContent() + "\n" + second.Message.TextContent())
+	want, ok := EstimateOutput(1, whole.Message)
+	if !ok {
+		t.Skip("tokenizer unavailable")
+	}
+	if recs[0].Output != want {
+		t.Errorf("folded estimate = %d, want %d (both blocks tokenized)", recs[0].Output, want)
+	}
+	if only, _ := EstimateOutput(1, first.Message); recs[0].Output <= only {
+		t.Errorf("folded estimate = %d, no larger than the first block alone (%d)", recs[0].Output, only)
+	}
+}
+
+// textContent renders one text block as a message content array.
+func textContent(text string) json.RawMessage {
+	raw, err := json.Marshal([]cc.ContentBlock{{Type: "text", Text: text}})
+	if err != nil {
+		panic(err)
+	}
+	return raw
 }

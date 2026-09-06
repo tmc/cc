@@ -34,36 +34,58 @@ type Reader struct {
 	hasPending       bool
 	buffered         Entry
 	hasBuffered      bool
-	usage            usageFold
+	usage            codexFold
 }
 
-// usageFold attaches the usage carried by standalone token_count entries to the
-// assistant message they follow. Codex reports usage that way, one event per
-// request rather than a field on the message, and the events do not line up
-// one-to-one with assistant entries: several can arrive between two of them,
-// tool calls and reasoning sit in between, and a rate-limit refresh re-sends
-// the last counter unchanged. So the fold sums successive events into the most
-// recent assistant message and skips a repeat whose running total has not
-// moved, which would otherwise count one request's tokens twice.
-type usageFold struct {
+// codexFold attaches the facts Codex reports on their own lines — the token
+// counts of a finished request and the model of the current turn — to the
+// assistant messages they belong to.
+//
+// Codex reports usage as one token_count event per request rather than a field
+// on the message, and the events do not line up one-to-one with assistant
+// entries: several can arrive between two of them, tool calls and reasoning sit
+// in between, and a rate-limit refresh re-sends the last counter unchanged. So
+// the fold sums successive events into the most recent assistant message and
+// skips a repeat whose running total has not moved, which would otherwise count
+// one request's tokens twice.
+//
+// The model arrives the other way round, on a turn_context line before the
+// turn's messages, so it is stamped onto each assistant message as it is seen.
+type codexFold struct {
 	assistant *Message
 	total     *Usage
+	model     string
 }
 
-// see records entry as the message later token_count entries belong to.
-func (f *usageFold) see(entry Entry) {
-	if entry.Message != nil && entry.Message.Role == "assistant" {
-		f.assistant = entry.Message
+// see records entry as the message later token_count entries belong to, and
+// stamps it with the turn's model when the harness records one per turn.
+func (f *codexFold) see(entry Entry) {
+	if entry.TurnModel != "" {
+		f.model = entry.TurnModel
+	}
+	if entry.Message == nil || entry.Message.Role != "assistant" {
+		return
+	}
+	f.assistant = entry.Message
+	if f.assistant.Model == "" {
+		f.assistant.Model = f.model
 	}
 }
 
 // add folds one token_count entry into the preceding assistant message and
-// reports whether it counted. Because Message is a pointer, an entry already
-// returned to the caller gains the usage too — the alternative is dropping it,
-// since the counter always arrives after the message it describes.
-func (f *usageFold) add(entry Entry) bool {
+// reports whether it was consumed. Because Message is a pointer, an entry
+// already returned to the caller gains the usage too — the alternative is
+// dropping it, since the counter always arrives after the message it describes.
+//
+// A repeated counter is consumed and discarded. An event with no assistant
+// message before it is not consumed: it describes a request whose message is
+// not in this file — Codex emits them for a sub-agent turn, and a tail read
+// starts mid-session — and attributing it to a later message would bill the
+// wrong request, so the caller emits it as its own entry instead and
+// [github.com/tmc/cc/ccusage.FromEntries] counts it unattributed.
+func (f *codexFold) add(entry Entry) bool {
 	if sameUsage(f.total, entry.UsageTotal) {
-		return false // running total unmoved: the same request, reported twice.
+		return true // running total unmoved: the same request, reported twice.
 	}
 	if entry.UsageTotal != nil {
 		f.total = entry.UsageTotal
@@ -147,8 +169,10 @@ func (r *Reader) Next() bool {
 			entry.SessionID = r.currentSessionID
 		}
 		if entry.Type == "system" && entry.Subtype == "token_count" && entry.Usage != nil {
-			r.usage.add(entry)
-			continue
+			if r.usage.add(entry) {
+				continue
+			}
+			// Unattributed: fall through so the tokens stay in the stream.
 		}
 		r.usage.see(entry)
 		if r.hasPending {
@@ -247,11 +271,15 @@ var ErrTailInvalid = errors.New("tail offset invalid; reparse from start")
 // entries+partial — folding partial into the cache would double-count it when
 // the line later completes.
 //
-// Because each JSONL line decodes independently (see decodeEntryLine), the
-// entries (plus partial) returned are exactly those a full [ReadFile] would
-// yield for the same byte range. ReadFileFrom returns [ErrTailInvalid] when
-// offset is past the file size or not on a line boundary; the caller should
-// reparse the whole file in that case.
+// Each JSONL line decodes independently (see decodeEntryLine), so the entries
+// (plus partial) returned are those a full [ReadFile] would yield for the same
+// byte range, with one exception: a Codex token_count line describes the
+// request before it, so one that starts a tail read, or that is still being
+// written, has no assistant entry to attach to and is returned as its own
+// unattributed entry. Its tokens are counted either way; only their attribution
+// waits for a read that sees the whole session. ReadFileFrom returns
+// [ErrTailInvalid] when offset is past the file size or not on a line boundary;
+// the caller should reparse the whole file in that case.
 func ReadFileFrom(ctx context.Context, path string, offset int64) (entries []Entry, newOffset int64, partial *Entry, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, nil, err
@@ -355,6 +383,9 @@ func ReadFileWithOffset(ctx context.Context, path string) (entries []Entry, offs
 // trailing line) are not counted in consumed — so the offset always lands on a
 // line boundary — but are decoded and returned as partial (nil if absent or
 // undecodable), matching what [ReadFile]'s scanner yields for the final token.
+// A partial is never folded into an earlier entry, even when it is a Codex
+// token_count: the entries it would mutate are cached by callers that will
+// re-read the line once it completes.
 // A single line longer than [MaxLineSize] returns the entries decoded so far
 // plus [bufio.ErrTooLong], exactly as [ReadFile] does, so all readers agree on
 // which files are unparseable.
@@ -362,7 +393,7 @@ func readComplete(ctx context.Context, r io.Reader) (entries []Entry, consumed i
 	br := bufio.NewReaderSize(r, initialBufferSize)
 	n := 0
 	currentSessionID := ""
-	var usage usageFold
+	var usage codexFold
 	for {
 		line, complete, readErr := readLine(br)
 		if readErr != nil && readErr != io.EOF {
@@ -386,8 +417,10 @@ func readComplete(ctx context.Context, r io.Reader) (entries []Entry, consumed i
 					entry.SessionID = currentSessionID
 				}
 				if entry.Type == "system" && entry.Subtype == "token_count" && entry.Usage != nil {
-					usage.add(entry)
-					continue
+					if usage.add(entry) {
+						continue
+					}
+					// Unattributed: fall through so the tokens stay in the stream.
 				}
 				entries = append(entries, entry)
 				usage.see(entry)

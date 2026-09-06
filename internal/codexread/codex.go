@@ -158,15 +158,20 @@ func firstNonEmptyString(a, b string) string {
 	return b
 }
 
+// decodeCodexTurnContext decodes the header Codex writes before each turn. It
+// carries the only model string a rollout records: Codex never repeats it on
+// the messages themselves, so the entry hands it to the reader as TurnModel and
+// the reader stamps it onto the turn's assistant messages.
 func decodeCodexTurnContext(env codexEnvelope) (ccmodel.Entry, bool) {
 	var payload struct {
 		TurnID string `json:"turn_id"`
 		CWD    string `json:"cwd"`
+		Model  string `json:"model"`
 	}
 	if err := json.Unmarshal(env.Payload, &payload); err != nil {
 		return ccmodel.Entry{}, false
 	}
-	if payload.CWD == "" {
+	if payload.CWD == "" && payload.Model == "" {
 		return ccmodel.Entry{}, false
 	}
 	return ccmodel.Entry{
@@ -175,6 +180,7 @@ func decodeCodexTurnContext(env codexEnvelope) (ccmodel.Entry, bool) {
 		UUID:      payload.TurnID,
 		Timestamp: env.Timestamp,
 		CWD:       payload.CWD,
+		TurnModel: payload.Model,
 		IsMeta:    true,
 	}, true
 }
@@ -390,10 +396,12 @@ func decodeCodexEventMsg(env codexEnvelope) (ccmodel.Entry, bool) {
 // codexTokenUsage is one of the two counters a token_count event reports:
 // last_token_usage, the tokens of the request just finished, and
 // total_token_usage, the session-to-date running total. InputTokens is
-// cache-inclusive here (CachedInputTokens is a subset of it) and is carried
-// through verbatim; see the ccmodel.Usage doc comment for where that is
-// normalized. Codex folds reasoning tokens into OutputTokens already, so
-// ReasoningOutputTokens is a breakdown, not an addend.
+// cache-inclusive here — both CachedInputTokens and CacheWriteInputTokens are
+// subsets of it, which the event's own TotalTokens confirms by equalling
+// InputTokens+OutputTokens — and is carried through verbatim; see the
+// ccmodel.Usage doc comment for where that is normalized. Codex folds reasoning
+// tokens into OutputTokens already, so ReasoningOutputTokens is a breakdown,
+// not an addend.
 type codexTokenUsage struct {
 	InputTokens           int `json:"input_tokens"`
 	CachedInputTokens     int `json:"cached_input_tokens"`

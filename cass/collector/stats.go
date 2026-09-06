@@ -57,6 +57,8 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 	s.ToolBreakdown = make(map[string]int)
 	countSubagentMirrors(entries, &s)
 
+	countTokens(entries, &s)
+
 	filesRead := make(map[string]bool)
 	filesWritten := make(map[string]bool)
 	filesEdited := make(map[string]bool)
@@ -94,22 +96,6 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 			// Count codex subagent notifications.
 			s.TeamMessagesRecvd += strings.Count(text, "<subagent_notification>")
 		case "assistant":
-			// Token usage.
-			// OutputTokensSnapshot in JSONL is a streaming-start snapshot (value=1);
-			// the final count lives only in SSE message_delta, not in JSONL.
-			// We estimate it via BPE tokenization of the text content.
-			if e.Message.Usage != nil {
-				s.InputTokens += e.Message.Usage.InputTokens
-				// If output is undercounted (streaming-start = 1), estimate from content.
-				out, estimated := ccusage.EstimateOutput(e.Message.Usage.OutputTokens, e.Message)
-				if estimated {
-					s.OutputTokensEstimated = true
-				}
-				s.OutputTokensSnapshot += out
-				s.CacheReads += e.Message.Usage.CacheReadInputTokens
-				s.CacheCreationInputTokens += e.Message.Usage.CacheCreationInputTokens
-			}
-
 			// Tool use analysis.
 			for _, b := range e.Message.ContentBlocks() {
 				if b.Type != "tool_use" {
@@ -191,6 +177,29 @@ func ExtractStats(entries []cc.Entry) cass.SessionStats {
 
 	s.Sparkline = buildSparkline(entries)
 	return s
+}
+
+// countTokens sums the session's token usage into s.
+//
+// The counting goes through [ccusage.FromEntries] so a request Claude Code
+// wrote as several JSONL entries — one per streamed block, each repeating the
+// prompt counts — is counted once. Summing those entries instead roughly
+// doubled the input and cache-read totals of every Claude session.
+//
+// The agent is deliberately empty. FromEntries subtracts the cached tokens
+// Codex and Gemini fold into their input count, and these totals are stored per
+// session as the provider reported them; only the fold and the output estimate
+// are wanted here.
+func countTokens(entries []cc.Entry, s *cass.SessionStats) {
+	for _, r := range ccusage.FromEntries("", entries) {
+		s.InputTokens += r.Input
+		s.OutputTokensSnapshot += r.Output
+		s.CacheReads += r.CacheRead
+		s.CacheCreationInputTokens += r.CacheCreate
+		if r.OutputEstimated {
+			s.OutputTokensEstimated = true
+		}
+	}
 }
 
 func countSubagentMirrors(entries []cc.Entry, s *cass.SessionStats) {

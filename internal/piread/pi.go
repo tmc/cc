@@ -65,11 +65,53 @@ type piMessage struct {
 	ErrorMessage string `json:"errorMessage"`
 }
 
+// piUsage is one pi request's token counts, which the two pi implementations
+// serialize under different names: the TypeScript agent writes the lowercase
+// keys, the Go agent marshals llm.Usage with its untagged Go field names. Both
+// shapes appear on disk, and Go's case-insensitive matching does not bridge
+// them, so decode reads whichever is present. The four counts are disjoint in
+// both.
 type piUsage struct {
-	Input      int `json:"input"`
-	Output     int `json:"output"`
-	CacheRead  int `json:"cacheRead"`
-	CacheWrite int `json:"cacheWrite"`
+	Input      int
+	Output     int
+	CacheRead  int
+	CacheWrite int
+}
+
+func (u *piUsage) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Input      *int `json:"input"`
+		Output     *int `json:"output"`
+		CacheRead  *int `json:"cacheRead"`
+		CacheWrite *int `json:"cacheWrite"`
+
+		InputTokens      int `json:"InputTokens"`
+		OutputTokens     int `json:"OutputTokens"`
+		CacheReadTokens  int `json:"CacheReadTokens"`
+		CacheWriteTokens int `json:"CacheWriteTokens"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*u = piUsage{
+		Input:      raw.InputTokens,
+		Output:     raw.OutputTokens,
+		CacheRead:  raw.CacheReadTokens,
+		CacheWrite: raw.CacheWriteTokens,
+	}
+	if raw.Input != nil {
+		u.Input = *raw.Input
+	}
+	if raw.Output != nil {
+		u.Output = *raw.Output
+	}
+	if raw.CacheRead != nil {
+		u.CacheRead = *raw.CacheRead
+	}
+	if raw.CacheWrite != nil {
+		u.CacheWrite = *raw.CacheWrite
+	}
+	return nil
 }
 
 type piBlock struct {
@@ -330,7 +372,9 @@ func piMessageEntry(sessionID string, header piSessionHeader, version string, pe
 
 // piBlocks converts a pi message into canonical content blocks. Tool-result
 // messages (role "toolResult") become a single tool_result block; ordinary
-// messages map text/thinking/toolCall/image blocks.
+// messages map text/thinking/toolCall/image blocks. A tool call is "toolCall"
+// from the TypeScript agent and "tool_use" from the Go one; a message whose
+// only block is one the switch does not know yields no blocks and is dropped.
 func piBlocks(msg *piMessage) []ccmodel.ContentBlock {
 	if msg.Role == "toolResult" {
 		content := strings.TrimSpace(piContentText(msg.Content))
@@ -367,7 +411,7 @@ func piBlocks(msg *piMessage) []ccmodel.ContentBlock {
 			if b.Thinking != "" {
 				blocks = append(blocks, ccmodel.ContentBlock{Type: "thinking", Thinking: b.Thinking})
 			}
-		case "toolCall":
+		case "toolCall", "tool_use": // the TypeScript and Go pi agents differ.
 			blocks = append(blocks, ccmodel.ContentBlock{
 				Type:  "tool_use",
 				ID:    b.ID,

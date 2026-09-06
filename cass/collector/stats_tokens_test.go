@@ -45,8 +45,11 @@ func assistantWithUsage(text string, in, cacheRead, cacheCreate, out int) cc.Ent
 }
 
 // oldTokenTotals is the token arithmetic ExtractStats performed before the
-// estimate moved into ccusage, kept here so the move stays provably
-// behavior-preserving: it must agree with ExtractStats on every input.
+// estimate moved into ccusage, kept as an independent check on the move. It
+// agrees with ExtractStats on any session whose requests are one entry each,
+// which is every harness but Claude Code; where a request spans several
+// entries the two deliberately differ, and TestExtractStatsFoldsMessageID
+// covers that.
 func oldTokenTotals(t *testing.T, entries []cc.Entry) (in, out, cacheRead, cacheCreate int, estimated bool) {
 	for _, e := range entries {
 		if e.Message == nil || e.Message.Role != "assistant" || e.Message.Usage == nil {
@@ -67,9 +70,10 @@ func oldTokenTotals(t *testing.T, entries []cc.Entry) (in, out, cacheRead, cache
 	return
 }
 
-// TestExtractStatsTokenTotals pins the five token fields ExtractStats reports.
-// They are persisted in stats_json and the index has no backfill, so a change
-// in this arithmetic silently disagrees with every session already indexed.
+// TestExtractStatsTokenTotals pins the five token fields ExtractStats reports,
+// on sessions whose requests are one entry each. They are persisted in
+// stats_json, so a change in this arithmetic disagrees with every session
+// indexed before it.
 func TestExtractStatsTokenTotals(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -136,25 +140,85 @@ func TestExtractStatsTokenTotals(t *testing.T) {
 	}
 }
 
-// TestExtractStatsSumsPerEntry documents that ExtractStats sums every assistant
-// entry, including the several Claude Code writes for one streamed message. It
-// overcounts the prompt of such a message, which is why ccusage.FromEntries
-// folds by message id instead; the two are deliberately different, and this
-// test exists so a future change to ExtractStats is a decision rather than an
-// accident.
-func TestExtractStatsSumsPerEntry(t *testing.T) {
-	one := assistantWithUsage("answer", 2, 1000, 500, 40)
+// TestExtractStatsFoldsMessageID checks that the several entries Claude Code
+// writes for one streamed API message are counted once. Summing them, which
+// ExtractStats used to do, roughly doubled the input and cache-read totals of
+// every Claude session in the index.
+func TestExtractStatsFoldsMessageID(t *testing.T) {
+	one := assistantWithUsage("answer", 2, 1000, 500, 1)
 	one.Message.ID = "msg1"
 	two := assistantWithUsage("answer", 2, 1000, 500, 40)
 	two.Message.ID = "msg1"
+	other := assistantWithUsage("second", 7, 300, 0, 20)
+	other.Message.ID = "msg2"
 
-	s := ExtractStats([]cc.Entry{one, two})
-	if s.InputTokens != 4 || s.CacheReads != 2000 {
-		t.Errorf("ExtractStats totals = in %d, reads %d; want 4, 2000 (per-entry sum)",
-			s.InputTokens, s.CacheReads)
+	s := ExtractStats([]cc.Entry{one, two, other})
+	if s.InputTokens != 9 {
+		t.Errorf("InputTokens = %d, want 9 (2 folded + 7)", s.InputTokens)
 	}
-	recs := ccusage.FromEntries("claude-code", []cc.Entry{one, two})
-	if len(recs) != 1 || recs[0].Input != 2 || recs[0].CacheRead != 1000 {
-		t.Errorf("FromEntries = %+v; want one record with in 2, read 1000", recs)
+	if s.CacheReads != 1300 {
+		t.Errorf("CacheReads = %d, want 1300 (1000 folded + 300)", s.CacheReads)
+	}
+	if s.CacheCreationInputTokens != 500 {
+		t.Errorf("CacheCreationInputTokens = %d, want 500", s.CacheCreationInputTokens)
+	}
+	if s.OutputTokensSnapshot != 60 {
+		t.Errorf("OutputTokensSnapshot = %d, want 60 (40 folded + 20)", s.OutputTokensSnapshot)
+	}
+	if s.OutputTokensEstimated {
+		t.Error("OutputTokensEstimated = true, want false: the folded message ended above the snapshot")
+	}
+}
+
+// TestExtractStatsAgreesWithFromEntries checks that the collector's totals are
+// the sum of the records ccusage produces, so the per-session totals in
+// stats_json and the per-request rows in usage_events cannot drift apart.
+func TestExtractStatsAgreesWithFromEntries(t *testing.T) {
+	entries := []cc.Entry{
+		assistantWithUsage("first answer", 10, 100, 20, 1),
+		assistantWithUsage("second answer", 5, 200, 0, 30),
+		{Type: "user", Message: &cc.Message{Role: "user"}},
+	}
+	entries[0].Message.ID = "msg1"
+	entries[1].Message.ID = "msg2"
+
+	s := ExtractStats(entries)
+	var in, out, cacheRead, cacheCreate int
+	for _, r := range ccusage.FromEntries("", entries) {
+		in, out = in+r.Input, out+r.Output
+		cacheRead, cacheCreate = cacheRead+r.CacheRead, cacheCreate+r.CacheCreate
+	}
+	if s.InputTokens != in || s.OutputTokensSnapshot != out ||
+		s.CacheReads != cacheRead || s.CacheCreationInputTokens != cacheCreate {
+		t.Errorf("ExtractStats = in %d, out %d, read %d, create %d; FromEntries sums to %d, %d, %d, %d",
+			s.InputTokens, s.OutputTokensSnapshot, s.CacheReads, s.CacheCreationInputTokens,
+			in, out, cacheRead, cacheCreate)
+	}
+}
+
+// TestExtractStatsCountsUnattributedUsage checks that a token_count entry the
+// reader could not attach to an assistant message still reaches the totals.
+// Codex emits the counter after the fact, and the message it describes is
+// missing from a sub-agent turn or a tail read; dropping such an entry lost
+// whole runs of tokens.
+func TestExtractStatsCountsUnattributedUsage(t *testing.T) {
+	entries := []cc.Entry{
+		{
+			Type:    "system",
+			Subtype: "token_count",
+			Usage:   &cc.Usage{InputTokens: 900, OutputTokens: 40, CacheReadInputTokens: 100},
+		},
+		assistantWithUsage("answer", 5, 200, 0, 30),
+	}
+
+	s := ExtractStats(entries)
+	if s.InputTokens != 905 {
+		t.Errorf("InputTokens = %d, want 905 (900 unattributed + 5)", s.InputTokens)
+	}
+	if s.CacheReads != 300 {
+		t.Errorf("CacheReads = %d, want 300 (100 unattributed + 200)", s.CacheReads)
+	}
+	if s.OutputTokensSnapshot != 70 {
+		t.Errorf("OutputTokensSnapshot = %d, want 70 (40 unattributed + 30)", s.OutputTokensSnapshot)
 	}
 }

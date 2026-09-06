@@ -151,8 +151,11 @@ func TestCodexTokenCountAcrossEntries(t *testing.T) {
 }
 
 // TestCodexTokenCountBeforeAssistant checks that an event with no assistant
-// entry before it is dropped rather than attributed to a later one, which would
-// bill a request's tokens to the wrong message.
+// entry before it keeps its tokens without being attributed to a later
+// message, which would bill a request to the wrong one. Codex emits these for
+// a sub-agent turn whose messages are not in the file, and a tail read starts
+// with them; they are returned as their own entry, and ccusage counts them
+// unattributed.
 func TestCodexTokenCountBeforeAssistant(t *testing.T) {
 	jsonl := tokenCount("2026-02-25T10:00:01Z", 100, 40, 10, 100, 40, 10) + "\n" + codexAssistant + "\n"
 
@@ -162,10 +165,78 @@ func TestCodexTokenCountBeforeAssistant(t *testing.T) {
 		entries []Entry
 	}{{"streaming", streamed}, {"whole file", whole}} {
 		t.Run(tc.name, func(t *testing.T) {
+			var loose []*Usage
 			for _, e := range tc.entries {
 				if e.Message != nil && e.Message.Role == "assistant" && e.Message.Usage != nil {
 					t.Errorf("assistant gained usage from an event that preceded it: %+v", e.Message.Usage)
 				}
+				if e.Type == "system" && e.Subtype == "token_count" && e.Usage != nil {
+					loose = append(loose, e.Usage)
+				}
+			}
+			if len(loose) != 1 {
+				t.Fatalf("got %d unattributed token_count entries, want 1", len(loose))
+			}
+			if loose[0].InputTokens != 100 || loose[0].OutputTokens != 10 {
+				t.Errorf("unattributed usage = in %d, out %d; want 100, 10",
+					loose[0].InputTokens, loose[0].OutputTokens)
+			}
+		})
+	}
+}
+
+// TestCodexCacheWrite checks that the tokens Codex reports writing to its cache
+// reach Usage.CacheCreationInputTokens. They are a subset of input_tokens, as
+// the event's own total_tokens (input+output) shows, which is why ccusage
+// subtracts them; the reader carries the provider's numbers through unchanged.
+func TestCodexCacheWrite(t *testing.T) {
+	// A real event: 34143 prompt tokens of which 32976 were read from cache
+	// and 1164 written to it, leaving 3 new.
+	const event = `{"timestamp":"2026-02-25T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{` +
+		`"last_token_usage":{"input_tokens":34143,"cached_input_tokens":32976,"cache_write_input_tokens":1164,"output_tokens":153,"total_tokens":34296},` +
+		`"total_token_usage":{"input_tokens":34143,"cached_input_tokens":32976,"cache_write_input_tokens":1164,"output_tokens":153,"total_tokens":34296}}}}`
+
+	streamed, whole := readBoth(t, codexAssistant+"\n"+event+"\n")
+	for _, tc := range []struct {
+		name    string
+		entries []Entry
+	}{{"streaming", streamed}, {"whole file", whole}} {
+		t.Run(tc.name, func(t *testing.T) {
+			u := usageOf(t, tc.entries)
+			if u.InputTokens != 34143 || u.CacheReadInputTokens != 32976 ||
+				u.CacheCreationInputTokens != 1164 || u.OutputTokens != 153 {
+				t.Errorf("usage = %+v; want in 34143, read 32976, create 1164, out 153", u)
+			}
+		})
+	}
+}
+
+// TestCodexTurnContextModel checks that the model a turn_context announces is
+// stamped onto the turn's assistant messages. It is the only model string a
+// rollout carries, so without this every Codex request has an empty model and
+// no vendor.
+func TestCodexTurnContextModel(t *testing.T) {
+	const turnContext = `{"timestamp":"2026-02-25T09:59:00Z","type":"turn_context","payload":{"turn_id":"t1","cwd":"/w","model":"gpt-5.4-codex"}}`
+	const toolCall = `{"timestamp":"2026-02-25T10:00:02Z","type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"c1","arguments":"{}"}}`
+
+	streamed, whole := readBoth(t, turnContext+"\n"+codexAssistant+"\n"+toolCall+"\n")
+	for _, tc := range []struct {
+		name    string
+		entries []Entry
+	}{{"streaming", streamed}, {"whole file", whole}} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := 0
+			for _, e := range tc.entries {
+				if e.Message == nil || e.Message.Role != "assistant" {
+					continue
+				}
+				n++
+				if e.Message.Model != "gpt-5.4-codex" {
+					t.Errorf("assistant model = %q, want gpt-5.4-codex", e.Message.Model)
+				}
+			}
+			if n != 2 {
+				t.Errorf("got %d assistant entries, want 2", n)
 			}
 		})
 	}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmc/cc/internal/ccmodel"
 )
 
 func writeTestFile(t *testing.T, path, content string) {
@@ -100,5 +102,66 @@ func TestPiToolName(t *testing.T) {
 		if got := piToolName(tt.in); got != tt.want {
 			t.Errorf("piToolName(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+// TestReadFilePiUsageShapes checks that both serializations of a pi assistant
+// message decode: the TypeScript agent writes lowercase usage keys and
+// "toolCall" blocks, the Go agent marshals llm.Usage and llm.Block with their
+// Go field and type names. Both appear on disk, and Go's case-insensitive JSON
+// matching does not bridge "InputTokens" to `input`, so the Go shape used to
+// read as an all-zero usage with its tool call dropped.
+func TestReadFilePiUsageShapes(t *testing.T) {
+	const header = `{"type":"session","id":"s1","timestamp":"2026-07-31T18:13:19.379Z","cwd":"/w"}`
+	tests := []struct {
+		name                string
+		line                string
+		wantIn              int
+		wantOut             int
+		wantRead, wantWrite int
+	}{
+		{
+			name:   "typescript",
+			line:   `{"type":"message","id":"m1","timestamp":"2026-07-31T18:14:53.959Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"t1","name":"bash","arguments":{}}],"model":"claude-opus-4-8","usage":{"input":2,"output":91,"cacheRead":10,"cacheWrite":3478}}}`,
+			wantIn: 2, wantOut: 91, wantRead: 10, wantWrite: 3478,
+		},
+		{
+			// A real go-pi line.
+			name:   "go",
+			line:   `{"type":"message","id":"m1","timestamp":"2026-07-31T18:14:53.959Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"bash","arguments":{}}],"model":"claude-opus-4-8","usage":{"InputTokens":2,"OutputTokens":91,"CacheReadTokens":10,"CacheWriteTokens":3478}}}`,
+			wantIn: 2, wantOut: 91, wantRead: 10, wantWrite: 3478,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "s.jsonl")
+			writeTestFile(t, path, header+"\n"+tt.line+"\n")
+			entries, err := ReadFile(context.Background(), path)
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+			var msg *ccmodel.Message
+			for _, e := range entries {
+				if e.Message != nil && e.Message.Role == "assistant" {
+					msg = e.Message
+				}
+			}
+			if msg == nil {
+				t.Fatalf("no assistant entry in %d entries", len(entries))
+			}
+			u := msg.Usage
+			if u == nil {
+				t.Fatal("assistant entry carries no usage")
+			}
+			if u.InputTokens != tt.wantIn || u.OutputTokens != tt.wantOut ||
+				u.CacheReadInputTokens != tt.wantRead || u.CacheCreationInputTokens != tt.wantWrite {
+				t.Errorf("usage = %+v; want in %d, out %d, read %d, write %d",
+					u, tt.wantIn, tt.wantOut, tt.wantRead, tt.wantWrite)
+			}
+			blocks := msg.ContentBlocks()
+			if len(blocks) != 1 || blocks[0].Type != "tool_use" || blocks[0].Name != "Bash" {
+				t.Errorf("blocks = %+v; want one tool_use named Bash", blocks)
+			}
+		})
 	}
 }

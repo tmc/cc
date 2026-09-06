@@ -50,6 +50,12 @@ type Entry struct {
 	SourceToolAssistantUUID string          `json:"sourceToolAssistantUUID,omitempty"`
 	Usage                   *Usage          `json:"usage,omitempty"`
 
+	// TurnModel is the model a harness announces for a whole turn rather than
+	// per message (a Codex turn_context line). Readers stamp it onto the
+	// assistant messages of that turn, which is where callers should read it;
+	// it is not serialized.
+	TurnModel string `json:"-"`
+
 	// UsageTotal is the session-to-date running total that accompanies Usage
 	// in harnesses reporting a counter rather than a per-request delta (Codex
 	// token_count events). Readers use it to tell a re-emitted counter from a
@@ -247,9 +253,10 @@ type Usage struct {
 	// InputTokens counts prompt tokens the provider processed uncached.
 	// It never includes cache reads or cache creations.
 	InputTokens int `json:"input_tokens"`
-	// OutputTokens counts completion tokens, reasoning included. Claude Code
-	// writes a streaming-start snapshot of 1 for the first entry of a
-	// message; later entries for the same message id carry the grown count.
+	// OutputTokens counts completion tokens, reasoning included. The entries
+	// Claude Code writes for one message usually repeat its final count; an
+	// entry written before the completion finished carries the streaming-start
+	// snapshot of 0 or 1 instead, which package ccusage estimates over.
 	OutputTokens int `json:"output_tokens"`
 	// CacheReadInputTokens counts prompt tokens served from a provider cache.
 	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`

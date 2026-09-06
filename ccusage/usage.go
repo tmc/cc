@@ -34,83 +34,128 @@ func (r Record) Total() int { return r.Context() + r.Output }
 // FromEntries returns one Record per model request in entries, normalized to
 // the Anthropic convention for agent. It does not resolve git context.
 //
-// Three normalizations happen here.
+// Four normalizations happen here.
 //
 // Codex and Gemini report cached prompt tokens as a subset of their input
-// count, so for those agents Input is the provider's input minus its cached
-// count, floored at zero. Every other harness already reports the two
-// separately and is passed through.
+// count, and Codex reports the tokens it wrote to the cache as a second subset
+// of it: its own total_tokens is input plus output, so neither cache count is
+// an addend. For those agents Input is the provider's input minus both, floored
+// at zero. Every other harness already reports the counts separately and is
+// passed through.
 //
 // Assistant entries sharing a message id are one request: Claude Code writes
-// one entry per streamed block, each repeating the prompt counts and carrying
-// a larger output snapshot. They fold into a single Record with the largest
-// count seen for each field, at the position of the first entry. Entries with
-// no message id are one Record each.
+// one entry per streamed block of an API message, each repeating that message's
+// prompt counts. They fold into a single Record with the largest count seen for
+// each field, at the position of the first entry. Entries with no message id
+// are one Record each.
+//
+// A usage-bearing token_count entry with no assistant message is a request the
+// reader could not attribute — Codex emits the counter after the fact, and the
+// message it describes can be missing from the file, as it is for a sub-agent
+// turn. It becomes a Record of its own with an empty Model, so its tokens stay
+// in the totals rather than being dropped.
 //
 // An output count of 1 or 0 is Claude Code's streaming-start snapshot, not a
-// measurement: when the message has text, Output is estimated by tokenizing it
-// and OutputEstimated is set. This is the estimate the cass collector has
-// always applied; see [EstimateOutput].
+// measurement: when the request has text, Output is estimated by tokenizing
+// every entry folded into it and OutputEstimated is set. This is the estimate
+// the cass collector has always applied; see [EstimateOutput].
 func FromEntries(agent string, entries []cc.Entry) []Record {
 	cacheInInput := cacheInInput(agent)
 	var (
 		recs []Record
-		msgs []*cc.Message // longest-output message per record, for the estimate
+		msgs [][]*cc.Message // the messages folded into each record, for the estimate
 		byID = make(map[string]int)
 	)
 	for _, e := range entries {
-		m := e.Message
-		if m == nil || m.Role != "assistant" || m.Usage == nil {
+		m, u := usageOf(e)
+		if u == nil {
 			continue
 		}
 		r := Record{
 			SessionID:   e.SessionID,
 			Agent:       agent,
 			Time:        e.Timestamp.UTC(),
-			Model:       m.Model,
-			Vendor:      Vendor(m.Model),
 			CWD:         e.CWD,
 			IsSidechain: e.IsSidechain,
-			Input:       m.Usage.InputTokens,
-			CacheRead:   m.Usage.CacheReadInputTokens,
-			CacheCreate: m.Usage.CacheCreationInputTokens,
-			Output:      m.Usage.OutputTokens,
+			Input:       u.InputTokens,
+			CacheRead:   u.CacheReadInputTokens,
+			CacheCreate: u.CacheCreationInputTokens,
+			Output:      u.OutputTokens,
+		}
+		if m != nil {
+			r.Model, r.Vendor = m.Model, Vendor(m.Model)
 		}
 		if cacheInInput {
-			r.Input = max(0, r.Input-r.CacheRead)
+			r.Input = max(0, r.Input-r.CacheRead-r.CacheCreate)
 		}
-		if i, ok := byID[m.ID]; ok {
-			if r.Output > recs[i].Output {
-				msgs[i] = m
+		if m != nil {
+			if i, ok := byID[m.ID]; ok {
+				recs[i].Input = max(recs[i].Input, r.Input)
+				recs[i].CacheRead = max(recs[i].CacheRead, r.CacheRead)
+				recs[i].CacheCreate = max(recs[i].CacheCreate, r.CacheCreate)
+				recs[i].Output = max(recs[i].Output, r.Output)
+				if recs[i].Model == "" {
+					recs[i].Model, recs[i].Vendor = r.Model, r.Vendor
+				}
+				msgs[i] = append(msgs[i], m)
+				continue
 			}
-			recs[i].Input = max(recs[i].Input, r.Input)
-			recs[i].CacheRead = max(recs[i].CacheRead, r.CacheRead)
-			recs[i].CacheCreate = max(recs[i].CacheCreate, r.CacheCreate)
-			recs[i].Output = max(recs[i].Output, r.Output)
-			if recs[i].Model == "" {
-				recs[i].Model, recs[i].Vendor = r.Model, r.Vendor
+			if m.ID != "" {
+				byID[m.ID] = len(recs)
 			}
+			recs, msgs = append(recs, r), append(msgs, []*cc.Message{m})
 			continue
 		}
-		if m.ID != "" {
-			byID[m.ID] = len(recs)
-		}
-		recs = append(recs, r)
-		msgs = append(msgs, m)
+		recs, msgs = append(recs, r), append(msgs, nil)
 	}
 	for i := range recs {
-		if out, estimated := EstimateOutput(recs[i].Output, msgs[i]); estimated {
+		if out, estimated := estimate(recs[i].Output, foldedText(msgs[i])); estimated {
 			recs[i].Output, recs[i].OutputEstimated = out, true
 		}
 	}
 	return recs
 }
 
+// usageOf returns the usage one entry reports and the assistant message it
+// belongs to, or a nil usage when the entry is not a request. The message is
+// nil for a token_count entry the reader could not attach to an assistant
+// entry; see [FromEntries].
+func usageOf(e cc.Entry) (*cc.Message, *cc.Usage) {
+	if m := e.Message; m != nil {
+		if m.Role == "assistant" && m.Usage != nil {
+			return m, m.Usage
+		}
+		return nil, nil
+	}
+	if e.Type == "system" && e.Subtype == "token_count" {
+		return nil, e.Usage
+	}
+	return nil, nil
+}
+
+// foldedText joins the text of every message folded into one record. Claude
+// Code splits a message across entries a block at a time, so tokenizing only
+// one of them would miss the rest of the same request's output.
+func foldedText(msgs []*cc.Message) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		text := m.TextContent()
+		if text == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+	}
+	return b.String()
+}
+
 // cacheInInput reports whether agent's usage counts cached prompt tokens
 // inside its input count. Codex ("codex-cli", "codex-app") and Gemini
-// ("gemini-cli") do; Claude, opencode and pi report the two separately, which
+// ("gemini-cli") do; Claude, opencode and pi report them separately, which
 // their session files prove: opencode records cache reads larger than input,
-// and pi's own totalTokens is the sum of all four.
+// and pi does the same for every model it caches with.
 func cacheInInput(agent string) bool {
 	return strings.HasPrefix(agent, "codex") || strings.HasPrefix(agent, "gemini")
 }
@@ -152,22 +197,30 @@ func Vendor(model string) string {
 }
 
 // EstimateOutput returns the output token count to record for an assistant
-// message whose provider reported reported tokens, and whether the count was
+// message whose provider reported the given count, and whether the count was
 // estimated. A reported count above 1 is returned unchanged. A count of 1 or 0
-// is Claude Code's streaming-start snapshot — the final count lives only in the
-// SSE message_delta, which the JSONL never sees — so the message text is
-// tokenized instead. The reported count stands when the message has no text or
-// the tokenizer is unavailable.
+// is a Claude Code entry written before the completion finished, carrying the
+// streaming-start snapshot — the final count lives only in the SSE
+// message_delta, which the JSONL never sees — so the message text is tokenized
+// instead. The reported count stands when the message has no text or the
+// tokenizer is unavailable.
+//
+// [FromEntries] estimates over every entry of a folded request rather than one
+// message; a caller holding a single message uses this.
 func EstimateOutput(reported int, msg *cc.Message) (int, bool) {
-	if reported > 1 || msg == nil {
+	if msg == nil {
+		return reported, false
+	}
+	return estimate(reported, msg.TextContent())
+}
+
+// estimate implements [EstimateOutput] over already-extracted text.
+func estimate(reported int, text string) (int, bool) {
+	if reported > 1 || text == "" {
 		return reported, false
 	}
 	tc := counter()
 	if tc == nil {
-		return reported, false
-	}
-	text := msg.TextContent()
-	if text == "" {
 		return reported, false
 	}
 	return tc.Count(text), true

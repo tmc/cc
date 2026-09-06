@@ -4,10 +4,11 @@
 // Every harness [cc] can read attaches a usage record to its assistant
 // messages, but they do not agree on what the numbers mean. Claude reports
 // uncached prompt tokens and cache tokens separately; Codex and Gemini report
-// cached tokens as a subset of input, so adding their input to Claude's
-// compares a cache-inclusive number with a cache-exclusive one. Claude writes
-// several JSONL entries per API message, each repeating the prompt counts and
-// carrying a growing output snapshot that starts at 1.
+// both cached and newly-cached tokens as subsets of input, so adding their
+// input to Claude's compares a cache-inclusive number with a cache-exclusive
+// one. Claude writes several JSONL entries per API message, each repeating the
+// prompt counts, and an entry written before the completion finished carries a
+// streaming-start output snapshot instead of the count.
 //
 // [FromEntries] is the one place those differences are resolved. It turns a
 // session's entries into [Record] values in the Anthropic convention: four
