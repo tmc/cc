@@ -16,8 +16,9 @@ import (
 
 // ledgerEntry is the part of one transcript line the unfolded sum needs.
 type ledgerEntry struct {
-	Timestamp time.Time `json:"timestamp"`
-	Message   *struct {
+	Timestamp   time.Time `json:"timestamp"`
+	IsSidechain bool      `json:"isSidechain"`
+	Message     *struct {
 		ID    string `json:"id"`
 		Model string `json:"model"`
 		Usage *struct {
@@ -29,9 +30,9 @@ type ledgerEntry struct {
 	} `json:"message"`
 }
 
-// transcriptSums walks the Claude Code transcripts and returns, per local day,
-// the tokens summed one streamed entry at a time, along with the oldest file on
-// disk.
+// transcriptSums walks the Claude Code transcripts and returns, per day in
+// loc, the tokens summed one streamed entry at a time, along with the oldest
+// file on disk. Subagent entries are left out, as the ledger leaves them out.
 //
 // Claude Code splits an API message across one entry per streamed block, each
 // repeating that message's prompt counts, so this sum counts a message's prompt
@@ -71,6 +72,9 @@ func transcriptSums(ctx context.Context, loc *time.Location) (byDay map[string]m
 			}
 			var e ledgerEntry
 			if json.Unmarshal(line, &e) != nil || e.Message == nil || e.Message.Usage == nil {
+				continue
+			}
+			if e.IsSidechain {
 				continue
 			}
 			u := e.Message.Usage

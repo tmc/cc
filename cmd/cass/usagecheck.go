@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/tmc/cc/cass/service"
@@ -38,8 +39,14 @@ const checkTolerance = 0.02
 // runUsageCheck compares the index's Claude Code rows against
 // ~/.claude/stats-cache.json, per model and per day.
 //
-// Only one thing is asserted: the index must never read above the ledger. The
-// two are not otherwise comparable, for two reasons the numbers make plain.
+// Only one thing is asserted: the index must never read above the ledger. For
+// that assertion to mean anything the two must count the same population, so
+// the comparison buckets days in UTC, as the ledger does, and leaves subagent
+// rows out, as the ledger does. Neither is cosmetic: comparing local days read
+// nine of sixty-two days high, and counting subagents read four of them 1.4x
+// to 1.6x high.
+//
+// The two are not otherwise comparable, for two reasons the numbers make plain.
 // The ledger is a cumulative accumulator whose transcripts are deleted after
 // cleanupPeriodDays, so a lifetime comparison counts sessions that are no
 // longer on disk for cass to read; the per-day comparison is therefore
@@ -64,7 +71,12 @@ func runUsageCheck(ctx context.Context, svc *service.Service, unit string) error
 		return fmt.Errorf("parse stats cache: %w", err)
 	}
 
-	f := store.UsageFilter{Agent: "claude-code"}
+	// The ledger counts only what the main thread spent: a subagent's tokens
+	// are absent from it, so comparing against rows that carry them would be
+	// comparing two different populations. Measured on the days a subagent
+	// dominates, the main-thread entry sum lands at 0.98-0.99 of the ledger
+	// where the sum with subagents lands at 2.5-3.2x it.
+	f := store.UsageFilter{Agent: "claude-code", ExcludeSidechain: true}
 	groups, err := svc.UsageByGroup(ctx, f)
 	if err != nil {
 		return err
@@ -76,15 +88,16 @@ func runUsageCheck(ctx context.Context, svc *service.Service, unit string) error
 	fmt.Printf("%s\n\n", labelStyle.Render(
 		"comparing agent claude-code against "+path+", computed "+sc.LastComputedDate))
 
-	fmt.Printf("%-30s %12s %12s %7s  %s\n", labelStyle.Render("model"),
+	fmt.Printf("%-14s %12s %14s %10s\n", labelStyle.Render("field"),
 		labelStyle.Render("cass"), labelStyle.Render("stats-cache"),
-		labelStyle.Render("delta"), labelStyle.Render("field"))
+		labelStyle.Render("delta"))
 	bad := 0
 	for _, g := range byModel {
 		want, ok := sc.ModelUsage[g.Model]
 		if !ok {
 			continue
 		}
+		fmt.Printf("\n%s\n", modelStyle.Render(g.Model))
 		for _, c := range []struct {
 			field    string
 			got, exp int
@@ -99,8 +112,8 @@ func runUsageCheck(ctx context.Context, svc *service.Service, unit string) error
 			if c.field != "output†" && d > checkTolerance {
 				mark, bad = " ✗", bad+1
 			}
-			fmt.Printf("%-30s %12s %12s %6.1f%%  %s%s\n", truncate(g.Model, 30),
-				compact(float64(c.got)), compact(float64(c.exp)), d*100, c.field, mark)
+			fmt.Printf("  %-12s %12s %14s %9.1f%%%s\n", c.field,
+				compact(float64(c.got)), compact(float64(c.exp)), d*100, mark)
 		}
 	}
 
@@ -109,7 +122,10 @@ func runUsageCheck(ctx context.Context, svc *service.Service, unit string) error
 	if err != nil {
 		return err
 	}
-	loc := time.Local
+	// The ledger buckets a day in UTC, so the comparison does too. Bucketing
+	// locally shifts tokens across midnight and reads some days high and
+	// others low against the same ledger.
+	loc := time.UTC
 	byDay := make(map[string]int)
 	for _, h := range hourRows(hours) {
 		t := time.Unix(h.Hour*3600, 0).In(loc)
@@ -138,15 +154,22 @@ func runUsageCheck(ctx context.Context, svc *service.Service, unit string) error
 	}
 	sort.Strings(days)
 
-	fmt.Printf("\n%-12s %12s %12s %7s %12s %7s\n",
+	fmt.Printf("\n%-12s %12s %14s %9s %14s %9s   %s\n",
 		labelStyle.Render("day"), labelStyle.Render("cass"),
 		labelStyle.Render("stats-cache"), labelStyle.Render("cass/sc"),
-		labelStyle.Render("per-entry"), labelStyle.Render("pe/sc"))
+		labelStyle.Render("per-entry"), labelStyle.Render("pe/sc"),
+		labelStyle.Render("cass/sc, 1.0 = the ledger"))
 	var foldRatios, entryRatios []float64
-	over := 0
+	over, month := 0, ""
 	for _, d := range days {
 		if want[d] == 0 {
 			continue
+		}
+		if m := d[:7]; m != month {
+			// A blank line at each month, so sixty days of rows can be read
+			// a stretch at a time rather than as one block.
+			fmt.Println()
+			month = m
 		}
 		raw := 0
 		for _, n := range unfolded[d] {
@@ -158,9 +181,9 @@ func runUsageCheck(ctx context.Context, svc *service.Service, unit string) error
 		if fr > 1+checkTolerance {
 			mark, over = " ✗", over+1
 		}
-		fmt.Printf("%-12s %12s %12s %6.2fx %12s %6.2fx%s\n", d,
+		fmt.Printf("%-12s %12s %14s %8.2fx %14s %8.2fx   %s%s\n", d,
 			compact(float64(byDay[d])), compact(float64(want[d])), fr,
-			compact(float64(raw)), er, mark)
+			compact(float64(raw)), er, ratioBar(fr), mark)
 	}
 	fmt.Printf("\n%s\n", labelStyle.Render(fmt.Sprintf(
 		"%d days compared, from %s, the oldest transcript on disk; %d earlier days in the "+
@@ -177,6 +200,24 @@ func runUsageCheck(ctx context.Context, svc *service.Service, unit string) error
 		return fmt.Errorf("%d model fields and %d days read above the ledger", bad, over)
 	}
 	return nil
+}
+
+// checkBarWidth is where the ledger's own figure falls on the ratio bar, so a
+// day cass reads above it is the one bar that crosses the mark.
+const checkBarWidth = 16
+
+// ratioBar draws a ratio against a fixed 1.0 mark rather than against the
+// largest row, since the whole reading is whether a day sits below the ledger
+// or above it.
+func ratioBar(r float64) string {
+	if r <= 0 {
+		return labelStyle.Render(strings.Repeat("·", 1))
+	}
+	s := bar(r, 1, checkBarWidth)
+	if r > 1+checkTolerance {
+		return overStyle.Render(s)
+	}
+	return s
 }
 
 // median returns the middle value of vs, or zero when vs is empty.

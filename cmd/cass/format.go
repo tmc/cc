@@ -26,6 +26,8 @@ var (
 	highlightStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // Bright yellow.
 	numberStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
 	headerStyle    = lipgloss.NewStyle().Bold(true).Underline(true)
+	modelStyle     = lipgloss.NewStyle().Bold(true)
+	overStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // Red.
 )
 
 // noColor reports whether color should be disabled because stdout is not a

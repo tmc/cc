@@ -1,6 +1,10 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -171,5 +175,54 @@ func TestDelta(t *testing.T) {
 	}
 	if got := delta(5, 0); got != 1 {
 		t.Errorf("delta(5, 0) = %v, want 1", got)
+	}
+}
+
+// TestTranscriptSumsSkipsSubagents locks the population the cross-check
+// compares. Claude Code's own ledger counts only what the main thread spent,
+// so an unfolded sum that counted subagent entries would read above it on
+// every day a subagent ran.
+func TestTranscriptSumsSkipsSubagents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CLAUDE_HOME", home)
+	dir := filepath.Join(home, "projects", "p")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := func(sidechain bool, tokens int) string {
+		b, err := json.Marshal(map[string]any{
+			"timestamp":   "2026-08-16T03:00:00Z",
+			"isSidechain": sidechain,
+			"message": map[string]any{
+				"id":    "msg_1",
+				"model": "claude-opus-5",
+				"usage": map[string]any{"input_tokens": tokens},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b) + "\n"
+	}
+	body := line(false, 100) + line(true, 900)
+	if err := os.WriteFile(filepath.Join(dir, "s.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	byDay, _, err := transcriptSums(context.Background(), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := byDay["2026-08-16"]["claude-opus-5"], 100; got != want {
+		t.Fatalf("main-thread sum = %d, want %d", got, want)
+	}
+	// The same entries bucketed west of UTC fall on the previous day, which is
+	// why the check buckets in the ledger's zone rather than the reader's.
+	byDay, _, err = transcriptSums(context.Background(), time.FixedZone("PDT", -7*3600))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := byDay["2026-08-16"]; ok {
+		t.Fatalf("entry stayed on 2026-08-16 west of UTC: %v", byDay)
 	}
 }
