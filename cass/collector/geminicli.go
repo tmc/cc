@@ -15,6 +15,7 @@ import (
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/ccusage"
 )
 
 // GeminiCLI collects sessions from Gemini CLI session files.
@@ -219,6 +220,7 @@ func (c *GeminiCLI) parseSession(ctx context.Context, config cass.ScanConfig, pa
 		EndedAt:    sum.LastTime,
 		Messages:   messages,
 		Stats:      stats,
+		Usage:      cass.UsageEvents(ccusage.FromEntries(c.Name(), entries)),
 		Metadata:   meta,
 		TeamName:   teamName,
 		AgentName:  agentName,

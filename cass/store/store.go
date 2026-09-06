@@ -371,6 +371,8 @@ func (s *DB) migrate() error {
 
 	` + jobsAgentsSchema + `
 
+	` + usageSchema + `
+
 		CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
 			title,
 			content,
@@ -528,6 +530,19 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		return fmt.Errorf("prepare workflows: %w", err)
 	}
 	defer wfStmt.Close()
+
+	usageStmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO usage_events (
+			session_id, agent, ts, model, vendor, git_common_dir, attribution,
+			is_sidechain, input_tokens, cache_read_tokens, cache_creation_tokens,
+			output_tokens, output_estimated
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare usage_events: %w", err)
+	}
+	defer usageStmt.Close()
 
 	now := time.Now().Unix()
 	for _, sess := range sessions {
@@ -695,6 +710,37 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 				wf.Result,
 			); err != nil {
 				return fmt.Errorf("insert workflow %s/%s: %w", sess.ID, wf.RunID, err)
+			}
+		}
+
+		// Usage events: clear and reinsert for this session.
+		if _, err := tx.ExecContext(ctx, "DELETE FROM usage_events WHERE session_id = ?", sess.ID); err != nil {
+			return fmt.Errorf("clear usage_events %s: %w", sess.ID, err)
+		}
+		for _, u := range sess.Usage {
+			// A harness that records no per-request timestamp falls back to the
+			// session's start, which keeps the row in the right day rather than
+			// at the far edge of the unix epoch.
+			ts := u.Time
+			if ts.IsZero() {
+				ts = sess.StartedAt
+			}
+			if _, err := usageStmt.ExecContext(ctx,
+				sess.ID,
+				sess.Agent,
+				ts.Unix(),
+				u.Model,
+				u.Vendor,
+				u.GitCommonDir,
+				u.Attribution,
+				boolInt(u.IsSidechain),
+				u.Input,
+				u.CacheRead,
+				u.CacheCreate,
+				u.Output,
+				boolInt(u.OutputEstimated),
+			); err != nil {
+				return fmt.Errorf("insert usage_event %s: %w", sess.ID, err)
 			}
 		}
 
@@ -1249,6 +1295,9 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM artifact_events WHERE session_id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete artifact events by id: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM usage_events WHERE session_id IN (%s)", placeholders), args...); err != nil {
+			return fmt.Errorf("delete usage events by id: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM sessions WHERE id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete by id: %w", err)
 		}
@@ -1272,6 +1321,12 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 			agentFilterArgs(filter.Agent)...,
 		); err != nil {
 			return fmt.Errorf("delete artifact events by agent: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM usage_events WHERE session_id IN (SELECT id FROM sessions WHERE "+agentFilter("agent")+")",
+			agentFilterArgs(filter.Agent)...,
+		); err != nil {
+			return fmt.Errorf("delete usage events by agent: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE "+agentFilter("agent"), agentFilterArgs(filter.Agent)...); err != nil {
 			return fmt.Errorf("delete by agent: %w", err)

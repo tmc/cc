@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/ccusage"
 )
 
 // OpenCode collects sessions from opencode's JSON storage.
@@ -225,7 +226,7 @@ func (c *OpenCode) parseSession(path string) (cass.Session, error) {
 	}
 
 	root := c.storageRootFromSessionPath(path)
-	messages, stats, meta, err := readOpenCodeMessages(root, sf.ID)
+	messages, stats, usage, meta, err := readOpenCodeMessages(root, sf.ID)
 	if err != nil {
 		return cass.Session{}, err
 	}
@@ -281,15 +282,21 @@ func (c *OpenCode) parseSession(path string) (cass.Session, error) {
 		EndedAt:    ended,
 		Messages:   messages,
 		Stats:      stats,
+		Usage:      usage,
 		Metadata:   meta,
 	}, nil
 }
 
-func readOpenCodeMessages(root, sessionID string) ([]cass.Message, cass.SessionStats, map[string]any, error) {
+// readOpenCodeMessages reads one session's message and part files. opencode
+// stores each message as its own JSON document rather than as JSONL, so it does
+// not go through cc.ReadFile and builds its usage records here; its token
+// counts already follow the Anthropic convention, as [ccusage.FromEntries]
+// documents, so they need no normalization.
+func readOpenCodeMessages(root, sessionID string) ([]cass.Message, cass.SessionStats, []cass.UsageEvent, map[string]any, error) {
 	messageDir := filepath.Join(root, "message", sessionID)
 	files, err := os.ReadDir(messageDir)
 	if err != nil {
-		return nil, cass.SessionStats{ToolBreakdown: map[string]int{}}, map[string]any{}, nil
+		return nil, cass.SessionStats{ToolBreakdown: map[string]int{}}, nil, map[string]any{}, nil
 	}
 
 	var records []openCodeMessageFile
@@ -312,6 +319,7 @@ func readOpenCodeMessages(root, sessionID string) ([]cass.Message, cass.SessionS
 	})
 
 	stats := cass.SessionStats{ToolBreakdown: map[string]int{}}
+	var usage []cass.UsageEvent
 	meta := map[string]any{}
 	var messages []cass.Message
 	var model, provider, mode, agent string
@@ -345,6 +353,22 @@ func readOpenCodeMessages(root, sessionID string) ([]cass.Message, cass.SessionS
 		stats.OutputTokensSnapshot += rec.Tokens.Output
 		stats.CacheReads += rec.Tokens.Cache.Read
 		stats.CacheCreationInputTokens += rec.Tokens.Cache.Write
+		if rec.Role == "assistant" && rec.Tokens != (openCodeTokens{}) {
+			recModel, recProvider := openCodeModelProvider(rec, "", "")
+			id := openCodeModelID(recModel, recProvider)
+			usage = append(usage, cass.UsageEvent{Record: ccusage.Record{
+				SessionID:   sessionID,
+				Agent:       "opencode",
+				Time:        created.UTC(),
+				Model:       id,
+				Vendor:      ccusage.Vendor(id),
+				CWD:         rec.Path.CWD,
+				Input:       rec.Tokens.Input,
+				CacheRead:   rec.Tokens.Cache.Read,
+				CacheCreate: rec.Tokens.Cache.Write,
+				Output:      rec.Tokens.Output,
+			}})
+		}
 		cost += rec.Cost
 		model, provider = openCodeModelProvider(rec, model, provider)
 		if rec.Mode != "" {
@@ -373,7 +397,21 @@ func readOpenCodeMessages(root, sessionID string) ([]cass.Message, cass.SessionS
 		messages[len(messages)-1].CreatedAt = last
 	}
 	stats.Sparkline = openCodeSparkline(messages)
-	return messages, stats, meta, nil
+	return messages, stats, usage, meta, nil
+}
+
+// openCodeModelID renders opencode's split model id as one "provider/model"
+// string, the form the vendor split reads. opencode routes several vendors
+// through one provider, so the provider alone does not name the vendor and the
+// model alone does not always either.
+func openCodeModelID(model, provider string) string {
+	switch {
+	case model == "":
+		return ""
+	case provider == "", strings.Contains(model, "/"):
+		return model
+	}
+	return provider + "/" + model
 }
 
 func readOpenCodeParts(root, messageID string) []openCodePartFile {

@@ -14,6 +14,7 @@ import (
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/ccusage"
 )
 
 var (
@@ -263,6 +264,7 @@ func (c *Antigravity) parseBrainSession(dir string) (cass.Session, error) {
 		Subagents:  subagents,
 		Skills:     skills,
 		Stats:      stats,
+		Usage:      cass.UsageEvents(ccusage.FromEntries(c.Name(), entries)),
 		Metadata:   meta,
 	}, nil
 }

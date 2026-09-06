@@ -9,6 +9,7 @@ import (
 
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/cass/store"
+	"github.com/tmc/cc/ccusage"
 )
 
 // makeSessions generates n synthetic sessions each with ~targetBytes of content.
@@ -197,5 +198,86 @@ func TestBackendSizes(t *testing.T) {
 			)
 		}
 		st.Close()
+	}
+}
+
+// usageStore indexes sessions carrying requests apiece, spread over twelve
+// weeks and a handful of repositories, for the usage query benchmarks. The
+// shape matters more than the volume: the queries aggregate over ts, so what
+// they cost is driven by how many rows fall inside the window.
+func usageStore(b *testing.B, sessions, requests int) *store.DB {
+	b.Helper()
+	st, err := store.New(":memory:")
+	if err != nil {
+		b.Fatal(err)
+	}
+	repos := []string{"/r/one/.git", "/r/two/.git", "/r/three/.git", ""}
+	models := []string{"claude-opus-5", "gpt-5.4-codex", "gemini-3-pro"}
+	agents := []string{"claude-code", "codex-cli", "gemini-cli"}
+	window := 12 * 7 * 24 * time.Hour
+	start := time.Now().Add(-window)
+
+	batch := make([]cass.Session, sessions)
+	for i := range batch {
+		id := fmt.Sprintf("u-%06d", i)
+		at := start.Add(time.Duration(float64(i) / float64(sessions) * float64(window)))
+		usage := make([]cass.UsageEvent, requests)
+		for j := range usage {
+			usage[j] = cass.UsageEvent{
+				Record: ccusage.Record{
+					Agent: agents[i%len(agents)],
+					Time:  at.Add(time.Duration(j) * time.Minute),
+					Model: models[i%len(models)],
+					Input: 100, CacheRead: 20_000, CacheCreate: 500, Output: 300,
+				},
+				GitCommonDir: repos[i%len(repos)],
+			}
+			usage[j].Vendor = ccusage.Vendor(usage[j].Model)
+		}
+		batch[i] = cass.Session{
+			ID: id, Agent: agents[i%len(agents)], StartedAt: at,
+			EndedAt: at.Add(time.Hour), Usage: usage,
+		}
+	}
+	if err := st.BatchIndex(context.Background(), batch); err != nil {
+		b.Fatal(err)
+	}
+	return st
+}
+
+// BenchmarkUsageByHour measures the hour query every time-bucketed view is
+// built from: twelve weeks, no filter.
+func BenchmarkUsageByHour(b *testing.B) {
+	st := usageStore(b, 2000, 50)
+	defer st.Close()
+	ctx := context.Background()
+	f := store.UsageFilter{After: time.Now().Add(-12 * 7 * 24 * time.Hour)}
+	b.ResetTimer()
+	for range b.N {
+		if _, err := st.UsageByHour(ctx, f); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkUsageByGroup measures the repository and provider query.
+func BenchmarkUsageByGroup(b *testing.B) {
+	st := usageStore(b, 2000, 50)
+	defer st.Close()
+	ctx := context.Background()
+	f := store.UsageFilter{After: time.Now().Add(-12 * 7 * 24 * time.Hour)}
+	b.ResetTimer()
+	for range b.N {
+		if _, err := st.UsageByGroup(ctx, f); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkUsageWrite measures the added cost of the usage rows on the index
+// write path, which the reindex budget is spent on.
+func BenchmarkUsageWrite(b *testing.B) {
+	for range b.N {
+		usageStore(b, 100, 50).Close()
 	}
 }

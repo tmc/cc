@@ -12,6 +12,7 @@ import (
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/ccusage"
 )
 
 // ClaudeCode collects sessions from Claude Code's JSONL session files.
@@ -244,6 +245,7 @@ func (c *ClaudeCode) parseSession(ctx context.Context, config cass.ScanConfig, p
 		Skills:       skills,
 		Goals:        goals,
 		Stats:        stats,
+		Usage:        cass.UsageEvents(ccusage.FromEntries(c.Name(), entries)),
 		Metadata:     meta,
 		Workflows:    workflows,
 		Artifacts:    artifacts,

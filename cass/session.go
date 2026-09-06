@@ -36,6 +36,12 @@ type Session struct {
 	// the collector; persisted by the store as a separate subagent_runs row
 	// keyed on (session_id, agent_id).
 	Subagents []SubagentRun `json:"subagents,omitempty"`
+
+	// Usage is one entry per model request the session made, with token
+	// counts normalized across harnesses. Populated by the collector,
+	// attributed to a repository by the indexing service, and persisted as
+	// usage_events rows keyed on session_id.
+	Usage []UsageEvent `json:"usage,omitempty"`
 }
 
 // Message is a single message within a session.

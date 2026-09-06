@@ -168,6 +168,7 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 	// written while the walk was already past its directory must still look
 	// newer than the cursor to the next run.
 	start := time.Now()
+	attr := newRepoAttributor(ctx, s.store)
 
 	var since time.Time
 	if !force {
@@ -229,7 +230,7 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 				batch = append(batch, sess)
 				if len(batch) >= 100 {
 					write.Lock()
-					err := s.store.BatchIndex(ctx, batch)
+					err := s.indexBatch(ctx, attr, batch)
 					write.Unlock()
 					if err != nil {
 						s.log.Error("batch index", "agent", col.Name(), "err", err)
@@ -246,7 +247,7 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 			// Flush remaining.
 			if len(batch) > 0 {
 				write.Lock()
-				err := s.store.BatchIndex(ctx, batch)
+				err := s.indexBatch(ctx, attr, batch)
 				write.Unlock()
 				if err != nil {
 					s.log.Error("batch index", "agent", col.Name(), "err", err)
@@ -481,6 +482,8 @@ func (s *Service) Graph(ctx context.Context, since time.Time, opts cass.GraphOpt
 // IndexRoots indexes explicit session roots without running agent detection.
 // It is for targeted imports and checks that should not walk all session history.
 func (s *Service) IndexRoots(ctx context.Context, paths []string) (int, error) {
+	attr := newRepoAttributor(ctx, s.store)
+
 	type pathGroup struct {
 		collector cass.Collector
 		paths     []string
@@ -521,7 +524,7 @@ func (s *Service) IndexRoots(ctx context.Context, paths []string) (int, error) {
 		if len(batch) == 0 {
 			continue
 		}
-		if err := s.store.BatchIndex(ctx, batch); err != nil {
+		if err := s.indexBatch(ctx, attr, batch); err != nil {
 			return 0, fmt.Errorf("index %s: %w", g.collector.Name(), err)
 		}
 		total += len(batch)
@@ -550,6 +553,8 @@ func ParentSessionPath(p string) string {
 }
 
 func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, error) {
+	attr := newRepoAttributor(ctx, s.store)
+
 	type pathGroup struct {
 		collector cass.Collector
 		dirs      map[string]struct{}
@@ -608,7 +613,7 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 		if len(batch) == 0 {
 			continue
 		}
-		if err := s.store.BatchIndex(ctx, batch); err != nil {
+		if err := s.indexBatch(ctx, attr, batch); err != nil {
 			return 0, fmt.Errorf("index paths: %w", err)
 		}
 		total += len(batch)
@@ -889,4 +894,62 @@ func (s *Service) AgentDefs(ctx context.Context) ([]store.AgentDef, error) {
 // Close releases resources.
 func (s *Service) Close() error {
 	return s.store.Close()
+}
+
+// indexBatch resolves each session's repository and writes the batch. Both
+// steps belong to one call so that no path can persist usage events with no
+// repository stamped on them.
+func (s *Service) indexBatch(ctx context.Context, attr *repoAttributor, batch []cass.Session) error {
+	attr.attribute(batch)
+	if err := s.store.BatchIndex(ctx, batch); err != nil {
+		return err
+	}
+	return attr.flush(ctx, s.store)
+}
+
+// UsageByHour returns per-UTC-hour token usage for the filter.
+func (s *Service) UsageByHour(ctx context.Context, f store.UsageFilter) ([]store.HourRow, error) {
+	return s.store.UsageByHour(ctx, f)
+}
+
+// UsageByGroup returns token usage per repository, agent, vendor and model.
+func (s *Service) UsageByGroup(ctx context.Context, f store.UsageFilter) ([]store.GroupRow, error) {
+	return s.store.UsageByGroup(ctx, f)
+}
+
+// UsageSessions returns the extent of each session with usage in the filter.
+func (s *Service) UsageSessions(ctx context.Context, f store.UsageFilter) ([]store.SessionSpanRow, error) {
+	return s.store.UsageSessions(ctx, f)
+}
+
+// UsageCoverage returns how many usage rows the index holds and the oldest one,
+// for the warning the usage reports print on an index that predates the table.
+func (s *Service) UsageCoverage(ctx context.Context) (int, time.Time, error) {
+	return s.store.UsageEventCount(ctx)
+}
+
+// Repos returns every repository usage has been attributed to.
+func (s *Service) Repos(ctx context.Context) (map[string]store.Repo, error) {
+	return s.store.Repos(ctx)
+}
+
+// UsageSessionCounts returns the distinct session count per value of dim.
+func (s *Service) UsageSessionCounts(ctx context.Context, f store.UsageFilter, dim string) (map[string]int, error) {
+	return s.store.UsageSessionCounts(ctx, f, dim)
+}
+
+// UsageRowCounts returns the usage row count per value of dim.
+func (s *Service) UsageRowCounts(ctx context.Context, f store.UsageFilter, dim string) (map[string]int, error) {
+	return s.store.UsageRowCounts(ctx, f, dim)
+}
+
+// UsageBySession returns per-session usage totals for the filter.
+func (s *Service) UsageBySession(ctx context.Context, f store.UsageFilter) ([]store.SessionUsageRow, error) {
+	return s.store.UsageBySession(ctx, f)
+}
+
+// OldestSession returns the start of the earliest indexed session, which the
+// usage reports compare against the oldest usage row to detect a stale index.
+func (s *Service) OldestSession(ctx context.Context) (time.Time, error) {
+	return s.store.OldestSessionStart(ctx)
 }

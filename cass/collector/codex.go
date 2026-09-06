@@ -15,6 +15,7 @@ import (
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/ccusage"
 )
 
 // Codex collects sessions from Codex JSONL files.
@@ -198,6 +199,7 @@ func (c *Codex) parseSession(ctx context.Context, config cass.ScanConfig, path s
 		Goals:      goals,
 		Skills:     skills,
 		Stats:      stats,
+		Usage:      cass.UsageEvents(ccusage.FromEntries(agent, entries)),
 		Metadata:   meta,
 	}
 	session.Subagents = extractCodexSubagentRuns(entries, session)

@@ -10,6 +10,7 @@ import (
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/ccusage"
 )
 
 // Pi collects sessions from pi (pi-coding-agent) JSONL files.
@@ -186,6 +187,7 @@ func (c *Pi) parseSession(ctx context.Context, config cass.ScanConfig, path stri
 		Messages:   messages,
 		Skills:     skills,
 		Stats:      stats,
+		Usage:      cass.UsageEvents(ccusage.FromEntries(c.Name(), entries)),
 		Metadata:   meta,
 	}, nil
 }
