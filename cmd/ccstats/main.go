@@ -21,7 +21,7 @@ var (
 	redactFlag               = flag.Bool("redact", false, "Redact session identifiers and file paths from JSON output")
 	pricingFileFlag          = flag.String("pricing-file", "", "JSON file with pricing overrides for characteristics")
 	verboseFlag              = flag.Bool("verbose", false, "Include additional usage characteristics")
-	unitFlag                 = flag.String("unit", "cost", "Characteristics weighting unit: cost, tokens, requests")
+	unitFlag                 = flag.String("unit", "cost", "Characteristics weighting unit: cost, tokens, requests, context, input, output")
 	parallelWindowFlag       = flag.Duration("parallel-window", 2*time.Minute, "Parallelism lookback window")
 	contextThresholdFlag     = flag.Int("context-threshold", 150000, "Context size threshold for the hosted UI characteristic")
 	longRunningThresholdFlag = flag.Duration("long-running-threshold", 8*time.Hour, "Session duration threshold for the long-running characteristic")

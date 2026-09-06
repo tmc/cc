@@ -101,7 +101,8 @@ func ModelFamily(model string) string {
 //	cost              the four counts weighted by p
 //
 // An unrecognized unit is weighted as cost, matching what ccstats has always
-// done with its -unit flag.
+// done with its -unit flag. [UnitLabel] names the same units, so a report
+// cannot label a number in a unit Weight did not produce.
 func Weight(r Record, unit string, p Pricing) float64 {
 	switch strings.ToLower(unit) {
 	case "requests":
@@ -117,5 +118,23 @@ func Weight(r Record, unit string, p Pricing) float64 {
 	default:
 		return float64(r.Input)*p.Input + float64(r.Output)*p.Output +
 			float64(r.CacheRead)*p.CacheRead + float64(r.CacheCreate)*p.CacheCreate
+	}
+}
+
+// UnitLabel returns the name of a [Weight] unit, for a report header.
+func UnitLabel(unit string) string {
+	switch strings.ToLower(unit) {
+	case "requests":
+		return "requests"
+	case "input":
+		return "uncached input tokens"
+	case "output":
+		return "output tokens"
+	case "context":
+		return "context tokens"
+	case "total", "tokens":
+		return "tokens"
+	default:
+		return "cost-weighted tokens"
 	}
 }

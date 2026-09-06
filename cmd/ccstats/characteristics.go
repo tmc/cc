@@ -345,7 +345,7 @@ func renderCharacteristicsReport(report *characteristicsReport) {
 
 	fmt.Println()
 	fmt.Printf("Unit: %s · Window: %s → %s\n",
-		renderUnitLabel(report.Unit),
+		ccusage.UnitLabel(report.Unit),
 		report.Window.Start.Format("2006-01-02 15:04"),
 		report.Window.End.Format("2006-01-02 15:04"),
 	)
@@ -405,30 +405,12 @@ func effectiveParallelWindow() time.Duration {
 }
 
 // The pricing table lives in ccusage so the index and the file-mode reports
-// weight a request the same way; these names stay for the call sites here.
-type (
-	pricing       = ccusage.Pricing
-	pricingConfig = ccusage.PricingConfig
-)
+// weight a request the same way; this name stays for the call sites here.
+type pricingConfig = ccusage.PricingConfig
 
 func loadPricingConfig(path string) (pricingConfig, error) { return ccusage.LoadPricing(path) }
 
-func pricingForModel(model string, cfg pricingConfig) pricing {
-	return ccusage.PricingForModel(model, cfg)
-}
-
 func modelFamily(model string) string { return ccusage.ModelFamily(model) }
-
-func renderUnitLabel(unit string) string {
-	switch strings.ToLower(unit) {
-	case "requests":
-		return "requests"
-	case "tokens":
-		return "tokens"
-	default:
-		return "cost-weighted tokens"
-	}
-}
 
 func pct(weight, total float64) float64 {
 	if total <= 0 {
