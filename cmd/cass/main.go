@@ -56,6 +56,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "  subagents  list Task subagent runs")
 		fmt.Fprintln(os.Stderr, "  workflows  list native workflow runs")
 		fmt.Fprintln(os.Stderr, "  requests   show indexed API request breakdown")
+		fmt.Fprintln(os.Stderr, "  usage      token utilization by weekday, repository, model or day")
 		fmt.Fprintln(os.Stderr, "  web        start web UI server")
 		os.Exit(1)
 	}
@@ -109,6 +110,8 @@ func run() error {
 		return runWorkflows(ctx, svc, args[1:], *jsonOutput)
 	case "requests":
 		return runRequests(ctx, svc, args[1:], *jsonOutput)
+	case "usage":
+		return runUsage(ctx, svc, args[1:], *jsonOutput)
 	case "web":
 		return runWeb(ctx, svc, args[1:], logger)
 	default:

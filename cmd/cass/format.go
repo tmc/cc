@@ -41,12 +41,19 @@ func noColor() bool {
 	return fi.Mode()&os.ModeCharDevice == 0
 }
 
+// termenvAscii is termenv.Ascii, the profile that renders no escapes at all.
+// lipgloss takes a termenv.Profile and termenv is not a direct dependency of
+// this module, so the value is spelled out. It is not zero: zero is TrueColor,
+// which is what this used to select, so -no-color and a piped stdout both
+// kept their colors.
+const termenvAscii = 3
+
 // configureColor disables lipgloss color output when force is true or when
 // stdout is not a terminal. It must be called from main after flag parsing so
 // that library users of this package are unaffected.
 func configureColor(force bool) {
 	if force || noColor() {
-		lipgloss.SetColorProfile(0) // No color.
+		lipgloss.SetColorProfile(termenvAscii)
 	}
 }
 

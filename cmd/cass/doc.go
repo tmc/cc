@@ -57,6 +57,43 @@
 //	cass search -snippet 64 "retry policy"
 //	cass search -render "retry policy"
 //
+// Report token utilization across every indexed harness:
+//
+//	cass usage weekday
+//	cass usage repos -n 8
+//	cass usage calendar -since 52w
+//	cass usage daily -bucket week -cumulative -by agent
+//	cass usage sessions -since 1w -n 10
+//	cass usage -check stats-cache
+//
+// # Usage
+//
+// The usage command reports one row per model request, with the four token
+// counts normalized to the Anthropic convention so that harnesses which
+// report cached tokens inside their input count are comparable with those
+// which report them separately. Views:
+//
+//	weekday    Mean, median and active days per weekday over whole weeks.
+//	heatmap    Weekday by local hour.
+//	calendar   Week columns by weekday rows, as /stats and /usage daily draw.
+//	repos      By repository, with the unattributed rows as a visible bucket.
+//	providers  By harness and vendor.
+//	models     Share and four-way split per model.
+//	daily      A bar per day or week, optionally cumulative or split.
+//	sessions   Each session's share of the window, largest first.
+//
+// Common flags: -since (Nw, Nd, or 0 for all time), -until, -unit
+// (total, context, output, input, cost), -agent, -repo, -model, -tz,
+// -no-sidechain, -n, -week-start, -session, and -format json.
+//
+// The sessions view divides by the whole window, so -session narrows which
+// rows print without changing the denominator: it answers what fraction of
+// the week's tokens one session accounted for.
+//
+// Rows appear only for sessions indexed since the usage table was added;
+// cass has no backfill, so run cass index --force once and the command
+// warns while the index predates the table.
+//
 // List subagent runs for a session:
 //
 //	cass subagents --by-agent-type
