@@ -144,11 +144,11 @@ func (r report) repoLabel(dir string) string {
 // has no backfill: sessions indexed before the table existed hold no rows and
 // silently shrink every total.
 func warnBackfill(ctx context.Context, svc *service.Service, w ccusage.Window) error {
-	n, oldest, err := svc.UsageCoverage(ctx)
+	any, oldest, err := svc.UsageCoverage(ctx)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	if !any {
 		fmt.Fprintln(os.Stderr, "cass: no usage events indexed; run `cass index --force`")
 		return nil
 	}

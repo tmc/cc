@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -67,12 +68,15 @@ func TestUsageEventsRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := indexUsage(t, s)
 
-	count, oldest, err := s.UsageEventCount(ctx)
+	if count := usageRows(t, s); count != 5 {
+		t.Errorf("usage rows = %d, want 5", count)
+	}
+	any, oldest, err := s.UsageCoverage(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 5 {
-		t.Errorf("usage rows = %d, want 5", count)
+	if !any {
+		t.Error("coverage reports no usage rows")
 	}
 	if want := time.Date(2026, 6, 1, 9, 30, 0, 0, time.UTC); !oldest.Equal(want) {
 		t.Errorf("oldest = %v, want %v", oldest, want)
@@ -118,11 +122,7 @@ func TestUsageReindexIsIdempotent(t *testing.T) {
 	if err := s.BatchIndex(ctx, usageSessions()); err != nil {
 		t.Fatal(err)
 	}
-	count, _, err := s.UsageEventCount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 5 {
+	if count := usageRows(t, s); count != 5 {
 		t.Errorf("usage rows after reindex = %d, want 5", count)
 	}
 
@@ -131,7 +131,7 @@ func TestUsageReindexIsIdempotent(t *testing.T) {
 	if err := s.BatchIndex(ctx, shrunk[:1]); err != nil {
 		t.Fatal(err)
 	}
-	if count, _, _ := s.UsageEventCount(ctx); count != 3 {
+	if count := usageRows(t, s); count != 3 {
 		t.Errorf("usage rows after shrinking s1 = %d, want 3", count)
 	}
 }
@@ -291,11 +291,7 @@ func TestUsageEventsFollowSessionDelete(t *testing.T) {
 	if err := s.Delete(ctx, cass.DeleteFilter{IDs: []string{"s1"}}); err != nil {
 		t.Fatal(err)
 	}
-	count, _, err := s.UsageEventCount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 2 {
+	if count := usageRows(t, s); count != 2 {
 		t.Errorf("usage rows after deleting s1 = %d, want 2", count)
 	}
 }
@@ -473,6 +469,61 @@ func TestUsageRollupMatchesEvents(t *testing.T) {
 		if got != want {
 			t.Errorf("groups for %+v = %v, events = %v", f, got, want)
 		}
+
+		// Spans come from the per-session rollup, which keeps the true first
+		// and last timestamp rather than the hour they fall in.
+		spans, err := s.UsageSessions(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := s.usageSessionsFromEvents(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(spans, raw) {
+			t.Errorf("spans for %+v = %v, events = %v", f, spans, raw)
+		}
+		for _, dim := range []string{"agent", "model", "git_common_dir"} {
+			got, err := s.UsageSessionCounts(ctx, f, dim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := s.usageCounts(ctx, f, dim, "count(DISTINCT session_id)")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("session counts by %s for %+v = %v, events = %v", dim, f, got, want)
+			}
+		}
+		bySession, err := s.UsageBySession(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = [5]int{}
+		for _, r := range bySession {
+			got[0] += r.Requests
+			got[1] += r.Input
+			got[2] += r.CacheRead
+			got[3] += r.CacheCreate
+			got[4] += r.Output
+		}
+		if got != want {
+			t.Errorf("sessions for %+v = %v, events = %v", f, got, want)
+		}
+		for _, dim := range []string{"agent", "attribution", "git_common_dir"} {
+			got, err := s.UsageRowCounts(ctx, f, dim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := s.usageCounts(ctx, f, dim, "count(*)")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("row counts by %s for %+v = %v, events = %v", dim, f, got, want)
+			}
+		}
 	}
 }
 
@@ -569,4 +620,15 @@ func TestForkedRequestCountedOnce(t *testing.T) {
 	if d := dedup["claude-code"]; d.Requests != 1 || d.Tokens == 0 {
 		t.Errorf("dedup stats = %+v, want one request with tokens", d)
 	}
+}
+
+// usageRows counts the fact table, which the store itself never does: the
+// reports only ask whether it is empty.
+func usageRows(t *testing.T, s *DB) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRow("SELECT count(*) FROM usage_events").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

@@ -45,41 +45,57 @@ func (s *DB) addDedup(agent string, requests int, tokens int64) {
 	s.dedup[agent] = d
 }
 
-// usageRollupNoticeRows is the event count above which the one-time rollup fill
-// announces itself. The fill runs at about a million rows a second, so this is
-// where it starts to be noticeable.
-const usageRollupNoticeRows = 1_000_000
-
 // fillUsageRollup populates usage_hourly from usage_events when the rollup is
 // empty and the events are not. Unlike usage_events itself, which only a
 // reindex can fill, the rollup is derived, so an index that predates it is
 // brought up to date at open rather than reading as though nothing happened.
 func (s *DB) fillUsageRollup() error {
-	var events, rollup int
-	if err := s.db.QueryRow("SELECT (SELECT count(*) FROM usage_events), (SELECT count(*) FROM usage_hourly)").
-		Scan(&events, &rollup); err != nil {
+	// Existence, not cardinality: this runs at every open, and counting the
+	// fact table there costs a full scan -- a second of it on a corpus-sized
+	// index, paid by every report.
+	var events, hourly, sessions bool
+	if err := s.db.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM usage_events), EXISTS(SELECT 1 FROM usage_hourly), "+
+			"EXISTS(SELECT 1 FROM usage_session_hourly)").
+		Scan(&events, &hourly, &sessions); err != nil {
 		return fmt.Errorf("usage rollup state: %w", err)
 	}
-	if events == 0 || rollup > 0 {
+	if !events || (hourly && sessions) {
 		return nil
 	}
 	// A grouped scan of the fact table, which on a corpus-sized index takes
 	// long enough that a silent one reads as a hang.
-	if events >= usageRollupNoticeRows {
-		fmt.Fprintf(os.Stderr, "cass: filling usage rollup from %d events\n", events)
+	fmt.Fprintln(os.Stderr, "cass: filling usage rollup from the indexed events")
+	if !hourly {
+		if _, err := s.db.Exec(`
+			INSERT INTO usage_hourly (
+				hour, agent, vendor, model, git_common_dir, is_sidechain,
+				requests, estimated,
+				input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens
+			)
+			SELECT ts/3600, agent, vendor, model, git_common_dir, is_sidechain,
+			       count(*), sum(output_estimated),
+			       sum(input_tokens), sum(cache_read_tokens),
+			       sum(cache_creation_tokens), sum(output_tokens)
+			FROM usage_events GROUP BY 1, 2, 3, 4, 5, 6`); err != nil {
+			return fmt.Errorf("fill usage rollup: %w", err)
+		}
 	}
-	if _, err := s.db.Exec(`
-		INSERT INTO usage_hourly (
-			hour, agent, vendor, model, git_common_dir, is_sidechain,
-			requests, estimated,
-			input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens
-		)
-		SELECT ts/3600, agent, vendor, model, git_common_dir, is_sidechain,
-		       count(*), sum(output_estimated),
-		       sum(input_tokens), sum(cache_read_tokens),
-		       sum(cache_creation_tokens), sum(output_tokens)
-		FROM usage_events GROUP BY 1, 2, 3, 4, 5, 6`); err != nil {
-		return fmt.Errorf("fill usage rollup: %w", err)
+	if !sessions {
+		if _, err := s.db.Exec(`
+			INSERT INTO usage_session_hourly (
+				hour, session_id, agent, vendor, model, git_common_dir, attribution,
+				is_sidechain, requests, estimated,
+				input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
+				first_ts, last_ts
+			)
+			SELECT ts/3600, session_id, agent, vendor, model, git_common_dir, attribution,
+			       is_sidechain, count(*), sum(output_estimated),
+			       sum(input_tokens), sum(cache_read_tokens),
+			       sum(cache_creation_tokens), sum(output_tokens), min(ts), max(ts)
+			FROM usage_events GROUP BY 1, 2, 3, 4, 5, 6, 7, 8`); err != nil {
+			return fmt.Errorf("fill usage session rollup: %w", err)
+		}
 	}
 	return nil
 }
@@ -202,6 +218,9 @@ func recomputeUsageHours(ctx context.Context, tx *sql.Tx, hours map[int64]bool) 
 		if _, err := tx.ExecContext(ctx, "DELETE FROM usage_hourly WHERE hour = ?", h); err != nil {
 			return fmt.Errorf("clear usage_hourly %d: %w", h, err)
 		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM usage_session_hourly WHERE hour = ?", h); err != nil {
+			return fmt.Errorf("clear usage_session_hourly %d: %w", h, err)
+		}
 		// Bounded by timestamp rather than by ts/3600 so the ts index applies.
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO usage_hourly (
@@ -217,6 +236,22 @@ func recomputeUsageHours(ctx context.Context, tx *sql.Tx, hours map[int64]bool) 
 			GROUP BY 1, 2, 3, 4, 5, 6
 		`, h*3600, (h+1)*3600); err != nil {
 			return fmt.Errorf("fill usage_hourly %d: %w", h, err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO usage_session_hourly (
+				hour, session_id, agent, vendor, model, git_common_dir, attribution,
+				is_sidechain, requests, estimated,
+				input_tokens, cache_read_tokens, cache_creation_tokens, output_tokens,
+				first_ts, last_ts
+			)
+			SELECT ts/3600, session_id, agent, vendor, model, git_common_dir, attribution,
+			       is_sidechain, count(*), sum(output_estimated),
+			       sum(input_tokens), sum(cache_read_tokens),
+			       sum(cache_creation_tokens), sum(output_tokens), min(ts), max(ts)
+			FROM usage_events WHERE ts >= ? AND ts < ?
+			GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+		`, h*3600, (h+1)*3600); err != nil {
+			return fmt.Errorf("fill usage_session_hourly %d: %w", h, err)
 		}
 	}
 	return nil

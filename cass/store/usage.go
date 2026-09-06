@@ -29,7 +29,14 @@ const usageSchema = `
 		output_estimated INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 	);
+	-- ts alone. The write path recomputes the rollups an hour at a time from
+	-- this range, and the queries that still read the fact table -- a session
+	-- filter, a window edge the rollup cannot divide -- bound it the same way.
+	-- Carrying session_id as a second column made the old session-span scan
+	-- index-only, which the per-session rollup has since made unnecessary;
+	-- that index cost 95 MB on a corpus-sized index against this one's 30 MB.
 	CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_events(ts);
+	DROP INDEX IF EXISTS idx_usage_ts_session;
 	CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id);
 
 	CREATE TABLE IF NOT EXISTS usage_hourly (
@@ -48,6 +55,33 @@ const usageSchema = `
 		PRIMARY KEY (hour, agent, vendor, model, git_common_dir, is_sidechain)
 	) WITHOUT ROWID;
 	CREATE INDEX IF NOT EXISTS idx_usage_hourly_hour ON usage_hourly(hour);
+
+	-- The same rollup carried one dimension further, by session. Every report
+	-- counts the sessions in its window and measures the longest, which on the
+	-- fact table is a scan of the window's every request; here it is a scan of
+	-- one row per session and hour, a few tens of thousands for a corpus.
+	-- first_ts and last_ts keep the extent exact, so the answer is the one the
+	-- events give rather than an hour-rounded approximation of it.
+	CREATE TABLE IF NOT EXISTS usage_session_hourly (
+		hour INTEGER NOT NULL,
+		session_id TEXT NOT NULL,
+		agent TEXT NOT NULL,
+		vendor TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		git_common_dir TEXT NOT NULL DEFAULT '',
+		attribution TEXT NOT NULL DEFAULT '',
+		is_sidechain INTEGER NOT NULL DEFAULT 0,
+		requests INTEGER NOT NULL DEFAULT 0,
+		estimated INTEGER NOT NULL DEFAULT 0,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		first_ts INTEGER NOT NULL DEFAULT 0,
+		last_ts INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (hour, session_id, agent, vendor, model, git_common_dir, attribution, is_sidechain)
+	) WITHOUT ROWID;
+	CREATE INDEX IF NOT EXISTS idx_usage_session_hourly_hour ON usage_session_hourly(hour);
 
 
 	CREATE TABLE IF NOT EXISTS repos (
@@ -323,16 +357,26 @@ func (s *DB) UsageByGroup(ctx context.Context, f UsageFilter) ([]GroupRow, error
 // reported by the part of it inside the window, since that is the part the
 // surrounding report covers.
 func (s *DB) UsageSessions(ctx context.Context, f UsageFilter) ([]SessionSpanRow, error) {
-	where, args := f.where()
+	if !f.rollup() {
+		return s.usageSessionsFromEvents(ctx, f)
+	}
+	// The per-session rollup keeps each session's true first and last
+	// timestamp, so this is the same answer read from a table a couple of
+	// orders of magnitude smaller than the window's requests.
+	where, args := f.hourWhere()
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT session_id, min(ts), max(ts), count(*)
-		FROM usage_events WHERE `+where+`
+		SELECT session_id, min(first_ts), max(last_ts), sum(requests)
+		FROM usage_session_hourly WHERE `+where+`
 		GROUP BY session_id ORDER BY 2`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("usage sessions: %w", err)
 	}
 	defer rows.Close()
+	return scanSessionSpans(rows)
+}
 
+// scanSessionSpans reads session id, first, last, requests rows.
+func scanSessionSpans(rows *sql.Rows) ([]SessionSpanRow, error) {
 	var result []SessionSpanRow
 	for rows.Next() {
 		var r SessionSpanRow
@@ -346,20 +390,39 @@ func (s *DB) UsageSessions(ctx context.Context, f UsageFilter) ([]SessionSpanRow
 	return result, rows.Err()
 }
 
-// UsageEventCount returns the number of usage rows, and the earliest request
-// timestamp. Both are zero on an index that predates the table, which is what
-// the commands warn about: a schema migration adds the table empty and only a
-// reindex fills it.
-func (s *DB) UsageEventCount(ctx context.Context) (count int, oldest time.Time, err error) {
+// usageSessionsFromEvents answers UsageSessions from the fact table, which is
+// where a session-filtered query goes and what the rollup is checked against.
+func (s *DB) usageSessionsFromEvents(ctx context.Context, f UsageFilter) ([]SessionSpanRow, error) {
+	where, args := f.where()
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT session_id, min(ts), max(ts), count(*)
+		FROM usage_events WHERE `+where+`
+		GROUP BY session_id ORDER BY 2`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("usage sessions: %w", err)
+	}
+	defer rows.Close()
+	return scanSessionSpans(rows)
+}
+
+// UsageCoverage reports whether the index holds any usage rows, and the
+// earliest one. Both are empty on an index that predates the table, which is
+// what the commands warn about: a schema migration adds the table empty and
+// only a reindex fills it.
+//
+// The question is whether there are rows, not how many, so this reads the
+// smallest value of the timestamp index rather than counting: every report
+// calls it, and a count is a scan of the whole fact table.
+func (s *DB) UsageCoverage(ctx context.Context) (any_ bool, oldest time.Time, err error) {
 	var ts int64
-	row := s.db.QueryRowContext(ctx, `SELECT count(*), coalesce(min(ts), 0) FROM usage_events`)
-	if err := row.Scan(&count, &ts); err != nil {
-		return 0, time.Time{}, fmt.Errorf("usage event count: %w", err)
+	row := s.db.QueryRowContext(ctx, `SELECT coalesce(min(ts), 0) FROM usage_events`)
+	if err := row.Scan(&ts); err != nil {
+		return false, time.Time{}, fmt.Errorf("usage coverage: %w", err)
 	}
-	if ts > 0 {
-		oldest = time.Unix(ts, 0).UTC()
+	if ts == 0 {
+		return false, time.Time{}, nil
 	}
-	return count, oldest, nil
+	return true, time.Unix(ts, 0).UTC(), nil
 }
 
 // Repos returns every known repository keyed by its git common dir.
@@ -462,26 +525,53 @@ var usageDims = map[string]bool{
 // UsageRowCounts returns the number of usage rows per value of dim, which must
 // name a usage_events dimension column.
 func (s *DB) UsageRowCounts(ctx context.Context, f UsageFilter, dim string) (map[string]int, error) {
-	return s.usageCounts(ctx, f, dim, "count(*)")
+	if !usageDims[dim] {
+		return nil, fmt.Errorf("usage counts: unknown dimension %q", dim)
+	}
+	if !f.rollup() {
+		return s.usageCounts(ctx, f, dim, "count(*)")
+	}
+	where, args := f.hourWhere()
+	return s.scanCounts(ctx, `
+		SELECT `+dim+`, sum(requests)
+		FROM usage_session_hourly WHERE `+where+`
+		GROUP BY 1`, args)
 }
 
 // UsageSessionCounts returns the number of distinct sessions per value of dim,
 // which must name a usage_events dimension column. Summing the per-group
 // counts from UsageByGroup would count a session once per model it used.
 func (s *DB) UsageSessionCounts(ctx context.Context, f UsageFilter, dim string) (map[string]int, error) {
-	return s.usageCounts(ctx, f, dim, "count(DISTINCT session_id)")
+	if !usageDims[dim] {
+		return nil, fmt.Errorf("usage counts: unknown dimension %q", dim)
+	}
+	if !f.rollup() {
+		return s.usageCounts(ctx, f, dim, "count(DISTINCT session_id)")
+	}
+	// The per-session rollup is keyed by the same dimensions and carries the
+	// session, so the distinct count is the same one, over far fewer rows.
+	where, args := f.hourWhere()
+	return s.scanCounts(ctx, `
+		SELECT `+dim+`, count(DISTINCT session_id)
+		FROM usage_session_hourly WHERE `+where+`
+		GROUP BY 1`, args)
 }
 
-// usageCounts groups agg by dim under the filter.
+// usageCounts groups agg by dim under the filter, over the fact table.
 func (s *DB) usageCounts(ctx context.Context, f UsageFilter, dim, agg string) (map[string]int, error) {
 	if !usageDims[dim] {
 		return nil, fmt.Errorf("usage counts: unknown dimension %q", dim)
 	}
 	where, args := f.where()
-	rows, err := s.db.QueryContext(ctx, `
+	return s.scanCounts(ctx, `
 		SELECT `+dim+`, `+agg+`
 		FROM usage_events WHERE `+where+`
-		GROUP BY 1`, args...)
+		GROUP BY 1`, args)
+}
+
+// scanCounts runs a two-column key/count query.
+func (s *DB) scanCounts(ctx context.Context, query string, args []any) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("usage counts: %w", err)
 	}
@@ -491,7 +581,7 @@ func (s *DB) usageCounts(ctx context.Context, f UsageFilter, dim, agg string) (m
 		var key string
 		var n int
 		if err := rows.Scan(&key, &n); err != nil {
-			return nil, fmt.Errorf("usage counts: %w", err)
+			return nil, fmt.Errorf("scan usage count: %w", err)
 		}
 		out[key] = n
 	}
@@ -525,13 +615,22 @@ type SessionUsageRow struct {
 // UsageBySession returns one row per session in the filter, ordered by total
 // tokens, largest first. It answers what share of a window one session was.
 func (s *DB) UsageBySession(ctx context.Context, f UsageFilter) ([]SessionUsageRow, error) {
+	// The per-session rollup holds the same sums keyed by session and hour,
+	// so a report window reads it rather than the window's every request.
+	table, first, last, requests, est := "usage_events", "min(ts)", "max(ts)", "count(*)", "output_estimated"
 	where, args := f.where()
+	if f.rollup() {
+		table, first, last = "usage_session_hourly", "min(first_ts)", "max(last_ts)"
+		requests, est = "sum(requests)", "estimated"
+		where, args = f.hourWhere()
+	}
+	sum := func(col string) string { return "coalesce(sum(" + col + "), 0)" }
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT session_id, agent, git_common_dir, count(*), min(ts), max(ts),
-			coalesce(sum(input_tokens), 0), coalesce(sum(cache_read_tokens), 0),
-			coalesce(sum(cache_creation_tokens), 0), coalesce(sum(output_tokens), 0),
-			coalesce(sum(output_estimated), 0)
-		FROM usage_events WHERE `+where+`
+		SELECT session_id, agent, git_common_dir, `+requests+`, `+first+`, `+last+`,
+			`+sum("input_tokens")+`, `+sum("cache_read_tokens")+`,
+			`+sum("cache_creation_tokens")+`, `+sum("output_tokens")+`,
+			`+sum(est)+`
+		FROM `+table+` WHERE `+where+`
 		GROUP BY 1
 		ORDER BY sum(input_tokens) + sum(cache_read_tokens) +
 			sum(cache_creation_tokens) + sum(output_tokens) DESC`, args...)

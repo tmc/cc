@@ -931,10 +931,10 @@ func (s *Service) UsageSessions(ctx context.Context, f store.UsageFilter) ([]sto
 	return s.store.UsageSessions(ctx, f)
 }
 
-// UsageCoverage returns how many usage rows the index holds and the oldest one,
+// UsageCoverage reports whether the index holds usage rows and the oldest one,
 // for the warning the usage reports print on an index that predates the table.
-func (s *Service) UsageCoverage(ctx context.Context) (int, time.Time, error) {
-	return s.store.UsageEventCount(ctx)
+func (s *Service) UsageCoverage(ctx context.Context) (bool, time.Time, error) {
+	return s.store.UsageCoverage(ctx)
 }
 
 // Repos returns every repository usage has been attributed to.
