@@ -273,9 +273,10 @@ type geminiChatMessage struct {
 	Content   json.RawMessage `json:"content"`
 	Model     string          `json:"model"`
 	Tokens    struct {
-		Input  int `json:"input"`
-		Output int `json:"output"`
-		Cached int `json:"cached"`
+		Input    int `json:"input"`
+		Output   int `json:"output"`
+		Cached   int `json:"cached"`
+		Thoughts int `json:"thoughts"`
 	} `json:"tokens"`
 }
 
@@ -321,8 +322,12 @@ func (c *GeminiCLI) readJSONSession(path string) ([]cc.Entry, string, error) {
 		}
 		if role == "assistant" {
 			entry.Message.Usage = &cc.Usage{
-				InputTokens:          m.Tokens.Input,
-				OutputTokens:         m.Tokens.Output,
+				InputTokens: m.Tokens.Input,
+				// Gemini counts thinking separately, and its own total is
+				// input plus output plus thoughts. Folding thoughts into
+				// output keeps the request whole; leaving it out halves the
+				// output of every gemini request.
+				OutputTokens:         m.Tokens.Output + m.Tokens.Thoughts,
 				CacheReadInputTokens: m.Tokens.Cached,
 			}
 		}

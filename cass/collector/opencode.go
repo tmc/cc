@@ -226,7 +226,7 @@ func (c *OpenCode) parseSession(path string) (cass.Session, error) {
 	}
 
 	root := c.storageRootFromSessionPath(path)
-	messages, stats, usage, meta, err := readOpenCodeMessages(root, sf.ID)
+	messages, stats, usage, meta, err := readOpenCodeMessages(root, sf.ID, sf.ParentID)
 	if err != nil {
 		return cass.Session{}, err
 	}
@@ -289,10 +289,17 @@ func (c *OpenCode) parseSession(path string) (cass.Session, error) {
 
 // readOpenCodeMessages reads one session's message and part files. opencode
 // stores each message as its own JSON document rather than as JSONL, so it does
-// not go through cc.ReadFile and builds its usage records here; its token
-// counts already follow the Anthropic convention, as [ccusage.FromEntries]
-// documents, so they need no normalization.
-func readOpenCodeMessages(root, sessionID string) ([]cass.Message, cass.SessionStats, []cass.UsageEvent, map[string]any, error) {
+// not go through cc.ReadFile and builds its usage records here. Its cache
+// counts are already disjoint from its input count, so they need none of the
+// cache-in-input normalization [ccusage.FromEntries] does; unlike that path it
+// estimates no output, so an opencode request that reports none is recorded
+// with zero rather than an estimate.
+//
+// opencode spawns a subagent as its own top-level session linked by parentID,
+// so the caller passes it: without it every subagent request would look like
+// ordinary work and -no-sidechain would mean something different here than for
+// every other harness.
+func readOpenCodeMessages(root, sessionID, parentID string) ([]cass.Message, cass.SessionStats, []cass.UsageEvent, map[string]any, error) {
 	messageDir := filepath.Join(root, "message", sessionID)
 	files, err := os.ReadDir(messageDir)
 	if err != nil {
@@ -353,9 +360,8 @@ func readOpenCodeMessages(root, sessionID string) ([]cass.Message, cass.SessionS
 		stats.OutputTokensSnapshot += rec.Tokens.Output
 		stats.CacheReads += rec.Tokens.Cache.Read
 		stats.CacheCreationInputTokens += rec.Tokens.Cache.Write
-		if rec.Role == "assistant" && rec.Tokens != (openCodeTokens{}) {
-			recModel, recProvider := openCodeModelProvider(rec, "", "")
-			id := openCodeModelID(recModel, recProvider)
+		recModel, recProvider := openCodeModelProvider(rec, "", "")
+		if id := openCodeModelID(recModel, recProvider); rec.Role == "assistant" && id != "" {
 			usage = append(usage, cass.UsageEvent{Record: ccusage.Record{
 				SessionID:   sessionID,
 				Agent:       "opencode",
@@ -363,6 +369,7 @@ func readOpenCodeMessages(root, sessionID string) ([]cass.Message, cass.SessionS
 				Model:       id,
 				Vendor:      ccusage.Vendor(id),
 				CWD:         rec.Path.CWD,
+				IsSidechain: parentID != "",
 				Input:       rec.Tokens.Input,
 				CacheRead:   rec.Tokens.Cache.Read,
 				CacheCreate: rec.Tokens.Cache.Write,

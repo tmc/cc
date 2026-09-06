@@ -97,6 +97,12 @@ type Entry struct {
 	AgentNickname  string `json:"agentNickname,omitempty"`
 	AgentRole      string `json:"agentRole,omitempty"`
 
+	// ForkedFromID is the session a codex rollout was forked from, set on the
+	// fork's own session_meta. A fork's file opens with a verbatim copy of the
+	// ancestor's transcript, so readers that count requests must not count the
+	// copied prefix twice.
+	ForkedFromID string `json:"forkedFromId,omitempty"`
+
 	// Permission mode for the turn (e.g. "plan", "default").
 	PermissionMode string `json:"permissionMode,omitempty"`
 

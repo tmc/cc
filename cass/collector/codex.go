@@ -199,11 +199,41 @@ func (c *Codex) parseSession(ctx context.Context, config cass.ScanConfig, path s
 		Goals:      goals,
 		Skills:     skills,
 		Stats:      stats,
-		Usage:      cass.UsageEvents(ccusage.FromEntries(agent, entries)),
+		Usage:      cass.UsageEvents(ccusage.FromEntries(agent, ownEntries(entries))),
 		Metadata:   meta,
 	}
 	session.Subagents = extractCodexSubagentRuns(entries, session)
 	return session, nil
+}
+
+// ownEntries returns the entries whose requests originated in this rollout.
+//
+// A forked rollout — /fork, or a spawn_agent with fork_context — opens with a
+// verbatim copy of its ancestor's transcript, token counts included, and every
+// copied line is re-stamped to the fork's own start. Counting those requests
+// again would inflate every codex total; on this machine's corpus a third of
+// all codex tokens are such copies. The copied block is exactly the run of
+// entries sharing the file's first second, so it is dropped, and a fork whose
+// own first request lands in that same second keeps it: over-counting one
+// request is a smaller error than dropping a real one.
+func ownEntries(entries []cc.Entry) []cc.Entry {
+	forked := false
+	for _, e := range entries {
+		if e.Subtype == "session_meta" {
+			forked = e.ForkedFromID != ""
+			break
+		}
+	}
+	if !forked || len(entries) == 0 {
+		return entries
+	}
+	start := entries[0].Timestamp.Truncate(time.Second)
+	for i, e := range entries {
+		if e.Timestamp.After(start.Add(time.Second - time.Nanosecond)) {
+			return entries[i:]
+		}
+	}
+	return nil
 }
 
 func (c *Codex) root() (string, error) {

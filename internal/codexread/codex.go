@@ -84,6 +84,7 @@ func decodeCodexSessionMeta(env codexEnvelope) (ccmodel.Entry, bool) {
 	// shape fails the whole entry.
 	var payload struct {
 		ID            string          `json:"id"`
+		ForkedFromID  string          `json:"forked_from_id"`
 		Timestamp     string          `json:"timestamp"`
 		CWD           string          `json:"cwd"`
 		Originator    string          `json:"originator"`
@@ -117,6 +118,7 @@ func decodeCodexSessionMeta(env codexEnvelope) (ccmodel.Entry, bool) {
 		Originator:     payload.Originator,
 		Source:         source,
 		ParentThreadID: spawn.ParentThreadID,
+		ForkedFromID:   payload.ForkedFromID,
 		AgentNickname:  nickname,
 		AgentRole:      role,
 	}, true

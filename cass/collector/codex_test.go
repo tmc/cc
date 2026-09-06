@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	cc "github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 )
 
@@ -597,5 +598,34 @@ func writeCollectorJSONL(t *testing.T, path string, rows ...map[string]any) {
 		if _, err := f.Write(append(b, '\n')); err != nil {
 			t.Fatalf("Write: %v", err)
 		}
+	}
+}
+
+// TestOwnEntriesDropsForkedPrefix checks that the ancestor transcript a forked
+// rollout opens with is not counted as this session's requests, and that an
+// ordinary rollout keeps every entry.
+func TestOwnEntriesDropsForkedPrefix(t *testing.T) {
+	start := time.Date(2026, 3, 5, 7, 43, 21, 400_000_000, time.UTC)
+	copied := []cc.Entry{
+		{Type: "system", Subtype: "session_meta", Timestamp: start, ForkedFromID: "ancestor"},
+		{Type: "system", Subtype: "session_meta", Timestamp: start.Add(4 * time.Millisecond)},
+		{Type: "system", Subtype: "token_count", Timestamp: start.Add(20 * time.Millisecond)},
+	}
+	own := []cc.Entry{
+		{Type: "system", Subtype: "token_count", Timestamp: start.Add(21 * time.Second)},
+		{Type: "system", Subtype: "token_count", Timestamp: start.Add(48 * time.Hour)},
+	}
+	got := ownEntries(append(append([]cc.Entry{}, copied...), own...))
+	if len(got) != len(own) || !got[0].Timestamp.Equal(own[0].Timestamp) {
+		t.Errorf("kept %d entries starting %v, want %d starting %v",
+			len(got), got[0].Timestamp, len(own), own[0].Timestamp)
+	}
+
+	plain := []cc.Entry{
+		{Type: "system", Subtype: "session_meta", Timestamp: start},
+		{Type: "system", Subtype: "token_count", Timestamp: start.Add(20 * time.Millisecond)},
+	}
+	if got := ownEntries(plain); len(got) != len(plain) {
+		t.Errorf("unforked rollout kept %d entries, want %d", len(got), len(plain))
 	}
 }
