@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tmc/cc/cass"
@@ -18,6 +19,9 @@ import (
 // DB implements cass.Index using SQLite with FTS5.
 type DB struct {
 	db *sql.DB
+
+	dedupMu sync.Mutex
+	dedup   map[string]UsageDedup // duplicated requests removed, by harness
 }
 
 // SessionSource identifies an indexed session transcript.
@@ -751,11 +755,15 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			if !ts.IsZero() {
 				unix = ts.Unix()
 			}
-			own, err := claimRequest(ctx, tx, sess.Agent, u.RequestID, sess.StartedAt.Unix(), sess.ID, usageHours)
+			own, removed, err := claimRequest(ctx, tx, sess.Agent, u.RequestID, sess.StartedAt.Unix(), sess.ID, usageHours)
 			if err != nil {
 				return err
 			}
+			s.addDedup(sess.Agent, removed.Requests, removed.Tokens)
 			if !own {
+				// The row belongs to a session that started earlier: this one
+				// is a copy the fork or resume carried over.
+				s.addDedup(sess.Agent, 1, int64(u.Input+u.CacheRead+u.CacheCreate+u.Output))
 				continue
 			}
 			usageHours[usageHour(unix)] = true

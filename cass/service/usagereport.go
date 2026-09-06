@@ -103,3 +103,10 @@ func UsageSpans(rows []store.SessionSpanRow) []ccusage.SessionSpan {
 	}
 	return out
 }
+
+// UsageDedup reports the duplicated requests this handle's writes removed,
+// keyed by harness: a fork or a resume opens with a verbatim copy of its
+// ancestor's transcript, so the same request is present in two files.
+func (s *Service) UsageDedup() map[string]store.UsageDedup {
+	return s.store.UsageDedupStats()
+}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -335,6 +336,7 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"indexed":            count,
+			"usage_dedup":        svc.UsageDedup(),
 			"api_requests":       harCount,
 			"har_requests":       harCount,
 			"sessionv2_requests": sessionV2Count,
@@ -345,6 +347,7 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 		})
 	}
 	fmt.Printf("indexed %d sessions\n", count)
+	printUsageDedup(svc.UsageDedup())
 	if harCount > 0 {
 		fmt.Printf("indexed %d API requests from HAR\n", harCount)
 	}
@@ -1759,3 +1762,27 @@ func timeSince(t time.Time) time.Duration {
 
 // Ensure store.SessionMapping is referenced for go vet.
 var _ = store.SessionMapping{}
+
+// printUsageDedup reports the duplicated requests the run removed. A fork or a
+// resume opens with a verbatim copy of its ancestor's transcript, tokens
+// included, so without this the copies would be counted as usage; the line is
+// printed only when there were any.
+func printUsageDedup(stats map[string]store.UsageDedup) {
+	if len(stats) == 0 {
+		return
+	}
+	agents := make([]string, 0, len(stats))
+	total := store.UsageDedup{}
+	for a, d := range stats {
+		agents = append(agents, a)
+		total.Requests += d.Requests
+		total.Tokens += d.Tokens
+	}
+	sort.Slice(agents, func(i, j int) bool { return stats[agents[i]].Tokens > stats[agents[j]].Tokens })
+	fmt.Printf("dropped %d duplicated requests (%s tokens) copied by forks and resumes\n",
+		total.Requests, compact(float64(total.Tokens)))
+	for _, a := range agents {
+		d := stats[a]
+		fmt.Printf("  %-14s %8d requests  %10s tokens\n", a, d.Requests, compact(float64(d.Tokens)))
+	}
+}

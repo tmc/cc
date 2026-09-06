@@ -7,6 +7,44 @@ import (
 	"os"
 )
 
+// UsageDedup counts what request-id ownership removed for one harness: the
+// duplicated requests a fork or a resume copied from its ancestor, and the
+// tokens they carried. It is the measure of a bug class that is otherwise
+// invisible, since a duplicate reads as ordinary usage.
+type UsageDedup struct {
+	Requests int
+	Tokens   int64
+}
+
+// UsageDedupStats returns what the writes since this handle was opened
+// removed, keyed by harness. It is reset by nothing: an index run reports its
+// own totals because it opens its own handle.
+func (s *DB) UsageDedupStats() map[string]UsageDedup {
+	s.dedupMu.Lock()
+	defer s.dedupMu.Unlock()
+	out := make(map[string]UsageDedup, len(s.dedup))
+	for k, v := range s.dedup {
+		out[k] = v
+	}
+	return out
+}
+
+// addDedup records a removed duplicate.
+func (s *DB) addDedup(agent string, requests int, tokens int64) {
+	if requests == 0 && tokens == 0 {
+		return
+	}
+	s.dedupMu.Lock()
+	defer s.dedupMu.Unlock()
+	if s.dedup == nil {
+		s.dedup = make(map[string]UsageDedup)
+	}
+	d := s.dedup[agent]
+	d.Requests += requests
+	d.Tokens += tokens
+	s.dedup[agent] = d
+}
+
 // usageRollupNoticeRows is the event count above which the one-time rollup fill
 // announces itself. The fill runs at about a million rows a second, so this is
 // where it starts to be noticeable.
@@ -101,51 +139,59 @@ func agentUsageHours(ctx context.Context, tx *sql.Tx, agent string, hours map[in
 // An empty request id identifies nothing and never participates: Codex records
 // no per-request id and its copies are dropped structurally by the collector.
 // Request ids are matched within one harness, since a copy never crosses one.
-func claimRequest(ctx context.Context, tx *sql.Tx, agent, requestID string, startedAt int64, id string, hours map[int64]bool) (bool, error) {
+//
+// The second return is what the claim removed from the table, which the
+// caller accumulates so an index run can say how much duplication it found.
+func claimRequest(ctx context.Context, tx *sql.Tx, agent, requestID string, startedAt int64, id string, hours map[int64]bool) (bool, UsageDedup, error) {
+	var removed UsageDedup
 	if requestID == "" {
-		return true, nil
+		return true, removed, nil
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT e.ts, s.started_at, s.id
+		SELECT e.ts, s.started_at, s.id,
+		       e.input_tokens + e.cache_read_tokens + e.cache_creation_tokens + e.output_tokens
 		FROM usage_events e JOIN sessions s ON s.id = e.session_id
 		WHERE e.agent = ? AND e.request_id = ?
 	`, agent, requestID)
 	if err != nil {
-		return false, fmt.Errorf("claim request %s: %w", requestID, err)
+		return false, removed, fmt.Errorf("claim request %s: %w", requestID, err)
 	}
 	type held struct {
 		ts        int64
 		startedAt int64
 		id        string
+		tokens    int64
 	}
 	var holders []held
 	for rows.Next() {
 		var h held
-		if err := rows.Scan(&h.ts, &h.startedAt, &h.id); err != nil {
+		if err := rows.Scan(&h.ts, &h.startedAt, &h.id, &h.tokens); err != nil {
 			rows.Close()
-			return false, err
+			return false, removed, err
 		}
 		holders = append(holders, h)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return false, err
+		return false, removed, err
 	}
 	for _, h := range holders {
 		if h.startedAt < startedAt || (h.startedAt == startedAt && h.id < id) {
-			return false, nil
+			return false, removed, nil
 		}
 	}
 	for _, h := range holders {
 		hours[usageHour(h.ts)] = true
+		removed.Requests++
+		removed.Tokens += h.tokens
 	}
 	if len(holders) > 0 {
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM usage_events WHERE agent = ? AND request_id = ?", agent, requestID); err != nil {
-			return false, fmt.Errorf("drop duplicate request %s: %w", requestID, err)
+			return false, removed, fmt.Errorf("drop duplicate request %s: %w", requestID, err)
 		}
 	}
-	return true, nil
+	return true, removed, nil
 }
 
 // recomputeUsageHours rebuilds the rollup rows for the given hours from

@@ -539,6 +539,7 @@ func TestForkedRequestCountedOnce(t *testing.T) {
 	ctx := context.Background()
 	anc, fork := forkPair()
 
+	var dedup map[string]UsageDedup
 	dump := func(order []cass.Session) string {
 		s := newTestStore(t)
 		for _, sess := range order {
@@ -546,6 +547,7 @@ func TestForkedRequestCountedOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		dedup = s.UsageDedupStats()
 		return usageDump(ctx, t, s)
 	}
 	first := dump([]cass.Session{anc, fork})
@@ -561,5 +563,10 @@ func TestForkedRequestCountedOnce(t *testing.T) {
 	}
 	if n := strings.Count(first, "event "); n != 3 {
 		t.Errorf("events = %d, want 3 (two of the ancestor's, one of the fork's):\n%s", n, first)
+	}
+	// What was removed is counted, so an index run can report the duplication
+	// it found rather than leaving it invisible.
+	if d := dedup["claude-code"]; d.Requests != 1 || d.Tokens == 0 {
+		t.Errorf("dedup stats = %+v, want one request with tokens", d)
 	}
 }
