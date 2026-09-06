@@ -5236,23 +5236,255 @@ function ContextCompositionBar({ daily }) {
   `;
 }
 
-function UsagePanel({ urlParams, updateParams, navVersion }) {
-  const [data, setData] = useState(null);
-  const [since, setSinceRaw] = useState(urlParams.since || '720h');
 
-  function setSince(v) { setSinceRaw(v); updateParams({ since: v }); }
+// --- Usage report views ---
+//
+// These read GET /api/usage?view=, the same report `cass usage` prints, so a
+// number here and a number in a terminal come from one implementation.
+
+// The units the panel offers. Cost is left out: it weights each row by its
+// model's rate, which only the server knows.
+const USAGE_UNITS = ['total', 'context', 'input', 'output', 'cache_read', 'cache_create', 'requests'];
+const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// tokenUnit measures a Tokens object the way the server's unit flag does, so
+// switching unit does not need a round trip for rows already in hand.
+function tokenUnit(t, unit) {
+  if (!t) return 0;
+  switch (unit) {
+    case 'input': return t.input || 0;
+    case 'output': return t.output || 0;
+    case 'cache_read': return t.cache_read || 0;
+    case 'cache_create': return t.cache_create || 0;
+    case 'context': return (t.input || 0) + (t.cache_read || 0) + (t.cache_create || 0);
+    case 'requests': return t.requests || 0;
+    default: return (t.input || 0) + (t.cache_read || 0) + (t.cache_create || 0) + (t.output || 0);
+  }
+}
+
+function fmtUnit(v, unit) {
+  if (unit === 'requests') return fmtNum(Math.round(v));
+  if (unit === 'cost') return v >= 100 ? v.toFixed(0) : v.toFixed(2);
+  return fmtTokens(Math.round(v));
+}
+
+function UsageSummary({ summary, unit }) {
+  if (!summary) return null;
+  const t = summary.tokens || {};
+  const total = tokenUnit(t, 'total') || 1;
+  const part = (label, n, note) => html`
+    <div class="stat-card">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value">${fmtTokens(n || 0)}</div>
+      <div class="stat-sub">${Math.round(((n || 0) / total) * 100)}%${note ? ' · ' + note : ''}</div>
+    </div>
+  `;
+  return html`
+    <div class="stats-grid" style="margin-bottom:0">
+      <div class="stat-card">
+        <div class="stat-label">Total (${unit})</div>
+        <div class="stat-value">${unit === 'requests'
+          ? fmtNum(summary.requests || 0)
+          : fmtUnit(tokenUnit(t, unit), unit)}</div>
+        <div class="stat-sub">${fmtNum(summary.requests || 0)} requests · ${fmtNum(summary.sessions || 0)} sessions</div>
+      </div>
+      ${part('Input', t.input)}
+      ${part('Cache read', t.cache_read, '~0.1× cost')}
+      ${part('Cache write', t.cache_create, '1.25× cost')}
+      ${part('Output', t.output, Math.round((summary.estimated || 0) * 100) + '% estimated')}
+      <div class="stat-card">
+        <div class="stat-label">Active days</div>
+        <div class="stat-value">${summary.active_days}/${summary.total_days}</div>
+        <div class="stat-sub">streak ${summary.current_streak}d · longest ${summary.longest_streak}d</div>
+      </div>
+    </div>
+  `;
+}
+
+// UsageCalendar draws a year of days as week columns, sharing the level field
+// with the terminal view so both shade a day the same way.
+function UsageCalendar({ days, unit }) {
+  if (!days || !days.length) return null;
+  // The server starts the window on the first day of a week, so the days
+  // chunk into columns of seven without any alignment work here.
+  const weeks = [];
+  for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
+  const month = d => Number(d.date.slice(5, 7)) - 1;
+  const months = weeks.map((w, i) => {
+    const m = month(w[0]);
+    return i && m === month(weeks[i - 1][0]) ? '' : MONTH_NAMES[m];
+  });
+  return html`
+    <div class="usage-cal-wrap">
+      <div class="usage-cal-months">
+        ${months.map(m => html`<div class="usage-cal-month">${m}</div>`)}
+      </div>
+      <div class="usage-cal">
+        ${weeks.map(w => html`
+          <div class="usage-cal-week">
+            ${w.map(d => html`
+              <div class="usage-cal-day level-${d.level}"
+                title=${d.date.slice(0, 10) + ' · ' + fmtUnit(tokenUnit(d, unit), unit)}></div>
+            `)}
+          </div>
+        `)}
+      </div>
+    </div>
+  `;
+}
+
+// UsageWeekdayBars shows the mean or median of a weekday over the window;
+// zero days are counted, so a quiet Sunday reads as quiet.
+function UsageWeekdayBars({ rows, unit }) {
+  const [stat, setStat] = useState('mean');
+  if (!rows || !rows.length) return null;
+  const max = Math.max(...rows.map(r => r[stat] || 0), 1);
+  return html`
+    <div>
+      <div class="filter-chips" style="margin-bottom:8px">
+        ${['mean', 'median'].map(s => html`
+          <button class="filter-chip ${stat === s ? 'active' : ''}" onClick=${() => setStat(s)}>${s}</button>
+        `)}
+      </div>
+      ${rows.map(r => html`
+        <div class="usage-bar-row">
+          <div class="usage-bar-label">${WEEKDAY_NAMES[r.weekday]}</div>
+          <div class="usage-bar-track">
+            <div class="usage-bar-fill" style=${{ width: ((r[stat] || 0) / max) * 100 + '%' }}></div>
+          </div>
+          <div class="usage-bar-value">${fmtUnit(r[stat] || 0, unit)}</div>
+          <div class="usage-bar-sub">${r.active}/${r.count} active · ${Math.round((r.share || 0) * 100)}%</div>
+        </div>
+      `)}
+    </div>
+  `;
+}
+
+// UsageHeatmap draws weekday by hour of day.
+function UsageHeatmap({ grid, unit }) {
+  if (!grid) return null;
+  let max = 0;
+  const cell = (d, h) => tokenUnit(grid[d][h], unit);
+  for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) max = Math.max(max, cell(d, h));
+  const level = v => (v <= 0 || max <= 0 ? 0 : Math.min(4, Math.ceil((v / max) * 4)));
+  return html`
+    <div class="usage-heat">
+      <div class="usage-heat-row">
+        <div class="usage-heat-label"></div>
+        ${Array.from({ length: 24 }, (_, h) => html`
+          <div class="usage-heat-hour">${h % 6 === 0 ? h : ''}</div>
+        `)}
+      </div>
+      ${Array.from({ length: 7 }, (_, d) => html`
+        <div class="usage-heat-row">
+          <div class="usage-heat-label">${WEEKDAY_NAMES[d]}</div>
+          ${Array.from({ length: 24 }, (_, h) => html`
+            <div class="usage-heat-cell level-${level(cell(d, h))}"
+              title=${WEEKDAY_NAMES[d] + ' ' + h + ':00 · ' + fmtUnit(cell(d, h), unit)}></div>
+          `)}
+        </div>
+      `)}
+    </div>
+  `;
+}
+
+// UsageGroupTable ranks folded groups. Rows with an empty name are the
+// unattributed bucket and are labelled, never dropped.
+function UsageGroupTable({ groups, unit, field, empty, linkRepo }) {
+  if (!groups || !groups.length) return html`<div class="empty">No rows</div>`;
+  const total = groups.reduce((s, g) => s + tokenUnit(g, unit), 0) || 1;
+  const name = g => g[field] || empty;
+  const shortRepo = v => (v || '').replace(/\/\.git$/, '').split('/').filter(Boolean).pop() || v;
+  return html`
+    <table class="data-table">
+      <thead><tr><th>${field}</th><th>Requests</th><th>Sessions</th><th>${unit}</th><th>Share</th></tr></thead>
+      <tbody>
+        ${groups.map(g => html`
+          <tr>
+            <td>${linkRepo && g[field]
+              ? html`<a href=${'/?q=' + encodeURIComponent(shortRepo(g[field]))}>${shortRepo(g[field])}</a>`
+              : name(g)}</td>
+            <td>${fmtNum(g.requests || 0)}</td>
+            <td>${fmtNum(g.sessions || 0)}</td>
+            <td>${fmtUnit(tokenUnit(g, unit), unit)}</td>
+            <td>${Math.round((tokenUnit(g, unit) / total) * 100)}%</td>
+          </tr>
+        `)}
+      </tbody>
+    </table>
+  `;
+}
+
+// UsageBuckets draws the daily or weekly bars, stacked by the chosen
+// dimension. Segments never sum to the bar when some rows are unattributed:
+// the bar height stays the true total.
+function UsageBuckets({ buckets, unit, names }) {
+  if (!buckets || !buckets.length) return null;
+  const max = Math.max(...buckets.map(b => tokenUnit(b, unit)), 1);
+  return html`
+    <div class="usage-buckets">
+      ${buckets.map(b => {
+        const v = tokenUnit(b, unit);
+        const parts = names.map(n => tokenUnit((b.parts || {})[n], unit));
+        return html`
+          <div class="usage-bucket" title=${b.start.slice(0, 10) + ' · ' + fmtUnit(v, unit)}>
+            <div class="usage-bucket-bar" style=${{ height: (v / max) * 100 + '%' }}>
+              ${parts.map((pv, i) => html`
+                <div class=${'usage-bucket-part part-' + (i % 8)}
+                  style=${{ height: v > 0 ? (pv / v) * 100 + '%' : '0' }}></div>
+              `)}
+            </div>
+          </div>
+        `;
+      })}
+    </div>
+  `;
+}
+
+function UsagePanel({ urlParams, updateParams, navVersion }) {
+  const [data, setData] = useState(null);          // legacy body: rate limits, context
+  const [report, setReport] = useState(null);      // the usage report views
+  const [err, setErr] = useState('');
+  const [since, setSinceRaw] = useState(urlParams.since || '30d');
+  const [unit, setUnitRaw] = useState(urlParams.unit || 'total');
+  const [by, setByRaw] = useState(urlParams.by || '');
+  const [bucket, setBucketRaw] = useState(urlParams.bucket || 'day');
+
+  function nav(next) { updateParams({ since, unit, by, bucket, ...next }); }
+  function setSince(v) { setSinceRaw(v); nav({ since: v }); }
+  function setUnit(v) { setUnitRaw(v); nav({ unit: v }); }
+  function setBy(v) { setByRaw(v); nav({ by: v }); }
+  function setBucket(v) { setBucketRaw(v); nav({ bucket: v }); }
 
   useEffect(() => {
     if (navVersion === 0) return;
-    setSinceRaw(urlParams.since || '720h');
+    setSinceRaw(urlParams.since || '30d');
+    setUnitRaw(urlParams.unit || 'total');
+    setByRaw(urlParams.by || '');
+    setBucketRaw(urlParams.bucket || 'day');
   }, [navVersion]);
 
   const load = useCallback(async () => {
     try {
-      const d = await api('usage' + (since ? '?since=' + since : ''));
-      setData(d);
-    } catch (e) { console.error('usage:', e); }
-  }, [since]);
+      // One request draws every block but the calendar, which is always a
+      // year regardless of the selected window, and one keeps the legacy
+      // rate-limit and context blocks.
+      const [main, calendar, legacy] = await Promise.all([
+        api('usage?' + qs({
+          view: 'daily,weekday,heatmap,repos,models,providers',
+          since, unit, bucket, by, n: '20',
+        })),
+        api('usage?' + qs({ view: 'calendar', unit })),
+        api('usage'),
+      ]);
+      setReport({ ...main, calendar: calendar.calendar });
+      setData(legacy);
+      setErr('');
+    } catch (e) {
+      setErr(errorMessage(e, 'failed to load usage'));
+    }
+  }, [since, unit, by, bucket]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -5261,27 +5493,22 @@ function UsagePanel({ urlParams, updateParams, navVersion }) {
   }, [load]);
 
   const timePresets = [
-    { label: '7d', value: '168h' },
-    { label: '30d', value: '720h' },
-    { label: '90d', value: '2160h' },
-    { label: 'All', value: '0s' },
+    { label: '7d', value: '7d' },
+    { label: '30d', value: '30d' },
+    { label: '12w', value: '12w' },
+    { label: '1y', value: '52w' },
+    { label: 'All', value: '0' },
   ];
 
-  const card = (label, value, sub) => html`
-    <div class="stat-card">
-      <div class="stat-label">${label}</div>
-      <div class="stat-value">${value}</div>
-      ${sub && html`<div class="stat-sub">${sub}</div>`}
-    </div>
-  `;
-
-  // Aggregate daily totals for summary cards.
-  const daily = data?.daily || [];
-  const totalInput = daily.reduce((s, d) => s + d.input_tokens, 0);
-  const totalOutput = daily.reduce((s, d) => s + d.output_tokens, 0);
-  const totalCacheCreate = daily.reduce((s, d) => s + d.cache_creation_tokens, 0);
-  const totalCacheRead = daily.reduce((s, d) => s + d.cache_read_tokens, 0);
-  const totalRequests = daily.reduce((s, d) => s + d.requests, 0);
+  // The dimensions the stacked chart splits on, in the order the legend draws
+  // them; the server caps the split and leaves the unattributed part out.
+  const stackNames = (() => {
+    const seen = [];
+    for (const b of report?.buckets || []) {
+      for (const k of Object.keys(b.parts || {})) if (!seen.includes(k)) seen.push(k);
+    }
+    return seen;
+  })();
 
   return html`
     <div>
@@ -5292,34 +5519,83 @@ function UsagePanel({ urlParams, updateParams, navVersion }) {
               onClick=${() => setSince(t.value)}>${t.label}</button>
           `)}
         </div>
+        <div class="filter-chips">
+          ${USAGE_UNITS.map(u => html`
+            <button class="filter-chip ${unit === u ? 'active' : ''}"
+              onClick=${() => setUnit(u)}>${u}</button>
+          `)}
+        </div>
       </div>
 
-      ${!data && html`<div class="loading">Loading usage...</div>`}
+      ${err && html`<div class="error">${err}</div>`}
+      ${!report && !err && html`<div class="loading">Loading usage...</div>`}
 
-      ${data && html`
+      ${report && html`
         <div class="usage-section">
-          <div class="stats-grid" style="margin-bottom:0">
-            ${card('API requests', fmtNum(data.api_request_count))}
-            ${card('Input tokens', fmtTokens(totalInput), 'Selected window')}
-            ${card('Output tokens ⚠', fmtTokens(totalOutput), 'Undercounted from JSONL')}
-            ${card('Cache creation', fmtTokens(totalCacheCreate), '1.25× cost')}
-            ${card('Cache read', fmtTokens(totalCacheRead), '~0.1× cost')}
-          </div>
+          <${UsageSummary} summary=${report.summary} unit=${unit} />
         </div>
 
+        <div class="usage-section">
+          <div class="usage-section-title">Activity</div>
+          <${UsageCalendar} days=${report.calendar} unit=${unit} />
+        </div>
+
+        <div class="usage-section">
+          <div class="usage-section-title">By weekday</div>
+          <${UsageWeekdayBars} rows=${report.weekdays} unit=${unit} />
+        </div>
+
+        <div class="usage-section">
+          <div class="usage-section-title">By weekday and hour (${report.zone})</div>
+          <${UsageHeatmap} grid=${report.heatmap} unit=${unit} />
+        </div>
+
+        <div class="usage-section">
+          <div class="usage-section-title">Over time</div>
+          <div class="filter-chips" style="margin-bottom:8px">
+            ${['day', 'week'].map(b => html`
+              <button class="filter-chip ${bucket === b ? 'active' : ''}" onClick=${() => setBucket(b)}>${b}</button>
+            `)}
+            <span class="filter-sep"></span>
+            ${[['', 'none'], ['agent', 'agent'], ['model', 'model'], ['repo', 'repo']].map(([v, label]) => html`
+              <button class="filter-chip ${by === v ? 'active' : ''}" onClick=${() => setBy(v)}>${label}</button>
+            `)}
+          </div>
+          <${UsageBuckets} buckets=${report.buckets} unit=${unit} names=${stackNames} />
+          ${stackNames.length > 0 && html`
+            <div class="usage-legend">
+              ${stackNames.map((n, i) => html`
+                <span class="usage-legend-item"><span class=${'usage-swatch part-' + (i % 8)}></span>${n}</span>
+              `)}
+            </div>
+          `}
+        </div>
+
+        <div class="usage-section">
+          <div class="usage-section-title">By model</div>
+          <${UsageGroupTable} groups=${report.models} unit=${unit} field="model" empty="(no model)" />
+        </div>
+
+        <div class="usage-section">
+          <div class="usage-section-title">By repository</div>
+          <${UsageGroupTable} groups=${report.repos} unit=${unit} field="repo" empty="(no repo)" linkRepo=${true} />
+        </div>
+
+        <div class="usage-section">
+          <div class="usage-section-title">By provider</div>
+          <${UsageGroupTable} groups=${report.providers} unit=${unit} field="agent" empty="(unknown)" />
+        </div>
+      `}
+
+      ${data && html`
         <div class="usage-section">
           <div class="usage-section-title">Rate limit utilization</div>
           <${RateLimitGauges} latestLimits=${data.latest_limits} />
         </div>
 
         <div class="usage-section">
-          <div class="usage-section-title">Token usage over time</div>
-          <${TokenTimeline} daily=${daily} />
-        </div>
-
-        <div class="usage-section">
           <div class="usage-section-title">Context composition (aggregate)</div>
-          <${ContextCompositionBar} daily=${daily} />
+          <${ContextCompositionBar} daily=${data.daily || []} />
         </div>
       `}
     </div>

@@ -1251,7 +1251,15 @@ func (s *Server) handleLimits(w http.ResponseWriter, r *http.Request) {
 
 // handleUsage returns daily token usage from api_requests for the usage tab.
 // GET /api/usage?since=168h
+//
+// With a view parameter it serves the usage report instead, in the shape the
+// cass usage command prints; see handleUsageView. The legacy body is what the
+// parameterless request returns, so the original panel keeps working.
 func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") != "" {
+		s.handleUsageView(w, r)
+		return
+	}
 	since := 720 * time.Hour // default 30d
 	if v := r.URL.Query().Get("since"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {

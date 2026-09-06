@@ -2611,3 +2611,72 @@ mark.search-hl {
 }
 .wf-agent-more:hover:not(:disabled) { background: var(--hover); }
 .wf-agent-more:disabled { color: var(--faint); cursor: default; }
+
+/* usage report views */
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table th {
+  text-align: left;
+  padding: 5px 8px;
+  font-weight: normal;
+  color: var(--dim);
+  border-bottom: 1px solid var(--border);
+}
+.data-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.data-table tr:hover td { background: var(--hover); }
+.data-table td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+
+.filter-sep { width: 12px; }
+
+/* activity calendar */
+.usage-cal-wrap { overflow-x: auto; }
+.usage-cal, .usage-cal-months { display: flex; gap: 3px; min-width: max-content; }
+.usage-cal-month, .usage-cal-week { width: 11px; }
+.usage-cal-month { font-size: 9px; color: var(--dim); }
+.usage-cal-week { display: flex; flex-direction: column; gap: 3px; }
+.usage-cal-day { width: 11px; height: 11px; border-radius: 2px; }
+
+/* weekday-by-hour heatmap */
+.usage-heat { display: flex; flex-direction: column; gap: 3px; overflow-x: auto; }
+.usage-heat-row { display: flex; gap: 3px; align-items: center; }
+.usage-heat-label { width: 28px; font-size: 10px; color: var(--dim); }
+.usage-heat-hour { width: 13px; font-size: 9px; color: var(--faint); text-align: center; }
+.usage-heat-cell { width: 13px; height: 13px; border-radius: 2px; }
+
+/* the shared intensity scale: 0 is a day with no usage, 1-4 its quartile */
+.usage-cal-day.level-0, .usage-heat-cell.level-0 { background: var(--hover); }
+.usage-cal-day.level-1, .usage-heat-cell.level-1 { background: #9be9a8; }
+.usage-cal-day.level-2, .usage-heat-cell.level-2 { background: #40c463; }
+.usage-cal-day.level-3, .usage-heat-cell.level-3 { background: #30a14e; }
+.usage-cal-day.level-4, .usage-heat-cell.level-4 { background: #216e39; }
+
+/* weekday bars */
+.usage-bar-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 2px 0; }
+.usage-bar-label { width: 32px; color: var(--dim); }
+.usage-bar-track { flex: 1; height: 12px; background: var(--hover); border-radius: 2px; }
+.usage-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+.usage-bar-value { width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+.usage-bar-sub { width: 140px; color: var(--dim); font-size: 11px; }
+
+/* daily/weekly bars */
+.usage-buckets { display: flex; align-items: flex-end; gap: 2px; height: 120px; overflow-x: auto; }
+.usage-bucket { flex: 1; min-width: 4px; height: 100%; display: flex; align-items: flex-end; }
+.usage-bucket-bar {
+  width: 100%;
+  min-height: 1px;
+  background: var(--accent);
+  display: flex;
+  flex-direction: column-reverse;
+}
+.usage-bucket-part { width: 100%; }
+.usage-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11px; color: var(--dim); }
+.usage-legend-item { display: flex; align-items: center; gap: 4px; }
+.usage-swatch { width: 10px; height: 10px; border-radius: 2px; }
+
+.part-0 { background: #4c78a8; }
+.part-1 { background: #f58518; }
+.part-2 { background: #54a24b; }
+.part-3 { background: #b279a2; }
+.part-4 { background: #e45756; }
+.part-5 { background: #72b7b2; }
+.part-6 { background: #eeca3b; }
+.part-7 { background: #9d755d; }
