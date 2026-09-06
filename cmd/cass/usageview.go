@@ -115,8 +115,12 @@ func (r report) calendar() error {
 	// Columns are weeks; rows are weekdays starting at the configured day.
 	first := cal[0].Date
 	back := (int(first.Weekday()) - int(r.opts.weekStart) + 7) % 7
+	origin := civil(first.AddDate(0, 0, -back))
+	// Counted in calendar days rather than elapsed hours: a daylight-saving
+	// day is 23 or 25 hours long, and an hour of drift moves a cell into the
+	// wrong week, which shows up as a row that does not line up with the rest.
 	colOf := func(d time.Time) int {
-		return int(d.Sub(first.AddDate(0, 0, -back)).Hours()+1) / 24 / 7
+		return int(civil(d).Sub(origin)/(24*time.Hour)) / 7
 	}
 	cols := colOf(cal[len(cal)-1].Date) + 1
 	grid := make([][]int, 7)
@@ -169,6 +173,13 @@ func (r report) calendar() error {
 	fmt.Printf("%s\n", labelStyle.Render("     · none  ░ ▒ ▓ █ quartiles of active days"))
 	r.printAgentShare()
 	return nil
+}
+
+// civil is the date of t with its clock and zone discarded, so that two dates
+// can be subtracted as whole days.
+func civil(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 // printAgentShare prints the one-line agent breakdown the calendar carries.

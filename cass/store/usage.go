@@ -33,6 +33,7 @@ const usageSchema = `
 	CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id);
 	CREATE INDEX IF NOT EXISTS idx_usage_repo_ts ON usage_events(git_common_dir, ts);
 
+
 	CREATE TABLE IF NOT EXISTS repos (
 		git_common_dir TEXT PRIMARY KEY,
 		remote TEXT NOT NULL DEFAULT '',
@@ -74,7 +75,9 @@ func (f UsageFilter) where() (string, []any) {
 		conds, args = append(conds, "ts < ?"), append(args, f.Before.Unix())
 	}
 	if f.Agent != "" {
-		conds, args = append(conds, "agent = ?"), append(args, f.Agent)
+		// Matched as a family, as every other agent dimension in this
+		// package is, so that "codex" selects codex-cli and codex-app.
+		conds, args = append(conds, agentFilter("agent")), append(args, agentFilterArgs(f.Agent)...)
 	}
 	if f.Repo != "" {
 		conds, args = append(conds, "git_common_dir = ?"), append(args, f.Repo)
@@ -150,7 +153,9 @@ func (s *DB) UsageByHour(ctx context.Context, f UsageFilter) ([]HourRow, error) 
 
 // UsageByGroup returns one row per (repo, agent, vendor, model), ordered by
 // total tokens descending. Views that want a coarser split, such as agent by
-// vendor, fold the rows in Go so that every view sums to the same totals.
+// vendor, fold the token and request columns in Go so that every view sums to
+// the same totals. Sessions is a distinct count and must not be summed: use
+// [DB.UsageSessionCounts] with the coarser dimension instead.
 func (s *DB) UsageByGroup(ctx context.Context, f UsageFilter) ([]GroupRow, error) {
 	where, args := f.where()
 	rows, err := s.db.QueryContext(ctx, `
@@ -277,10 +282,17 @@ func (s *DB) SaveRepos(ctx context.Context, repos []Repo) error {
 // has learned from sessions whose git context did resolve. Attribution uses it
 // to place a working directory that is a subdirectory of a known checkout, or
 // one whose repository has since been deleted.
+//
+// One workspace can carry several common dirs — nested repositories, or a
+// checkout replaced by a different repository. The choice must be a function
+// of the row set and not of the order SQLite returns it in, or attribution
+// moves tokens between repositories on re-index, so the rows are ordered and
+// the last one wins: the most specific dir, then the lexically greatest.
 func (s *DB) WorktreePaths(ctx context.Context) (map[string]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT DISTINCT workspace, git_common_dir FROM sessions
-		WHERE workspace != '' AND git_common_dir != ''`)
+		WHERE workspace != '' AND git_common_dir != ''
+		ORDER BY workspace, length(git_common_dir), git_common_dir`)
 	if err != nil {
 		return nil, fmt.Errorf("worktree paths: %w", err)
 	}

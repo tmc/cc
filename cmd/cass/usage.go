@@ -130,6 +130,14 @@ func runUsage(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	// when -since 0 asks for everything the index holds.
 	if days > 0 {
 		opts.window = ccusage.WindowEnding(end, days, loc, nil)
+		if view == "calendar" {
+			// Every column is a whole week, so the grid is rectangular on
+			// its left edge whatever weekday the window would have started
+			// on. The right edge is the current partial week, as it is in
+			// the calendars this one is read against.
+			back := (int(opts.window.Start.Weekday()) - int(opts.weekStart) + 7) % 7
+			opts.window.Start = opts.window.Start.AddDate(0, 0, -back)
+		}
 		opts.filter.After, opts.filter.Before = opts.window.Start.UTC(), opts.window.End.UTC()
 	}
 	hours, err := svc.UsageByHour(ctx, opts.filter)

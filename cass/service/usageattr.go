@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"go/build"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,17 +32,22 @@ import (
 type repoAttributor struct {
 	mu        sync.Mutex
 	resolved  map[string]string // directory -> git common dir, "" when it did not resolve
-	worktrees map[string]string // known checkout path -> git common dir
+	worktrees map[string]string // known checkout path -> git common dir, fixed at run start
+	learned   map[string]string // checkouts this run resolved, applied a pass later
+	exists    map[string]bool   // git common dir -> still on disk
 	repos     map[string]store.Repo
 	added     []store.Repo
 }
 
 // newRepoAttributor loads what previous index runs learned. A store error is
 // not fatal: attribution degrades to what this run can resolve on its own.
+
 func newRepoAttributor(ctx context.Context, s *store.DB) *repoAttributor {
 	a := &repoAttributor{
 		resolved:  make(map[string]string),
 		worktrees: make(map[string]string),
+		learned:   make(map[string]string),
+		exists:    make(map[string]bool),
 		repos:     make(map[string]store.Repo),
 	}
 	if paths, err := s.WorktreePaths(ctx); err == nil {
@@ -54,16 +60,52 @@ func newRepoAttributor(ctx context.Context, s *store.DB) *repoAttributor {
 }
 
 // attribute stamps the repository onto every usage event of each session.
+//
+// It runs in two passes: every session that git or a stored context can place
+// is placed first, and only then are the rest matched against the checkouts
+// those passes revealed. A single pass would make a session's repository
+// depend on which sessions happened to precede it, and collectors index
+// concurrently, so that order is not stable from run to run.
 func (a *repoAttributor) attribute(sessions []cass.Session) {
+	unplaced := make([]int, 0, len(sessions))
 	for i := range sessions {
 		sess := &sessions[i]
 		if len(sess.Usage) == 0 {
 			continue
 		}
 		dir, how := a.resolve(sess)
-		for j := range sess.Usage {
-			sess.Usage[j].GitCommonDir, sess.Usage[j].Attribution = dir, how
+		if dir == "" {
+			unplaced = append(unplaced, i)
+			continue
 		}
+		if how == "path" {
+			// Recorded on the session so that a later run reaches the same
+			// answer from the index alone, even once the checkout is gone.
+			// A prefix match is a guess and is not persisted.
+			sess.GitCommonDir = dir
+		}
+		a.stamp(sess, dir, how)
+	}
+	for _, i := range unplaced {
+		sess := &sessions[i]
+		dir := ""
+		if cwd := sessionCWD(sess); cwd != "" {
+			a.mu.Lock()
+			dir = a.byPrefix(cwd)
+			a.mu.Unlock()
+		}
+		if dir == "" {
+			a.stamp(sess, "", "")
+			continue
+		}
+		a.stamp(sess, dir, "prefix")
+	}
+}
+
+// stamp writes one attribution onto all of a session's usage events.
+func (a *repoAttributor) stamp(sess *cass.Session, dir, how string) {
+	for j := range sess.Usage {
+		sess.Usage[j].GitCommonDir, sess.Usage[j].Attribution = dir, how
 	}
 }
 
@@ -99,9 +141,6 @@ func (a *repoAttributor) resolve(sess *cass.Session) (dir, how string) {
 			return dir, "path"
 		}
 	}
-	if dir := a.byPrefix(cwd); dir != "" {
-		return dir, "prefix"
-	}
 	return "", ""
 }
 
@@ -112,8 +151,8 @@ func (a *repoAttributor) note(dir, worktree string) {
 		return
 	}
 	if worktree != "" {
-		if _, ok := a.worktrees[worktree]; !ok {
-			a.worktrees[worktree] = dir
+		if _, ok := a.learned[worktree]; !ok {
+			a.learned[worktree] = dir
 		}
 	}
 	if _, ok := a.repos[dir]; ok {
@@ -134,13 +173,37 @@ func (a *repoAttributor) note(dir, worktree string) {
 // contains cwd. This places a working directory that was a subdirectory of a
 // checkout, and one whose checkout has since been deleted. The caller holds
 // a.mu.
+//
+// A checkout whose git common dir still exists always outranks one that does
+// not, however much less of the path it matches: an earlier ccgit defect wrote
+// directories that were never real, and a phantom that wins here scatters one
+// repository across two keys. A genuinely deleted checkout still places its
+// own sessions, which is what makes a removed repository keep its history.
 func (a *repoAttributor) byPrefix(cwd string) string {
-	best, bestLen := "", 0
-	for path, dir := range a.worktrees {
-		if len(path) <= bestLen || !under(cwd, path) {
-			continue
+	best, bestLen, bestReal := "", 0, false
+	consider := func(path, dir string) {
+		if !under(cwd, path) {
+			return
 		}
-		best, bestLen = dir, len(path)
+		real, ok := a.exists[dir]
+		if !ok {
+			_, err := os.Stat(dir)
+			real = err == nil
+			a.exists[dir] = real
+		}
+		if bestReal && !real {
+			return
+		}
+		if real == bestReal && len(path) <= bestLen {
+			return
+		}
+		best, bestLen, bestReal = dir, len(path), real
+	}
+	for path, dir := range a.worktrees {
+		consider(path, dir)
+	}
+	for path, dir := range a.learned {
+		consider(path, dir)
 	}
 	return best
 }
@@ -205,13 +268,27 @@ func repoName(gitCommonDir, remote string) string {
 		return remote
 	}
 	root := repoRoot(gitCommonDir)
-	for _, base := range []string{filepath.Join(os.Getenv("GOPATH"), "src"), os.Getenv("HOME")} {
-		if base == "" || base == "src" {
+	var bases []string
+	// GOPATH has not had to be exported since modules, so it comes from the
+	// go tool's own default rather than the environment.
+	for _, gopath := range filepath.SplitList(build.Default.GOPATH) {
+		if gopath != "" {
+			bases = append(bases, filepath.Join(gopath, "src"))
+		}
+	}
+	bases = append(bases, os.Getenv("HOME"))
+	for _, base := range bases {
+		if base == "" {
 			continue
 		}
 		if rel, err := filepath.Rel(base, root); err == nil && !strings.HasPrefix(rel, "..") {
 			return rel
 		}
+	}
+	// The configured GOPATH need not be the tree the sources live in, so a
+	// checkout under any src directory is named relative to it.
+	if i := strings.LastIndex(root, "/src/"); i >= 0 {
+		return root[i+len("/src/"):]
 	}
 	return filepath.Base(root)
 }

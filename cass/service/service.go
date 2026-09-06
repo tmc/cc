@@ -229,6 +229,10 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 			for sess := range ch {
 				batch = append(batch, sess)
 				if len(batch) >= 100 {
+					// Attribution forks git and is guarded by its own
+					// lock, so it runs outside the write lock: one
+					// collector's git work overlaps another's writes.
+					attr.attribute(batch)
 					write.Lock()
 					err := s.indexBatch(ctx, attr, batch)
 					write.Unlock()
@@ -246,6 +250,7 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 
 			// Flush remaining.
 			if len(batch) > 0 {
+				attr.attribute(batch)
 				write.Lock()
 				err := s.indexBatch(ctx, attr, batch)
 				write.Unlock()
@@ -524,6 +529,7 @@ func (s *Service) IndexRoots(ctx context.Context, paths []string) (int, error) {
 		if len(batch) == 0 {
 			continue
 		}
+		attr.attribute(batch)
 		if err := s.indexBatch(ctx, attr, batch); err != nil {
 			return 0, fmt.Errorf("index %s: %w", g.collector.Name(), err)
 		}
@@ -613,6 +619,7 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 		if len(batch) == 0 {
 			continue
 		}
+		attr.attribute(batch)
 		if err := s.indexBatch(ctx, attr, batch); err != nil {
 			return 0, fmt.Errorf("index paths: %w", err)
 		}
@@ -899,8 +906,10 @@ func (s *Service) Close() error {
 // indexBatch resolves each session's repository and writes the batch. Both
 // steps belong to one call so that no path can persist usage events with no
 // repository stamped on them.
+// indexBatch writes an already-attributed batch. Callers run
+// [repoAttributor.attribute] first, outside any write lock, because it forks
+// git and would otherwise serialize every collector behind one.
 func (s *Service) indexBatch(ctx context.Context, attr *repoAttributor, batch []cass.Session) error {
-	attr.attribute(batch)
 	if err := s.store.BatchIndex(ctx, batch); err != nil {
 		return err
 	}

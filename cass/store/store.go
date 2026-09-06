@@ -422,6 +422,10 @@ func (s *DB) migrate() error {
 		"ALTER TABLE sessions ADD COLUMN git_common_dir TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE sessions ADD COLUMN branch TEXT NOT NULL DEFAULT ''",
 		"CREATE INDEX IF NOT EXISTS idx_sessions_git_common_dir ON sessions(git_common_dir)",
+		// WorktreePaths reads only these two columns, and git_common_dir was
+		// added by ALTER TABLE, so it sits past the inline content blob:
+		// without a covering index the scan walks every session payload.
+		"CREATE INDEX IF NOT EXISTS idx_sessions_workspace_git ON sessions(workspace, git_common_dir)",
 		"ALTER TABLE sessions ADD COLUMN subagent_run_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN goal_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN active_goal_count INTEGER NOT NULL DEFAULT 0",
@@ -720,15 +724,21 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		for _, u := range sess.Usage {
 			// A harness that records no per-request timestamp falls back to the
 			// session's start, which keeps the row in the right day rather than
-			// at the far edge of the unix epoch.
+			// at the far edge of the unix epoch. When the session has no start
+			// either the time is unknown, and the row is stored at zero rather
+			// than at year 1, which no window would ever reach.
 			ts := u.Time
 			if ts.IsZero() {
 				ts = sess.StartedAt
 			}
+			unix := int64(0)
+			if !ts.IsZero() {
+				unix = ts.Unix()
+			}
 			if _, err := usageStmt.ExecContext(ctx,
 				sess.ID,
 				sess.Agent,
-				ts.Unix(),
+				unix,
 				u.Model,
 				u.Vendor,
 				u.GitCommonDir,
