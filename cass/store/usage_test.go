@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,8 +92,17 @@ func TestUsageEventsRoundTrip(t *testing.T) {
 	if top.Input != 15 || top.CacheRead != 300 || top.CacheCreate != 20 || top.Output != 80 {
 		t.Errorf("top group tokens = %+v, want 15/300/20/80", top)
 	}
-	if top.Sessions != 1 || top.Requests != 2 {
-		t.Errorf("top group = %d sessions, %d requests; want 1, 2", top.Sessions, top.Requests)
+	// The rollup this filter reads holds no session id; the exact count comes
+	// from UsageSessionCounts, which the views substitute.
+	if top.Sessions != 0 || top.Requests != 2 {
+		t.Errorf("top group = %d sessions, %d requests; want 0, 2", top.Sessions, top.Requests)
+	}
+	events, err := s.UsageByGroup(ctx, UsageFilter{Session: "s1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 || events[0].Sessions != 1 {
+		t.Errorf("session-filtered group sessions = %v, want 1", events)
 	}
 	if top.Vendor != "anthropic" {
 		t.Errorf("top group vendor = %q, want anthropic", top.Vendor)
@@ -388,5 +399,167 @@ func TestUsageBySession(t *testing.T) {
 	}
 	if len(one) != 1 || one[0].SessionID != "s2" || one[0].Output != 11 {
 		t.Errorf("filtered = %+v, want just s2", one)
+	}
+}
+
+// eventsSum sums the four counts and the requests the events table holds for a
+// filter, as the pre-rollup queries did.
+func eventsSum(ctx context.Context, t *testing.T, s *DB, f UsageFilter) [5]int {
+	t.Helper()
+	where, args := f.where()
+	var got [5]int
+	row := s.db.QueryRowContext(ctx, `
+		SELECT count(*), coalesce(sum(input_tokens), 0), coalesce(sum(cache_read_tokens), 0),
+			coalesce(sum(cache_creation_tokens), 0), coalesce(sum(output_tokens), 0)
+		FROM usage_events WHERE `+where, args...)
+	if err := row.Scan(&got[0], &got[1], &got[2], &got[3], &got[4]); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// TestUsageRollupMatchesEvents checks the invariant the rollup rests on: for
+// every filter it can answer, its sums are the fact table's sums.
+func TestUsageRollupMatchesEvents(t *testing.T) {
+	s := newTestStore(t)
+	ctx := indexUsage(t, s)
+
+	day := func(d int) time.Time { return time.Date(2026, 6, d, 0, 0, 0, 0, time.UTC) }
+	filters := []UsageFilter{
+		{},
+		{Agent: "claude-code"},
+		{Agent: "codex"}, // the family match
+		{Repo: "/r/a/.git"},
+		{Repo: ""},
+		{Model: "claude-opus-5"},
+		{ExcludeSidechain: true},
+		{After: day(1), Before: day(3)},
+		{After: day(2), Before: day(4), Agent: "codex-cli"},
+		{After: day(1), Before: day(4), Repo: "/r/a/.git", Model: "claude-haiku-4-5"},
+	}
+	for _, f := range filters {
+		if !f.rollup() {
+			t.Errorf("filter %+v should be answerable from the rollup", f)
+			continue
+		}
+		want := eventsSum(ctx, t, s, f)
+		hours, err := s.UsageByHour(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got [5]int
+		for _, h := range hours {
+			got[0] += h.Requests
+			got[1] += h.Input
+			got[2] += h.CacheRead
+			got[3] += h.CacheCreate
+			got[4] += h.Output
+		}
+		if got != want {
+			t.Errorf("hours for %+v = %v, events = %v", f, got, want)
+		}
+		groups, err := s.UsageByGroup(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = [5]int{}
+		for _, g := range groups {
+			got[0] += g.Requests
+			got[1] += g.Input
+			got[2] += g.CacheRead
+			got[3] += g.CacheCreate
+			got[4] += g.Output
+		}
+		if got != want {
+			t.Errorf("groups for %+v = %v, events = %v", f, got, want)
+		}
+	}
+}
+
+// forkPair returns an ancestor session and the fork that copied its first
+// request, in the order given.
+func forkPair() (ancestor, fork cass.Session) {
+	at := func(h int) time.Time { return time.Date(2026, 6, 1, h, 0, 0, 0, time.UTC) }
+	copied := usageAt(at(9), "claude-code", "claude-opus-5", "/r/a/.git", 10, 100, 20, 50)
+	copied.RequestID = "msg_1"
+	own := usageAt(at(10), "claude-code", "claude-opus-5", "/r/a/.git", 1, 2, 3, 4)
+	own.RequestID = "msg_2"
+	forkOwn := usageAt(at(11), "claude-code", "claude-opus-5", "/r/a/.git", 5, 6, 7, 8)
+	forkOwn.RequestID = "msg_3"
+	forkCopy := copied
+	ancestor = cass.Session{ID: "anc", Agent: "claude-code", StartedAt: at(9), EndedAt: at(10),
+		Usage: []cass.UsageEvent{copied, own}}
+	fork = cass.Session{ID: "fork", Agent: "claude-code", StartedAt: at(11), EndedAt: at(12),
+		Usage: []cass.UsageEvent{forkCopy, forkOwn}}
+	return ancestor, fork
+}
+
+// usageDump renders the two usage tables as text, for comparing one index
+// order against another.
+func usageDump(ctx context.Context, t *testing.T, s *DB) string {
+	t.Helper()
+	var b strings.Builder
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT session_id, request_id, ts, input_tokens, output_tokens
+		FROM usage_events ORDER BY 1, 2, 3`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var sid, rid string
+		var ts, in, out int64
+		if err := rows.Scan(&sid, &rid, &ts, &in, &out); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&b, "event %s %s %d %d %d\n", sid, rid, ts, in, out)
+	}
+	rows.Close()
+	rows, err = s.db.QueryContext(ctx, `
+		SELECT hour, agent, model, requests, input_tokens, output_tokens
+		FROM usage_hourly ORDER BY 1, 2, 3`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var hour, req, in, out int64
+		var agent, model string
+		if err := rows.Scan(&hour, &agent, &model, &req, &in, &out); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&b, "hourly %d %s %s %d %d %d\n", hour, agent, model, req, in, out)
+	}
+	return b.String()
+}
+
+// TestForkedRequestCountedOnce checks that a request copied into a forked
+// session is stored once, under the ancestor, whichever session was indexed
+// first.
+func TestForkedRequestCountedOnce(t *testing.T) {
+	ctx := context.Background()
+	anc, fork := forkPair()
+
+	dump := func(order []cass.Session) string {
+		s := newTestStore(t)
+		for _, sess := range order {
+			if err := s.BatchIndex(ctx, []cass.Session{sess}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return usageDump(ctx, t, s)
+	}
+	first := dump([]cass.Session{anc, fork})
+	second := dump([]cass.Session{fork, anc})
+	if first != second {
+		t.Errorf("index order changed the tables:\nancestor first:\n%s\nfork first:\n%s", first, second)
+	}
+	if strings.Count(first, "msg_1") != 1 {
+		t.Errorf("copied request stored %d times, want 1:\n%s", strings.Count(first, "msg_1"), first)
+	}
+	if !strings.Contains(first, "event anc msg_1") {
+		t.Errorf("copied request should belong to the ancestor:\n%s", first)
+	}
+	if n := strings.Count(first, "event "); n != 3 {
+		t.Errorf("events = %d, want 3 (two of the ancestor's, one of the fork's):\n%s", n, first)
 	}
 }

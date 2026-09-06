@@ -13,7 +13,13 @@ import (
 // CacheRead, CacheCreate and Output are disjoint: the prompt the model read is
 // Input+CacheRead+CacheCreate, and the whole request is that plus Output.
 type Record struct {
-	SessionID   string
+	SessionID string
+	// RequestID identifies the API request across files: the harness's own
+	// message id, which a forked or resumed session copies verbatim along
+	// with the rest of the ancestor's transcript. It is empty when the
+	// harness records no id for the request, as Codex's token_count entries
+	// do not.
+	RequestID   string
 	Agent       string    // harness slug as cass names it
 	Time        time.Time // request timestamp, UTC
 	Model       string
@@ -84,6 +90,7 @@ func FromEntries(agent string, entries []cc.Entry) []Record {
 		}
 		if m != nil {
 			r.Model, r.Vendor = m.Model, Vendor(m.Model)
+			r.RequestID = m.ID
 		}
 		if cacheInInput {
 			r.Input = max(0, r.Input-r.CacheRead-r.CacheCreate)

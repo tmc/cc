@@ -33,6 +33,23 @@ const usageSchema = `
 	CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id);
 	CREATE INDEX IF NOT EXISTS idx_usage_repo_ts ON usage_events(git_common_dir, ts);
 
+	CREATE TABLE IF NOT EXISTS usage_hourly (
+		hour INTEGER NOT NULL,
+		agent TEXT NOT NULL,
+		vendor TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		git_common_dir TEXT NOT NULL DEFAULT '',
+		is_sidechain INTEGER NOT NULL DEFAULT 0,
+		requests INTEGER NOT NULL DEFAULT 0,
+		estimated INTEGER NOT NULL DEFAULT 0,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+		cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (hour, agent, vendor, model, git_common_dir, is_sidechain)
+	) WITHOUT ROWID;
+	CREATE INDEX IF NOT EXISTS idx_usage_hourly_hour ON usage_hourly(hour);
+
 
 	CREATE TABLE IF NOT EXISTS repos (
 		git_common_dir TEXT PRIMARY KEY,
@@ -94,6 +111,49 @@ func (f UsageFilter) where() (string, []any) {
 	return strings.Join(conds, " AND "), args
 }
 
+// rollup reports whether the filter can be answered from usage_hourly. Every
+// dimension the rollup is keyed by is a filter column; the session is not, so a
+// session filter reads the fact table instead. A window edge that falls inside
+// an hour does too: the rollup cannot divide one, and rounding it either way
+// would make this view disagree with the ones that read the events. Report
+// windows are midnight boundaries, which are hour-aligned in every zone whose
+// offset is a whole number of hours.
+func (f UsageFilter) rollup() bool {
+	return f.Session == "" && hourAligned(f.After) && hourAligned(f.Before)
+}
+
+// hourAligned reports whether t is zero, meaning unbounded, or lands exactly on
+// an hour.
+func hourAligned(t time.Time) bool { return t.IsZero() || t.Unix()%3600 == 0 }
+
+// hourWhere renders the filter against usage_hourly, whose time column is the
+// hour rather than the timestamp. It is only called for a filter [UsageFilter.rollup]
+// accepted, so both edges land on an hour and select exactly the same requests
+// the equivalent timestamp bounds would.
+func (f UsageFilter) hourWhere() (string, []any) {
+	conds := []string{"1=1"}
+	var args []any
+	if !f.After.IsZero() {
+		conds, args = append(conds, "hour >= ?"), append(args, f.After.Unix()/3600)
+	}
+	if !f.Before.IsZero() {
+		conds, args = append(conds, "hour < ?"), append(args, f.Before.Unix()/3600)
+	}
+	if f.Agent != "" {
+		conds, args = append(conds, agentFilter("agent")), append(args, agentFilterArgs(f.Agent)...)
+	}
+	if f.Repo != "" {
+		conds, args = append(conds, "git_common_dir = ?"), append(args, f.Repo)
+	}
+	if f.Model != "" {
+		conds, args = append(conds, "model = ?"), append(args, f.Model)
+	}
+	if f.ExcludeSidechain {
+		conds = append(conds, "is_sidechain = 0")
+	}
+	return strings.Join(conds, " AND "), args
+}
+
 // HourRow is the usage of one UTC hour. Callers map Hour into a display zone
 // themselves, so that day and weekday bucketing is correct in every zone and
 // across daylight-saving transitions.
@@ -125,7 +185,14 @@ type SessionSpanRow struct {
 func (r SessionSpanRow) Duration() time.Duration { return r.Last.Sub(r.First) }
 
 // UsageByHour returns one row per UTC hour with usage in it, ordered by hour.
+//
+// It reads the usage_hourly rollup, which is keyed by the same dimensions the
+// filter selects on and is maintained with the fact table, so the sums are
+// equal. A session filter has no rollup column and falls back to the events.
 func (s *DB) UsageByHour(ctx context.Context, f UsageFilter) ([]HourRow, error) {
+	if f.rollup() {
+		return s.usageByHourRollup(ctx, f)
+	}
 	where, args := f.where()
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT ts / 3600 AS hour, count(*),
@@ -151,12 +218,77 @@ func (s *DB) UsageByHour(ctx context.Context, f UsageFilter) ([]HourRow, error) 
 	return result, rows.Err()
 }
 
+// usageByHourRollup answers UsageByHour from usage_hourly.
+func (s *DB) usageByHourRollup(ctx context.Context, f UsageFilter) ([]HourRow, error) {
+	where, args := f.hourWhere()
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT hour, coalesce(sum(requests), 0),
+			coalesce(sum(input_tokens), 0), coalesce(sum(cache_read_tokens), 0),
+			coalesce(sum(cache_creation_tokens), 0), coalesce(sum(output_tokens), 0),
+			coalesce(sum(estimated), 0)
+		FROM usage_hourly WHERE `+where+`
+		GROUP BY hour ORDER BY hour`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("usage by hour: %w", err)
+	}
+	defer rows.Close()
+
+	var result []HourRow
+	for rows.Next() {
+		var r HourRow
+		if err := rows.Scan(&r.Hour, &r.Requests, &r.Input, &r.CacheRead,
+			&r.CacheCreate, &r.Output, &r.Estimated); err != nil {
+			return nil, fmt.Errorf("scan usage hour: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// usageByGroupRollup answers UsageByGroup from usage_hourly. The rollup holds
+// no session id, so Sessions is zero — every caller that prints a session count
+// takes it from [DB.UsageSessionCounts] — and First and Last are the bounds of
+// the hours the group appears in rather than of its own requests.
+func (s *DB) usageByGroupRollup(ctx context.Context, f UsageFilter) ([]GroupRow, error) {
+	where, args := f.hourWhere()
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT git_common_dir, agent, vendor, model,
+			coalesce(sum(requests), 0), min(hour), max(hour),
+			coalesce(sum(input_tokens), 0), coalesce(sum(cache_read_tokens), 0),
+			coalesce(sum(cache_creation_tokens), 0), coalesce(sum(output_tokens), 0),
+			coalesce(sum(estimated), 0)
+		FROM usage_hourly WHERE `+where+`
+		GROUP BY 1, 2, 3, 4
+		ORDER BY sum(input_tokens + cache_read_tokens + cache_creation_tokens + output_tokens) DESC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("usage by group: %w", err)
+	}
+	defer rows.Close()
+
+	var result []GroupRow
+	for rows.Next() {
+		var r GroupRow
+		var first, last int64
+		if err := rows.Scan(&r.Repo, &r.Agent, &r.Vendor, &r.Model,
+			&r.Requests, &first, &last,
+			&r.Input, &r.CacheRead, &r.CacheCreate, &r.Output, &r.Estimated); err != nil {
+			return nil, fmt.Errorf("scan usage group: %w", err)
+		}
+		r.First, r.Last = time.Unix(first*3600, 0).UTC(), time.Unix(last*3600+3599, 0).UTC()
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
 // UsageByGroup returns one row per (repo, agent, vendor, model), ordered by
 // total tokens descending. Views that want a coarser split, such as agent by
 // vendor, fold the token and request columns in Go so that every view sums to
 // the same totals. Sessions is a distinct count and must not be summed: use
 // [DB.UsageSessionCounts] with the coarser dimension instead.
 func (s *DB) UsageByGroup(ctx context.Context, f UsageFilter) ([]GroupRow, error) {
+	if f.rollup() {
+		return s.usageByGroupRollup(ctx, f)
+	}
 	where, args := f.where()
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT git_common_dir, agent, vendor, model,

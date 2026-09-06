@@ -251,7 +251,9 @@ func BenchmarkUsageByHour(b *testing.B) {
 	st := usageStore(b, 2000, 50)
 	defer st.Close()
 	ctx := context.Background()
-	f := store.UsageFilter{After: time.Now().Add(-12 * 7 * 24 * time.Hour)}
+	// Truncated to the hour, as a report window is: an unaligned edge cannot
+	// be answered from the rollup and would measure the fact-table path.
+	f := store.UsageFilter{After: time.Now().Add(-12 * 7 * 24 * time.Hour).Truncate(time.Hour)}
 	b.ResetTimer()
 	for range b.N {
 		if _, err := st.UsageByHour(ctx, f); err != nil {
@@ -265,7 +267,9 @@ func BenchmarkUsageByGroup(b *testing.B) {
 	st := usageStore(b, 2000, 50)
 	defer st.Close()
 	ctx := context.Background()
-	f := store.UsageFilter{After: time.Now().Add(-12 * 7 * 24 * time.Hour)}
+	// Truncated to the hour, as a report window is: an unaligned edge cannot
+	// be answered from the rollup and would measure the fact-table path.
+	f := store.UsageFilter{After: time.Now().Add(-12 * 7 * 24 * time.Hour).Truncate(time.Hour)}
 	b.ResetTimer()
 	for range b.N {
 		if _, err := st.UsageByGroup(ctx, f); err != nil {

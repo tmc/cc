@@ -426,6 +426,11 @@ func (s *DB) migrate() error {
 		// added by ALTER TABLE, so it sits past the inline content blob:
 		// without a covering index the scan walks every session payload.
 		"CREATE INDEX IF NOT EXISTS idx_sessions_workspace_git ON sessions(workspace, git_common_dir)",
+		// Cross-file request identity: a forked or resumed session copies its
+		// ancestor's requests verbatim, and only an id tells the copy from the
+		// original. See claimRequest.
+		"ALTER TABLE usage_events ADD COLUMN request_id TEXT NOT NULL DEFAULT ''",
+		"CREATE INDEX IF NOT EXISTS idx_usage_request ON usage_events(agent, request_id)",
 		"ALTER TABLE sessions ADD COLUMN subagent_run_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN goal_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN active_goal_count INTEGER NOT NULL DEFAULT 0",
@@ -458,7 +463,7 @@ func (s *DB) migrate() error {
 	} {
 		s.db.Exec(col) // ignore "duplicate column" errors
 	}
-	return nil
+	return s.fillUsageRollup()
 }
 
 // BatchIndex adds or updates sessions atomically.
@@ -539,14 +544,17 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		INSERT INTO usage_events (
 			session_id, agent, ts, model, vendor, git_common_dir, attribution,
 			is_sidechain, input_tokens, cache_read_tokens, cache_creation_tokens,
-			output_tokens, output_estimated
+			output_tokens, output_estimated, request_id
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare usage_events: %w", err)
 	}
 	defer usageStmt.Close()
+
+	// Hours whose rollup rows this batch invalidates.
+	usageHours := make(map[int64]bool)
 
 	now := time.Now().Unix()
 	for _, sess := range sessions {
@@ -717,7 +725,12 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			}
 		}
 
-		// Usage events: clear and reinsert for this session.
+		// Usage events: clear and reinsert for this session. The hours the old
+		// and new rows touch are collected as they go and the rollup for those
+		// hours is recomputed once, before the transaction commits.
+		if err := sessionUsageHours(ctx, tx, sess.ID, usageHours); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM usage_events WHERE session_id = ?", sess.ID); err != nil {
 			return fmt.Errorf("clear usage_events %s: %w", sess.ID, err)
 		}
@@ -735,6 +748,14 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			if !ts.IsZero() {
 				unix = ts.Unix()
 			}
+			own, err := claimRequest(ctx, tx, sess.Agent, u.RequestID, sess.StartedAt.Unix(), sess.ID, usageHours)
+			if err != nil {
+				return err
+			}
+			if !own {
+				continue
+			}
+			usageHours[usageHour(unix)] = true
 			if _, err := usageStmt.ExecContext(ctx,
 				sess.ID,
 				sess.Agent,
@@ -749,6 +770,7 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 				u.CacheCreate,
 				u.Output,
 				boolInt(u.OutputEstimated),
+				u.RequestID,
 			); err != nil {
 				return fmt.Errorf("insert usage_event %s: %w", sess.ID, err)
 			}
@@ -784,6 +806,9 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		}
 	}
 
+	if err := recomputeUsageHours(ctx, tx, usageHours); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -1287,6 +1312,10 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 	}
 	defer tx.Rollback()
 
+	// The rollup covers whatever usage_events holds, so the hours the deleted
+	// rows touched are recomputed from what survives.
+	usageHours := make(map[int64]bool)
+
 	if len(filter.IDs) > 0 {
 		placeholders := strings.Repeat("?,", len(filter.IDs))
 		placeholders = placeholders[:len(placeholders)-1]
@@ -1304,6 +1333,11 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM artifact_events WHERE session_id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete artifact events by id: %w", err)
+		}
+		for _, id := range filter.IDs {
+			if err := sessionUsageHours(ctx, tx, id, usageHours); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM usage_events WHERE session_id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete usage events by id: %w", err)
@@ -1332,6 +1366,9 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 		); err != nil {
 			return fmt.Errorf("delete artifact events by agent: %w", err)
 		}
+		if err := agentUsageHours(ctx, tx, filter.Agent, usageHours); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM usage_events WHERE session_id IN (SELECT id FROM sessions WHERE "+agentFilter("agent")+")",
 			agentFilterArgs(filter.Agent)...,
@@ -1343,6 +1380,9 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 		}
 	}
 
+	if err := recomputeUsageHours(ctx, tx, usageHours); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
