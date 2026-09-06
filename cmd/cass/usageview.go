@@ -202,47 +202,30 @@ func (r report) printAgentShare() {
 }
 
 func (r report) reposView(ctx context.Context) error {
-	folded := ccusage.Fold(r.groups, r.opts.unit, r.price(), func(g ccusage.Group) string { return g.Repo })
-	counts, err := r.svc.UsageSessionCounts(ctx, r.opts.filter, "git_common_dir")
+	rank, err := r.rank(ctx, "repo")
 	if err != nil {
 		return err
 	}
-	agents := make(map[string]map[string]bool)
-	for _, g := range r.groups {
-		if agents[g.Repo] == nil {
-			agents[g.Repo] = make(map[string]bool)
-		}
-		agents[g.Repo][g.Agent] = true
-	}
-	total := 0.0
-	for _, g := range folded {
-		total += g.Unit(r.opts.unit, r.price())
-	}
 	fmt.Printf("\n%s\n", labelStyle.Render(fmt.Sprintf("%-38s %-24s %8s %9s  %5s",
 		"repo", "agents", "sessions", r.opts.unit, "share")))
-	for i, g := range folded {
-		if r.opts.top > 0 && i >= r.opts.top {
-			fmt.Printf("%s\n", labelStyle.Render(fmt.Sprintf("… %d more (-n)", len(folded)-i)))
-			// The unattributed bucket is always shown, wherever it ranks: it
-			// is the measure of the attribution gap, not one repo among many.
-			for _, g := range folded[i:] {
-				if g.Repo == "" {
-					fmt.Printf("%-38s %-24s %8s %9s  %4.0f%%\n", "(no repo)",
-						truncate(strings.Join(sortedSet(agents[g.Repo]), ", "), 24),
-						compactInt(counts[g.Repo]), compact(g.Unit(r.opts.unit, r.price())),
-						ccusage.Share(g.Unit(r.opts.unit, r.price()), total)*100)
-				}
-			}
-			break
-		}
+	for _, g := range rank.Rows {
 		fmt.Printf("%-38s %-24s %8s %9s  %4.0f%%\n",
-			truncate(r.repoLabel(g.Repo), 38),
-			truncate(strings.Join(sortedSet(agents[g.Repo]), ", "), 24),
-			compactInt(counts[g.Repo]),
-			compact(g.Unit(r.opts.unit, r.price())),
-			ccusage.Share(g.Unit(r.opts.unit, r.price()), total)*100)
+			truncate(g.Label, 38), truncate(strings.Join(g.Agents, ", "), 24),
+			compactInt(g.Sessions), compact(g.Value), g.Share*100)
 	}
-	return r.printAttribution(ctx, len(folded))
+	if rank.Rest != nil {
+		fmt.Printf("%s\n", labelStyle.Render(fmt.Sprintf("%-38s %-24s %8s %9s  %4.0f%% (-n)",
+			fmt.Sprintf("… %d more", rank.Count-len(rank.Rows)),
+			truncate(strings.Join(rank.Rest.Agents, ", "), 24),
+			compactInt(rank.Rest.Sessions), compact(rank.Rest.Value), rank.Rest.Share*100)))
+	}
+	return r.printAttribution(ctx, rank.Count)
+}
+
+// rank folds the report's groups onto one dimension. Both this and the web
+// call service.UsageRanking, so a ranked row is folded once.
+func (r report) rank(ctx context.Context, dim string) (ccusage.Ranking, error) {
+	return r.svc.UsageRanking(ctx, r.groups, r.opts.filter, dim, r.opts.unit, r.priceFor, r.opts.top)
 }
 
 // printAttribution prints which of the four attribution steps placed the rows.
@@ -268,56 +251,39 @@ func (r report) printAttribution(ctx context.Context, repos int) error {
 }
 
 func (r report) providers(ctx context.Context) error {
-	folded := ccusage.Fold(r.groups, r.opts.unit, r.price(), func(g ccusage.Group) string {
-		return g.Agent + "\x00" + g.Vendor
-	})
-	counts, err := r.svc.UsageSessionCounts(ctx, r.opts.filter, "agent")
+	rank, err := r.svc.UsageRanking(ctx, r.groups, r.opts.filter, "agent", r.opts.unit, r.priceFor, 0)
 	if err != nil {
 		return err
 	}
-	total := 0.0
-	for _, g := range folded {
-		total += g.Unit(r.opts.unit, r.price())
-	}
 	fmt.Printf("\n%s\n", labelStyle.Render(fmt.Sprintf("%-16s %-11s %8s %9s %9s  %5s",
 		"agent", "vendor", "sessions", "requests", r.opts.unit, "share")))
-	for _, g := range folded {
+	for _, g := range rank.Rows {
 		fmt.Printf("%-16s %-11s %8s %9s %9s  %4.0f%%\n",
-			g.Agent, orNone(g.Vendor), compactInt(counts[g.Agent]), compactInt(g.Requests),
-			compact(g.Unit(r.opts.unit, r.price())),
-			ccusage.Share(g.Unit(r.opts.unit, r.price()), total)*100)
+			g.Label, truncate(orNone(strings.Join(g.Vendors, ",")), 11), compactInt(g.Sessions),
+			compactInt(g.Requests), compact(g.Value), g.Share*100)
 	}
 	return nil
 }
 
 func (r report) models(ctx context.Context) error {
-	folded := ccusage.Fold(r.groups, r.opts.unit, r.price(), func(g ccusage.Group) string { return g.Model })
-	agents := make(map[string]map[string]bool)
-	for _, g := range r.groups {
-		if agents[g.Model] == nil {
-			agents[g.Model] = make(map[string]bool)
-		}
-		agents[g.Model][g.Agent] = true
-	}
-	total := 0.0
-	for _, g := range folded {
-		total += g.Unit(r.opts.unit, r.price())
+	rank, err := r.rank(ctx, "model")
+	if err != nil {
+		return err
 	}
 	fmt.Printf("\n%s\n", labelStyle.Render(fmt.Sprintf("%-26s %-18s %6s %8s %8s %10s %10s %5s",
 		"model", "agents", "share", "input", "output", "cache read", "cache write", "est.")))
-	for i, g := range folded {
-		if r.opts.top > 0 && i >= r.opts.top {
-			fmt.Printf("%s\n", labelStyle.Render(fmt.Sprintf("… %d more (-n)", len(folded)-i)))
-			break
-		}
+	rows := rank.Rows
+	if rank.Rest != nil {
+		rows = append(rows, *rank.Rest)
+	}
+	for _, g := range rows {
 		est := 0.0
 		if g.Requests > 0 {
 			est = float64(g.Estimated) / float64(g.Requests) * 100
 		}
 		fmt.Printf("%-26s %-18s %5.1f%% %8s %8s %10s %10s %4.0f%%\n",
-			truncate(orNone(g.Model), 26), truncate(strings.Join(sortedSet(agents[g.Model]), ","), 18),
-			ccusage.Share(g.Unit(r.opts.unit, r.priceFor(g.Model)), total)*100,
-			compact(float64(g.Input)), compact(float64(g.Output)),
+			truncate(orNone(g.Label), 26), truncate(strings.Join(g.Agents, ","), 18),
+			g.Share*100, compact(float64(g.Input)), compact(float64(g.Output)),
 			compact(float64(g.CacheRead)), compact(float64(g.CacheCreate)), est)
 	}
 	return nil

@@ -475,3 +475,143 @@ func Share(v, total float64) float64 {
 	}
 	return v / total
 }
+
+// RankRow is one row of a ranked view: every group sharing one value of the
+// ranked dimension, folded together and measured in the view's unit. Name is
+// the raw value, empty for the unattributed bucket; Label is what a reader
+// sees, which for a repository is its short name rather than its git dir.
+type RankRow struct {
+	Name      string    `json:"name"`
+	Label     string    `json:"label"`
+	Agents    []string  `json:"agents,omitempty"`
+	Vendors   []string  `json:"vendors,omitempty"`
+	Sessions  int       `json:"sessions"`
+	Requests  int       `json:"requests"`
+	Estimated int       `json:"estimated"`
+	First     time.Time `json:"first"`
+	Last      time.Time `json:"last"`
+	Tokens
+	Value float64 `json:"value"` // Tokens measured in the ranking's unit
+	Share float64 `json:"share"` // Value over the ranking's total
+}
+
+// Ranking is what a ranked view shows: the rows above the cut, an aggregate of
+// those below it, and the total they all sum to. Rest exists so that the rows
+// a reader is given always account for the whole window: a client that adds up
+// what it was sent gets the same number the summary reports.
+type Ranking struct {
+	Unit  string    `json:"unit"`
+	Rows  []RankRow `json:"rows"`
+	Rest  *RankRow  `json:"rest,omitempty"`
+	Total float64   `json:"total"`
+	Count int       `json:"count"` // rows before the cut
+}
+
+// Rank folds groups onto one dimension and orders them by unit, descending.
+// Sessions is left at zero: the fact table cannot count distinct sessions per
+// folded value without a second query, so the caller fills it in from
+// UsageSessionCounts, and Label from whatever names the value.
+func Rank(groups []Group, unit string, price func(model string) Pricing, key func(Group) string) []RankRow {
+	folded := Fold(groups, unit, price(""), key)
+	// Value is summed over the unfolded groups, so that a model's own rates
+	// apply even when the fold mixes models -- a repository's cost is the sum
+	// of what each model it ran cost, not its total priced at one rate.
+	value := make(map[string]float64)
+	for _, g := range groups {
+		value[key(g)] += g.Unit(unit, price(g.Model))
+	}
+	agents := make(map[string]map[string]bool)
+	vendors := make(map[string]map[string]bool)
+	for _, g := range groups {
+		k := key(g)
+		if agents[k] == nil {
+			agents[k], vendors[k] = make(map[string]bool), make(map[string]bool)
+		}
+		if g.Agent != "" {
+			agents[k][g.Agent] = true
+		}
+		if g.Vendor != "" {
+			vendors[k][g.Vendor] = true
+		}
+	}
+	total := 0.0
+	for _, g := range folded {
+		total += value[key(g)]
+	}
+	rows := make([]RankRow, len(folded))
+	for i, g := range folded {
+		k := key(g)
+		v := value[k]
+		rows[i] = RankRow{
+			Name: k, Label: k, Agents: sortedSet(agents[k]), Vendors: sortedSet(vendors[k]),
+			Requests: g.Requests, Estimated: g.Estimated,
+			First: g.First, Last: g.Last, Tokens: g.Tokens,
+			Value: v, Share: Share(v, total),
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Value > rows[j].Value })
+	return rows
+}
+
+// Cut keeps the first n rows and folds the rest into one row, so that a
+// truncated view still sums to the total. The unattributed row is kept
+// wherever it ranks: it measures the attribution gap rather than being one
+// value among many. A non-positive n keeps everything.
+func Cut(rows []RankRow, unit string, n int) Ranking {
+	total := 0.0
+	for _, r := range rows {
+		total += r.Value
+	}
+	out := Ranking{Unit: unit, Total: total, Count: len(rows)}
+	if n <= 0 || len(rows) <= n {
+		out.Rows = rows
+		return out
+	}
+	out.Rows = make([]RankRow, 0, n+1)
+	out.Rows = append(out.Rows, rows[:n]...)
+	rest := RankRow{Name: "", Label: "(rest)"}
+	agents := make(map[string]bool)
+	for _, r := range rows[n:] {
+		if r.Name == "" {
+			out.Rows = append(out.Rows, r)
+			continue
+		}
+		rest.Tokens.Add(r.Tokens)
+		rest.Requests += r.Requests
+		rest.Sessions += r.Sessions
+		rest.Estimated += r.Estimated
+		rest.Value += r.Value
+		for _, a := range r.Agents {
+			agents[a] = true
+		}
+	}
+	if rest.Requests > 0 || rest.Value > 0 {
+		rest.Agents = sortedSet(agents)
+		rest.Share = Share(rest.Value, total)
+		out.Rest = &rest
+	}
+	return out
+}
+
+// sortedSet returns the set's members in order.
+func sortedSet(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ZoneName returns the name to print for loc. A location loaded from the
+// process environment calls itself "Local", which says nothing to a reader, so
+// it is resolved to the zone's own abbreviation for the current time.
+func ZoneName(loc *time.Location) string {
+	if loc == nil {
+		return ""
+	}
+	if n := loc.String(); n != "Local" {
+		return n
+	}
+	return time.Now().In(loc).Format("MST")
+}

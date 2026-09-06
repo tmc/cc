@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/tmc/cc/cass/store"
@@ -109,4 +112,76 @@ func UsageSpans(rows []store.SessionSpanRow) []ccusage.SessionSpan {
 // ancestor's transcript, so the same request is present in two files.
 func (s *Service) UsageDedup() map[string]store.UsageDedup {
 	return s.store.UsageDedupStats()
+}
+
+// UsageDimensions are the dimensions a ranked usage view folds onto.
+var UsageDimensions = []string{"repo", "agent", "model"}
+
+// UsageRanking folds a report's groups onto one dimension and fills in what
+// only the store knows: the exact session count per value, and a repository's
+// display name. The result is what both the terminal and the web draw, so a
+// ranked row is folded once rather than once per surface.
+//
+// top cuts the rows, with everything below the cut kept as one aggregate so
+// the rows still sum to the window's total; a non-positive top keeps all.
+func (s *Service) UsageRanking(ctx context.Context, groups []ccusage.Group, f store.UsageFilter, dim, unit string, price func(model string) ccusage.Pricing, top int) (ccusage.Ranking, error) {
+	var key func(ccusage.Group) string
+	var col string
+	switch dim {
+	case "repo":
+		key, col = func(g ccusage.Group) string { return g.Repo }, "git_common_dir"
+	case "agent":
+		key, col = func(g ccusage.Group) string { return g.Agent }, "agent"
+	case "model":
+		key, col = func(g ccusage.Group) string { return g.Model }, "model"
+	default:
+		return ccusage.Ranking{}, fmt.Errorf("unknown usage dimension %q; want %s", dim, strings.Join(UsageDimensions, ", "))
+	}
+	rows := ccusage.Rank(groups, unit, price, key)
+	counts, err := s.store.UsageSessionCounts(ctx, f, col)
+	if err != nil {
+		return ccusage.Ranking{}, err
+	}
+	var repos map[string]store.Repo
+	if dim == "repo" {
+		if repos, err = s.store.Repos(ctx); err != nil {
+			return ccusage.Ranking{}, err
+		}
+	}
+	for i := range rows {
+		rows[i].Sessions = counts[rows[i].Name]
+		switch dim {
+		case "repo":
+			rows[i].Label = RepoLabel(repos, rows[i].Name)
+		case "model":
+			if rows[i].Name == "" {
+				rows[i].Label = "(no model)"
+			}
+		}
+	}
+	return ccusage.Cut(rows, unit, top), nil
+}
+
+// RepoLabel names a repository for a reader: its indexed name, else its
+// remote, else the directory the git dir sits in. The empty git dir is the
+// unattributed bucket, which is labelled rather than hidden.
+func RepoLabel(repos map[string]store.Repo, dir string) string {
+	if dir == "" {
+		return "(no repo)"
+	}
+	if repo, ok := repos[dir]; ok {
+		if repo.Name != "" {
+			return repo.Name
+		}
+		if repo.Remote != "" {
+			return repo.Remote
+		}
+	}
+	return filepath.Base(filepath.Dir(dir))
+}
+
+// UsageAttribution returns the share of usage rows each attribution step
+// placed, keyed by step: "git", "path", "prefix", and "" for none.
+func (s *Service) UsageAttribution(ctx context.Context, f store.UsageFilter) (map[string]int, error) {
+	return s.store.UsageRowCounts(ctx, f, "attribution")
 }

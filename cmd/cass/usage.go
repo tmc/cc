@@ -202,7 +202,7 @@ func (r report) priceFor(model string) ccusage.Pricing {
 
 func (r report) render(ctx context.Context) error {
 	if r.opts.jsonOut {
-		return r.renderJSON()
+		return r.renderJSON(ctx)
 	}
 	fmt.Print(r.header())
 	switch r.opts.view {

@@ -55,13 +55,10 @@ func spanRows(rows []store.SessionSpanRow) []ccusage.SessionSpan {
 // zoneName is how a report names its display zone. time.Local reports itself
 // as "Local", which says nothing, so the current abbreviation stands in.
 func zoneName(loc *time.Location) string {
-	if n := loc.String(); n != "Local" {
-		return n
-	}
-	if tz := os.Getenv("TZ"); tz != "" {
+	if tz := os.Getenv("TZ"); tz != "" && loc.String() == "Local" {
 		return tz
 	}
-	return time.Now().In(loc).Format("MST")
+	return ccusage.ZoneName(loc)
 }
 
 // zone resolves -tz, falling back to the process zone.
@@ -220,17 +217,6 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-func sortedSet(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		if k != "" {
-			out = append(out, k)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 func orNone(s string) string {
 	if s == "" {
 		return "(none)"
@@ -272,11 +258,15 @@ type usageJSON struct {
 	Days     []ccusage.CalDay     `json:"days,omitempty"`
 	Weekdays []ccusage.WeekdayRow `json:"weekdays,omitempty"`
 	Buckets  []ccusage.Bucket     `json:"buckets,omitempty"`
-	Groups   []ccusage.Group      `json:"groups,omitempty"`
+	Rank     *ccusage.Ranking     `json:"rank,omitempty"`
 	Heatmap  [][]ccusage.Tokens   `json:"heatmap,omitempty"`
+
+	// Attribution is how many usage rows each attribution step placed; the
+	// repo view prints the same breakdown under its table.
+	Attribution map[string]int `json:"attribution,omitempty"`
 }
 
-func (r report) renderJSON() error {
+func (r report) renderJSON(ctx context.Context) error {
 	out := usageJSON{
 		View: r.opts.view, Unit: r.opts.unit, Zone: zoneName(r.opts.window.Loc),
 		Start:   r.opts.window.Start.Format("2006-01-02"),
@@ -295,8 +285,22 @@ func (r report) renderJSON() error {
 		for wd := 0; wd < 7; wd++ {
 			out.Heatmap = append(out.Heatmap, grid[wd][:])
 		}
-	default:
-		out.Groups = r.groups
+	case "repos", "providers", "models":
+		dim := map[string]string{"repos": "repo", "providers": "agent", "models": "model"}[r.opts.view]
+		top := r.opts.top
+		if r.opts.view == "providers" {
+			top = 0 // the provider table is short; it is never cut
+		}
+		rank, err := r.svc.UsageRanking(ctx, r.groups, r.opts.filter, dim, r.opts.unit, r.priceFor, top)
+		if err != nil {
+			return err
+		}
+		out.Rank = &rank
+		if r.opts.view == "repos" {
+			if out.Attribution, err = r.svc.UsageAttribution(ctx, r.opts.filter); err != nil {
+				return err
+			}
+		}
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

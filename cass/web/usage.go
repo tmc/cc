@@ -160,10 +160,15 @@ type usageResponse struct {
 	Heatmap   *[7][24]ccusage.Tokens  `json:"heatmap,omitempty"`
 	Calendar  []ccusage.CalDay        `json:"calendar,omitempty"`
 	Buckets   []ccusage.Bucket        `json:"buckets,omitempty"`
-	Repos     []ccusage.Group         `json:"repos,omitempty"`
-	Providers []ccusage.Group         `json:"providers,omitempty"`
-	Models    []ccusage.Group         `json:"models,omitempty"`
+	Repos     *ccusage.Ranking        `json:"repos,omitempty"`
+	Providers *ccusage.Ranking        `json:"providers,omitempty"`
+	Models    *ccusage.Ranking        `json:"models,omitempty"`
 	Sessions  []store.SessionUsageRow `json:"sessions,omitempty"`
+
+	// Attribution is how many usage rows each attribution step placed,
+	// keyed by step; it accompanies the repo view, whose "(no repo)" row it
+	// explains.
+	Attribution map[string]int `json:"attribution,omitempty"`
 }
 
 // handleUsageView answers GET /api/usage?view=, the same report the cass usage
@@ -185,8 +190,12 @@ func (s *Server) handleUsageView(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	price := ccusage.PricingForModel("", ccusage.PricingConfig{})
-	out := usageResponse{View: q.view, Unit: q.unit, Zone: rep.Window.Loc.String(), Summary: rep.Summary}
+	priceFor := func(model string) ccusage.Pricing {
+		return ccusage.PricingForModel(model, ccusage.PricingConfig{})
+	}
+	price := priceFor("")
+	out := usageResponse{View: q.view, Unit: q.unit, Zone: ccusage.ZoneName(rep.Window.Loc), Summary: rep.Summary}
+	out.Summary.Zone = out.Zone // the summary carries the same resolved name
 	for _, view := range q.views {
 		switch view {
 		case "weekday":
@@ -205,12 +214,25 @@ func (s *Server) handleUsageView(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-		case "repos":
-			out.Repos = foldTop(rep.Groups, q, price, func(g ccusage.Group) string { return g.Repo })
-		case "providers":
-			out.Providers = foldTop(rep.Groups, q, price, func(g ccusage.Group) string { return g.Agent })
-		case "models":
-			out.Models = foldTop(rep.Groups, q, price, func(g ccusage.Group) string { return g.Model })
+		case "repos", "providers", "models":
+			dim := map[string]string{"repos": "repo", "providers": "agent", "models": "model"}[view]
+			rank, err := s.svc.UsageRanking(r.Context(), rep.Groups, q.filter, dim, q.unit, priceFor, q.top)
+			if err != nil {
+				writeError(w, err, http.StatusInternalServerError)
+				return
+			}
+			switch view {
+			case "repos":
+				out.Repos = &rank
+				if out.Attribution, err = s.svc.UsageAttribution(r.Context(), q.filter); err != nil {
+					writeError(w, err, http.StatusInternalServerError)
+					return
+				}
+			case "providers":
+				out.Providers = &rank
+			case "models":
+				out.Models = &rank
+			}
 		case "sessions":
 			rows, err := s.svc.UsageBySession(r.Context(), q.filter)
 			if err != nil {
@@ -224,15 +246,6 @@ func (s *Server) handleUsageView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, out)
-}
-
-// foldTop collapses the groups onto one dimension and keeps the largest rows.
-func foldTop(groups []ccusage.Group, q usageQuery, p ccusage.Pricing, key func(ccusage.Group) string) []ccusage.Group {
-	rows := ccusage.Fold(groups, q.unit, p, key)
-	if len(rows) > q.top {
-		rows = rows[:q.top]
-	}
-	return rows
 }
 
 // slicesContains reports whether v is in list.

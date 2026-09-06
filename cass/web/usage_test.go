@@ -114,15 +114,25 @@ func TestUsageViewBodies(t *testing.T) {
 	} else if got.Heatmap[time.Monday][12].Total() == 0 {
 		t.Fatalf("heatmap has no Monday noon usage: %v", got.Heatmap[time.Monday][12])
 	}
+	// The zone is the resolved name, not the placeholder "Local", and the
+	// summary carries the same one the response does.
+	if got := get("view=weekday&since=4w&until=2026-03-10&tz=America/New_York"); got.Zone != "America/New_York" ||
+		got.Summary.Zone != got.Zone {
+		t.Fatalf("zone = %q, summary zone = %q", got.Zone, got.Summary.Zone)
+	}
 	if got := get("view=calendar" + query); len(got.Calendar) == 0 {
 		t.Fatal("calendar empty")
 	}
 	// One repository row, which is the unattributed bucket when the indexer
 	// could not resolve the working directory: it is shown, never dropped.
-	if got := get("view=repos" + query); len(got.Repos) != 1 || got.Repos[0].Total() != 252 {
+	if got := get("view=repos" + query); got.Repos == nil || len(got.Repos.Rows) != 1 ||
+		got.Repos.Rows[0].Label != "(no repo)" || got.Repos.Rows[0].Total() != 252 {
 		t.Fatalf("repos = %#v", got.Repos)
+	} else if got.Attribution == nil {
+		t.Fatal("repo view carries no attribution breakdown")
 	}
-	if got := get("view=providers" + query); len(got.Providers) != 1 || got.Providers[0].Agent != "claude-code" {
+	if got := get("view=providers" + query); got.Providers == nil || len(got.Providers.Rows) != 1 ||
+		got.Providers.Rows[0].Name != "claude-code" {
 		t.Fatalf("providers = %#v", got.Providers)
 	}
 	if got := get("view=sessions" + query); len(got.Sessions) != 1 {
@@ -194,13 +204,14 @@ func TestUsageMultiView(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got.Buckets) == 0 || len(got.Weekdays) != 7 || got.Heatmap == nil ||
-		len(got.Calendar) == 0 || len(got.Repos) != 1 || len(got.Models) != 1 || len(got.Providers) != 1 {
+		len(got.Calendar) == 0 || got.Repos == nil || got.Models == nil || got.Providers == nil ||
+		len(got.Repos.Rows) != 1 || len(got.Models.Rows) != 1 || len(got.Providers.Rows) != 1 {
 		t.Fatalf("multi-view response missing a view: %+v", got)
 	}
 	// Every view is folded from the same rows, so they agree on the total.
-	if got.Repos[0].Total() != got.Models[0].Total() || got.Repos[0].Total() != got.Summary.Tokens.Total() {
+	if got.Repos.Rows[0].Total() != got.Models.Rows[0].Total() || got.Repos.Rows[0].Total() != got.Summary.Tokens.Total() {
 		t.Fatalf("views disagree: repos %d models %d summary %d",
-			got.Repos[0].Total(), got.Models[0].Total(), got.Summary.Tokens.Total())
+			got.Repos.Rows[0].Total(), got.Models.Rows[0].Total(), got.Summary.Tokens.Total())
 	}
 }
 

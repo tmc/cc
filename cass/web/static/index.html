@@ -5244,7 +5244,8 @@ function ContextCompositionBar({ daily }) {
 
 // The units the panel offers. Cost is left out: it weights each row by its
 // model's rate, which only the server knows.
-const USAGE_UNITS = ['total', 'context', 'input', 'output', 'cache_read', 'cache_create', 'requests'];
+// The units the server accepts; anything else is a 400.
+const USAGE_UNITS = ['total', 'context', 'input', 'output'];
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -5389,26 +5390,26 @@ function UsageHeatmap({ grid, unit }) {
   `;
 }
 
-// UsageGroupTable ranks folded groups. Rows with an empty name are the
-// unattributed bucket and are labelled, never dropped.
-function UsageGroupTable({ groups, unit, field, empty, linkRepo }) {
-  if (!groups || !groups.length) return html`<div class="empty">No rows</div>`;
-  const total = groups.reduce((s, g) => s + tokenUnit(g, unit), 0) || 1;
-  const name = g => g[field] || empty;
+// UsageGroupTable draws a ranking the server folded. The rows already carry
+// their label, share and session count, and a "(rest)" row stands for
+// everything below the cut, so the table sums to the window's total.
+function UsageGroupTable({ ranking, field, linkRepo }) {
+  if (!ranking || !ranking.rows || !ranking.rows.length) return html`<div class="empty">No rows</div>`;
+  const rows = ranking.rest ? [...ranking.rows, ranking.rest] : ranking.rows;
   const shortRepo = v => (v || '').replace(/\/\.git$/, '').split('/').filter(Boolean).pop() || v;
   return html`
     <table class="data-table">
-      <thead><tr><th>${field}</th><th>Requests</th><th>Sessions</th><th>${unit}</th><th>Share</th></tr></thead>
+      <thead><tr><th>${field}</th><th>Requests</th><th>Sessions</th><th>${ranking.unit}</th><th>Share</th></tr></thead>
       <tbody>
-        ${groups.map(g => html`
+        ${rows.map(g => html`
           <tr>
-            <td>${linkRepo && g[field]
-              ? html`<a href=${'/?q=' + encodeURIComponent(shortRepo(g[field]))}>${shortRepo(g[field])}</a>`
-              : name(g)}</td>
+            <td>${linkRepo && g.name
+              ? html`<a href=${'/?q=' + encodeURIComponent(shortRepo(g.name))}>${g.label}</a>`
+              : g.label}</td>
             <td>${fmtNum(g.requests || 0)}</td>
             <td>${fmtNum(g.sessions || 0)}</td>
-            <td>${fmtUnit(tokenUnit(g, unit), unit)}</td>
-            <td>${Math.round((tokenUnit(g, unit) / total) * 100)}%</td>
+            <td>${fmtUnit(g.value, ranking.unit)}</td>
+            <td>${Math.round((g.share || 0) * 100)}%</td>
           </tr>
         `)}
       </tbody>
@@ -5573,17 +5574,17 @@ function UsagePanel({ urlParams, updateParams, navVersion }) {
 
         <div class="usage-section">
           <div class="usage-section-title">By model</div>
-          <${UsageGroupTable} groups=${report.models} unit=${unit} field="model" empty="(no model)" />
+          <${UsageGroupTable} ranking=${report.models} field="model" />
         </div>
 
         <div class="usage-section">
           <div class="usage-section-title">By repository</div>
-          <${UsageGroupTable} groups=${report.repos} unit=${unit} field="repo" empty="(no repo)" linkRepo=${true} />
+          <${UsageGroupTable} ranking=${report.repos} field="repo" linkRepo=${true} />
         </div>
 
         <div class="usage-section">
           <div class="usage-section-title">By provider</div>
-          <${UsageGroupTable} groups=${report.providers} unit=${unit} field="agent" empty="(unknown)" />
+          <${UsageGroupTable} ranking=${report.providers} field="agent" />
         </div>
       `}
 

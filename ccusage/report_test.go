@@ -1,6 +1,7 @@
 package ccusage
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -344,5 +345,66 @@ func TestWindowEndingAllTime(t *testing.T) {
 	}
 	if got := WindowEnding(now, 12*7, la, nil); got.Days() != 84 {
 		t.Errorf("12w window = %d days, want 84", got.Days())
+	}
+}
+
+// TestRankCutSumsToTotal checks the property a truncated ranking exists for:
+// the rows a reader is handed account for the whole window.
+func TestRankCutSumsToTotal(t *testing.T) {
+	var groups []Group
+	for i := range 10 {
+		groups = append(groups, Group{
+			Repo: fmt.Sprintf("/r%d/.git", i), Agent: "claude-code", Requests: 1,
+			Tokens: Tokens{Input: (10 - i) * 100},
+		})
+	}
+	// Two groups of the same repository fold into one row, and one row is
+	// unattributed.
+	groups = append(groups,
+		Group{Repo: "/r0/.git", Agent: "codex-cli", Requests: 1, Tokens: Tokens{Input: 50}},
+		Group{Repo: "", Agent: "pi", Requests: 1, Tokens: Tokens{Input: 7}})
+
+	rows := Rank(groups, "total", func(string) Pricing { return Pricing{} }, func(g Group) string { return g.Repo })
+	if len(rows) != 11 {
+		t.Fatalf("rows = %d, want 11", len(rows))
+	}
+	if rows[0].Name != "/r0/.git" || rows[0].Total() != 1050 {
+		t.Fatalf("top row = %+v", rows[0])
+	}
+	if got := rows[0].Agents; len(got) != 2 || got[0] != "claude-code" || got[1] != "codex-cli" {
+		t.Fatalf("agents = %v", got)
+	}
+
+	full := Cut(rows, "total", 0)
+	cut := Cut(rows, "total", 3)
+	if cut.Count != 11 {
+		t.Fatalf("count = %d, want 11", cut.Count)
+	}
+	sum := func(r Ranking) float64 {
+		v := 0.0
+		for _, row := range r.Rows {
+			v += row.Value
+		}
+		if r.Rest != nil {
+			v += r.Rest.Value
+		}
+		return v
+	}
+	if sum(cut) != sum(full) || sum(cut) != cut.Total {
+		t.Fatalf("cut sums to %v, full %v, total %v", sum(cut), sum(full), cut.Total)
+	}
+	// The unattributed row is kept wherever it ranks: it measures the
+	// attribution gap rather than being one value among many.
+	var sawEmpty bool
+	for _, row := range cut.Rows {
+		if row.Name == "" {
+			sawEmpty = true
+		}
+	}
+	if !sawEmpty {
+		t.Fatalf("unattributed row dropped by the cut: %+v", cut.Rows)
+	}
+	if cut.Rest == nil || cut.Rest.Requests != 7 {
+		t.Fatalf("rest = %+v", cut.Rest)
 	}
 }
