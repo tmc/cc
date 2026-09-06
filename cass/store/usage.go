@@ -31,7 +31,6 @@ const usageSchema = `
 	);
 	CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_events(ts);
 	CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_events(session_id);
-	CREATE INDEX IF NOT EXISTS idx_usage_repo_ts ON usage_events(git_common_dir, ts);
 
 	CREATE TABLE IF NOT EXISTS usage_hourly (
 		hour INTEGER NOT NULL,

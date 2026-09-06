@@ -431,6 +431,9 @@ func (s *DB) migrate() error {
 		// original. See claimRequest.
 		"ALTER TABLE usage_events ADD COLUMN request_id TEXT NOT NULL DEFAULT ''",
 		"CREATE INDEX IF NOT EXISTS idx_usage_request ON usage_events(agent, request_id)",
+		// The repository-by-time queries read usage_hourly now, and this index
+		// cost 138 MB of the table's 600 MB budget — the room request_id needs.
+		"DROP INDEX IF EXISTS idx_usage_repo_ts",
 		"ALTER TABLE sessions ADD COLUMN subagent_run_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN goal_count INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE sessions ADD COLUMN active_goal_count INTEGER NOT NULL DEFAULT 0",
