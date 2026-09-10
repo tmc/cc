@@ -981,3 +981,73 @@ func TestResolveMatchDropsAntigravityBrainTarget(t *testing.T) {
 		t.Fatalf("target = %q, want empty (brain storage is not a workspace)", r.target)
 	}
 }
+
+func TestIndexEntryForCodexPath(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sessions")
+	path := filepath.Join(root, "2026", "09", "10", "rollout-2026-09-10T08-00-00-01a088eb-04da-7fb0-a8e6-f6700080b679.jsonl")
+	writeTextFile(t, path, `{"type":"session_meta","payload":{"session_id":"01a088eb-04da-7fb0-a8e6-f6700080b679","id":"01a088eb-04da-7fb0-a8e6-f6700080b679","cwd":"/work/codex","thread_source":"user"}}`)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := indexEntryForPath(path, searchRoot{dir: root, kind: "codex"}, info)
+	if !ok {
+		t.Fatal("indexEntryForPath returned false")
+	}
+	if got.SessionID != "01a088eb-04da-7fb0-a8e6-f6700080b679" || got.ProjectPath != "/work/codex" {
+		t.Fatalf("indexEntryForPath = %#v", got)
+	}
+}
+
+func TestIndexEntryForCodexSubagentPath(t *testing.T) {
+	// A subagent rollout carries its parent's session_id; offering it would
+	// both duplicate the parent and name a thread codex cannot resume alone.
+	root := filepath.Join(t.TempDir(), "sessions")
+	path := filepath.Join(root, "2026", "09", "10", "rollout-2026-09-10T09-00-00-01a08914-d2b4-7983-9adb-31bb49c3a45f.jsonl")
+	writeTextFile(t, path, `{"type":"session_meta","payload":{"session_id":"01a088eb-04da-7fb0-a8e6-f6700080b679","id":"01a08914-d2b4-7983-9adb-31bb49c3a45f","cwd":"/work/codex","thread_source":"subagent"}}`)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, ok := indexEntryForPath(path, searchRoot{dir: root, kind: "codex"}, info); ok {
+		t.Fatalf("indexEntryForPath = %#v, want subagent rejected", got)
+	}
+}
+
+func TestMetadataMatchesFindsClaudeAndCodexSessions(t *testing.T) {
+	// Claude Code stopped writing sessions-index.json and codex never had one,
+	// so both harnesses are found only by scanning the session files.
+	root := t.TempDir()
+	claudeRoot := filepath.Join(root, ".claude", "projects")
+	claudePath := filepath.Join(claudeRoot, "-work-pumpfun-ml", "b1c30ab6-2b2f-4b0b-9a51-3f7c2c0f0d21.jsonl")
+	writeTextFile(t, claudePath, `{"type":"user","cwd":"/work/pumpfun-ml"}`)
+
+	codexRoot := filepath.Join(root, ".codex", "sessions")
+	codexPath := filepath.Join(codexRoot, "2026", "09", "10", "rollout-2026-09-10T08-00-00-01a088eb-04da-7fb0-a8e6-f6700080b679.jsonl")
+	writeTextFile(t, codexPath, `{"type":"session_meta","payload":{"id":"01a088eb-04da-7fb0-a8e6-f6700080b679","cwd":"/work/pumpfun-ml","thread_source":"user"}}`)
+
+	roots := []searchRoot{{dir: claudeRoot, kind: "claude"}, {dir: codexRoot, kind: "codex"}}
+	lists, err := recentCandidates(roots, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := metadataMatches("pumpfun", roots, lists)
+	found := map[string]bool{}
+	for _, e := range got {
+		found[e.FullPath] = true
+	}
+	if !found[claudePath] || !found[codexPath] {
+		t.Fatalf("metadataMatches = %#v, want %s and %s", got, claudePath, codexPath)
+	}
+}
+
+func TestMergeEntriesKeepsIndexedFields(t *testing.T) {
+	indexed := []cc.IndexEntry{{SessionID: "a", FullPath: "/p/a.jsonl", Summary: "indexed"}}
+	scanned := []cc.IndexEntry{{SessionID: "a", FullPath: "/p/a.jsonl"}, {SessionID: "b", FullPath: "/p/b.jsonl"}}
+	got := mergeEntries(indexed, scanned)
+	if len(got) != 2 || got[0].Summary != "indexed" || got[1].SessionID != "b" {
+		t.Fatalf("mergeEntries = %#v", got)
+	}
+}

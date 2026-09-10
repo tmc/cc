@@ -161,10 +161,10 @@ func run() error {
 		return fmt.Errorf("invalid -sort %q (want relevance or recency)", *sortFlag)
 	}
 
-	// The index scan and the content grep look at disjoint data, and the grep
-	// is only needed when the index misses; run it speculatively alongside so a
-	// miss costs one scan's latency rather than two. Its result is discarded
-	// (and the goroutine abandoned at exit) when the index hits.
+	// The metadata scan and the content grep look at disjoint data, and the
+	// grep is only needed when the metadata misses; both walk the same recent
+	// files, so scan once alongside the index read and use the grep only as a
+	// fallback.
 	contentQuery := query
 	switch {
 	case filepath.IsAbs(query):
@@ -176,28 +176,28 @@ func run() error {
 		// the unbounded grepMatches, which would scan all history for a glob.
 		contentQuery = literalToken(wrote)
 	}
-	type contentResult struct {
-		matches []cc.IndexEntry
-		err     error
-	}
-	// Bound the content grep by -since: candidate files are selected by mtime
-	// before rg runs, so old history is never scanned or resolved.
-	contentCh := make(chan contentResult, 1)
+	// Bound the scan by -since: candidate files are selected by mtime before
+	// anything reads them, so old history is never scanned or resolved.
+	scanCh := make(chan scanResult, 1)
 	go func() {
-		m, err := recentContentMatches(contentQuery, since)
-		contentCh <- contentResult{m, err}
+		scanCh <- scanRecentSessions(query, contentQuery, since)
 	}()
 
 	matches, err := findMatches(query, since)
 	if err != nil {
 		return err
 	}
+	res := <-scanCh
+	if res.err != nil {
+		return res.err
+	}
+	// Claude Code stopped writing sessions-index.json, and codex never had one,
+	// so the index alone reports neither harness. The metadata scan derives the
+	// same fields from the session files themselves; merge the two so an
+	// indexed match from one harness cannot hide a live session from another.
+	matches = mergeEntries(matches, res.meta)
 	if len(matches) == 0 {
-		res := <-contentCh
-		if res.err != nil {
-			return res.err
-		}
-		matches = res.matches
+		matches = res.content
 	}
 	if has != "" {
 		matches, err = filterContentMatches(matches, has)
@@ -1385,16 +1385,134 @@ func sessionRoots() ([]searchRoot, error) {
 	return roots, nil
 }
 
+// scanResult holds the two passes scanRecentSessions makes over one set of
+// recently modified session files.
+type scanResult struct {
+	meta    []cc.IndexEntry
+	content []cc.IndexEntry
+	err     error
+}
+
+// scanRecentSessions walks the session roots once and returns both the entries
+// whose metadata matches query and those whose transcript contains
+// contentQuery. Walking once matters: the trees hold tens of thousands of
+// files, and the two passes want the same mtime-bounded candidate set.
+func scanRecentSessions(query, contentQuery string, since time.Duration) scanResult {
+	roots, err := sessionRoots()
+	if err != nil {
+		return scanResult{err: err}
+	}
+	lists, err := recentCandidates(roots, sinceMinutes(since))
+	if err != nil {
+		return scanResult{err: err}
+	}
+	content, err := contentMatches(contentQuery, roots, lists)
+	if err != nil {
+		return scanResult{err: err}
+	}
+	return scanResult{meta: metadataMatches(query, roots, lists), content: content}
+}
+
+// sinceMinutes converts a -since duration to the whole minutes the file walk
+// uses, never rounding down to zero.
+func sinceMinutes(since time.Duration) int {
+	if m := int(since.Minutes()); m >= 1 {
+		return m
+	}
+	return 1
+}
+
+// metadataMatches returns the candidate sessions whose identity, session ID or
+// project path, contains query. It covers only the harnesses AllIndexEntries
+// misses: Claude Code no longer writes sessions-index.json and codex has no
+// index at all. opencode, pi, and antigravity are already scanned (and cached)
+// there, and deriving them again here would reparse every transcript.
+func metadataMatches(query string, roots []searchRoot, lists [][]string) []cc.IndexEntry {
+	type candidate struct {
+		root searchRoot
+		path string
+	}
+	var cands []candidate
+	for i, root := range roots {
+		switch root.kind {
+		case "claude", "gemini", "codex":
+		default:
+			continue
+		}
+		for _, path := range lists[i] {
+			if isResumeSessionPath(path, root.kind) {
+				cands = append(cands, candidate{root, path})
+			}
+		}
+	}
+
+	// A codex candidate costs a header read, so resolve them concurrently.
+	q := strings.ToLower(query)
+	entries := make([]cc.IndexEntry, len(cands))
+	hit := make([]bool, len(cands))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	for i, c := range cands {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			info, err := os.Stat(c.path)
+			if err != nil {
+				return
+			}
+			e, ok := indexEntryForPath(c.path, c.root, info)
+			if !ok || !containsAny(q, e.SessionID, e.ProjectPath) {
+				return
+			}
+			entries[i], hit[i] = e, true
+		}()
+	}
+	wg.Wait()
+
+	var matches []cc.IndexEntry
+	for i := range entries {
+		if hit[i] {
+			matches = append(matches, entries[i])
+		}
+	}
+	return matches
+}
+
+// mergeEntries appends the entries of b that a does not already hold, keeping
+// a's richer indexed fields for a session both passes found.
+func mergeEntries(a, b []cc.IndexEntry) []cc.IndexEntry {
+	seen := make(map[string]bool, len(a))
+	for _, e := range a {
+		seen[e.FullPath] = true
+	}
+	for _, e := range b {
+		if seen[e.FullPath] {
+			continue
+		}
+		seen[e.FullPath] = true
+		a = append(a, e)
+	}
+	return a
+}
+
 func recentContentMatches(query string, since time.Duration) ([]cc.IndexEntry, error) {
 	roots, err := sessionRoots()
 	if err != nil {
 		return nil, err
 	}
-	minutes := int(since.Minutes())
-	if minutes < 1 {
-		minutes = 1
+	lists, err := recentCandidates(roots, sinceMinutes(since))
+	if err != nil {
+		return nil, err
 	}
-	paths, err := recentMatchingPaths(roots, query, minutes)
+	return contentMatches(query, roots, lists)
+}
+
+// contentMatches greps the candidate files for query and resolves the hits to
+// session entries.
+func contentMatches(query string, roots []searchRoot, lists [][]string) ([]cc.IndexEntry, error) {
+	paths, err := grepCandidates(query, lists)
 	if err != nil {
 		return nil, err
 	}
@@ -1463,6 +1581,16 @@ func fileHasSessionCWD(path, cwd string) (bool, error) {
 }
 
 func recentMatchingPaths(roots []searchRoot, query string, minutes int) ([]string, error) {
+	lists, err := recentCandidates(roots, minutes)
+	if err != nil {
+		return nil, err
+	}
+	return grepCandidates(query, lists)
+}
+
+// recentCandidates lists, per root, the session files modified within the last
+// minutes.
+func recentCandidates(roots []searchRoot, minutes int) ([][]string, error) {
 	// One find per root, concurrently: a single find serializes behind the
 	// slowest tree (antigravity's brain/ is by far the largest).
 	lists := make([][]string, len(roots))
@@ -1476,13 +1604,21 @@ func recentMatchingPaths(roots []searchRoot, query string, minutes int) ([]strin
 		}()
 	}
 	wg.Wait()
-	var paths []string
 	for i := range roots {
 		if errs[i] != nil {
 			return nil, errs[i]
 		}
-		paths = append(paths, lists[i]...)
 	}
+	return lists, nil
+}
+
+// grepCandidates returns the candidate files that contain the literal query.
+func grepCandidates(query string, lists [][]string) ([]string, error) {
+	var paths []string
+	for _, list := range lists {
+		paths = append(paths, list...)
+	}
+	var wg sync.WaitGroup
 
 	// Grep the candidates in parallel batches: rg is fast per file, but a
 	// serial walk over thousands of transcripts is not.
@@ -1684,6 +1820,20 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 		if strings.HasPrefix(sessionID, "rollout-") && len(sessionID) >= len("rollout-2006-01-02T15-04-05-")+1 {
 			sessionID = strings.TrimPrefix(sessionID[len("rollout-2006-01-02T15-04-05-"):], "-")
 		}
+		// codex files rollouts by date, so the directory says nothing about
+		// the project; the session_meta header on the first line is the only
+		// record of where the session ran and whether it is a subagent.
+		if h, ok := codexSessionHeader(path); ok {
+			if h.subagent {
+				return cc.IndexEntry{}, false
+			}
+			if h.id != "" {
+				sessionID = h.id
+			}
+			if h.cwd != "" {
+				projectPath = h.cwd
+			}
+		}
 	case "opencode":
 		projectPath = filepath.Dir(path)
 		data, err := os.ReadFile(path)
@@ -1826,6 +1976,50 @@ func antigravityConversationIDFromPath(path string) string {
 		return id
 	}
 	return rest
+}
+
+// codexHeader is what a rollout's session_meta line says about the thread.
+type codexHeader struct {
+	id       string
+	cwd      string
+	subagent bool
+}
+
+// codexSessionHeader reads the session_meta line that opens a codex rollout
+// file. A subagent rollout carries its parent's session_id, so the thread's own
+// id is read from payload.id.
+func codexSessionHeader(path string) (codexHeader, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return codexHeader{}, false
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), cc.MaxLineSize)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var h struct {
+			Type    string `json:"type"`
+			Payload struct {
+				SessionID    string `json:"session_id"`
+				ID           string `json:"id"`
+				CWD          string `json:"cwd"`
+				ThreadSource string `json:"thread_source"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal([]byte(line), &h) != nil || h.Type != "session_meta" {
+			return codexHeader{}, false
+		}
+		id := h.Payload.ID
+		if id == "" {
+			id = h.Payload.SessionID
+		}
+		return codexHeader{id: id, cwd: h.Payload.CWD, subagent: h.Payload.ThreadSource == "subagent"}, true
+	}
+	return codexHeader{}, false
 }
 
 // piSessionHeader reads the first line of a pi session file and returns its
