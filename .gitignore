@@ -15,6 +15,21 @@
 /cmsg
 /creplay
 /mksid
+/ccagent
+/ccapprove
+/ccbrowse
+/ccdiff
+/ccerr
+/ccinbox
+/ccrender
+/ccspawn
+/cctask
+/ccteam
+/cctime
+/cctool
+# cass, cchooks, and ccdistill are packages as well as commands, and a
+# .gitignore pattern cannot tell a stray binary from the directory it shadows;
+# their build outputs show up as untracked instead.
 
 # Build output tree
 /bin/
