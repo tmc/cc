@@ -1051,3 +1051,64 @@ func TestMergeEntriesKeepsIndexedFields(t *testing.T) {
 		t.Fatalf("mergeEntries = %#v", got)
 	}
 }
+
+func TestRecentContentMatchesIgnoresQueryCase(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+	root := t.TempDir()
+	t.Setenv("CLAUDE_HOME", filepath.Join(root, ".claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, ".codex"))
+	t.Setenv("GEMINI_HOME", filepath.Join(root, ".gemini"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, ".antigravity"))
+	t.Setenv("OPENCODE_HOME", filepath.Join(root, ".opencode"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, ".pi"))
+	path := filepath.Join(root, ".claude", "projects", "work", "session.jsonl")
+	// A part number is recalled, not copied, so the query rarely arrives in the
+	// capitalization the transcript used.
+	writeTextFile(t, path, `{"sessionId":"case-id","text":"the MCX516A-CCAT takes a QSFP28 cable"}`)
+
+	for _, query := range []string{"qsfp28", "QSFP28", "QsFp28"} {
+		matches, err := recentContentMatches(query, time.Hour)
+		if err != nil {
+			t.Fatalf("recentContentMatches(%q): %v", query, err)
+		}
+		if len(matches) != 1 || matches[0].FullPath != path {
+			t.Fatalf("recentContentMatches(%q) = %#v, want %s", query, matches, path)
+		}
+	}
+}
+
+func TestFileContainsIgnoresCase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	writeTextFile(t, path, `{"text":"a QSFP28 transceiver"}`)
+	for _, contains := range []string{"qsfp28", "QSFP28"} {
+		ok, err := fileContains(path, contains)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatalf("fileContains(%q) = false, want true", contains)
+		}
+	}
+	if ok, err := fileContains(path, "sfp56"); err != nil || ok {
+		t.Fatalf("fileContains(sfp56) = %v, %v, want false, nil", ok, err)
+	}
+}
+
+func TestFileHasToolMatchIgnoresCase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := []byte(
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"Bash","input":{"command":"ethtool -m enp1s0f0"}}]}}` + "\n" +
+			`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"Identifier: QSFP28"}]}}` + "\n")
+	if err := os.WriteFile(path, data, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := fileHasToolMatch(path, "ETHTOOL -m", "qsfp28")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("tool command/result match not found for a differently cased query")
+	}
+}

@@ -6,6 +6,11 @@
 // form for codex, gemini, opencode, pi, and antigravity sessions). With -l the
 // resume is launched directly. Sessions for the current worktree are prioritized.
 //
+// Matching ignores case everywhere: the query, the -has, -cmd, -result, and
+// -wrote filters, and the occurrence counts behind -info. A query is recalled
+// text, not copied text, so a part number or error string finds its sessions
+// whichever way it is typed.
+//
 // A claude.ai URL is accepted as the query and reduced to its identifier before
 // searching, so pasting an artifact link (query string and all) resolves the
 // session that created the artifact. The same holds for code/session and design

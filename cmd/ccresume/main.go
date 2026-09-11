@@ -1203,11 +1203,23 @@ func grepContentMatches(contains string, since time.Duration) ([]cc.IndexEntry, 
 }
 
 func fileContains(path, contains string) (bool, error) {
+	// Transcripts reach hundreds of megabytes; let rg fold the case rather
+	// than allocating a lowered copy of the whole file.
+	if n, ok := rgCountMatches(contains, path); ok {
+		return n > 0, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, nil
 	}
-	return strings.Contains(string(data), contains), nil
+	return containsFold(string(data), contains), nil
+}
+
+// containsFold reports whether s contains substr, ignoring case. The filters
+// take recalled text, so they match the way the search that found the session
+// does.
+func containsFold(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 func filterToolMatches(matches []cc.IndexEntry, cmdText, resultText string) ([]cc.IndexEntry, error) {
@@ -1291,28 +1303,28 @@ func toolUseContains(tu cc.ContentBlock, text string) bool {
 	if text == "" {
 		return true
 	}
-	if strings.Contains(tu.BashCommand(), text) {
+	if containsFold(tu.BashCommand(), text) {
 		return true
 	}
-	return strings.Contains(string(tu.Input), text)
+	return containsFold(string(tu.Input), text)
 }
 
 func toolResultContains(tr cc.ContentBlock, text string) bool {
 	if text == "" {
 		return true
 	}
-	return strings.Contains(tr.Content, text) || strings.Contains(string(tr.Input), text)
+	return containsFold(tr.Content, text) || containsFold(string(tr.Input), text)
 }
 
 func toolUseResultContains(res *cc.ToolUseResult, text string) bool {
 	if text == "" {
 		return true
 	}
-	return strings.Contains(res.Stdout, text) ||
-		strings.Contains(res.Stderr, text) ||
-		strings.Contains(res.Error, text) ||
-		strings.Contains(res.Text, text) ||
-		strings.Contains(string(res.Content), text)
+	return containsFold(res.Stdout, text) ||
+		containsFold(res.Stderr, text) ||
+		containsFold(res.Error, text) ||
+		containsFold(res.Text, text) ||
+		containsFold(string(res.Content), text)
 }
 
 func findMatches(query string, since time.Duration) ([]cc.IndexEntry, error) {
@@ -1786,9 +1798,12 @@ func isRecentSessionFile(name string, info os.FileInfo, cutoff time.Time) bool {
 		(strings.HasPrefix(name, "ses_") && strings.HasSuffix(name, ".json"))
 }
 
-// grepFiles returns the files among paths that contain the literal query.
+// grepFiles returns the files among paths that contain the literal query,
+// ignoring case. A query is usually recalled text - a part number, an error
+// string - whose original capitalization the user has no reason to remember,
+// and every filter and count downstream already folds case.
 func grepFiles(query string, paths []string) ([]string, error) {
-	args := append([]string{"-l", "-F", "--", query}, paths...)
+	args := append([]string{"-l", "-F", "-i", "--", query}, paths...)
 	out, err := exec.Command("rg", args...).Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
