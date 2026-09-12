@@ -1,4 +1,4 @@
-package main
+package sessionview
 
 import (
 	"errors"
@@ -6,10 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
-
-	"github.com/charmbracelet/x/term"
 )
 
 // pagerCommand resolves the pager the way git does: CCRENDER_PAGER, then
@@ -36,7 +33,7 @@ func pagerCommand(look func(string) (string, bool)) []string {
 // Like git, ccrender defaults LESS to FRX — quit if the text fits on one
 // screen, keep ANSI color, and don't wipe the screen on exit — but leaves an
 // existing LESS alone, since that is the user's own configuration.
-func runPager(text string) error {
+func runPager(text, search string) error {
 	argv := pagerCommand(os.LookupEnv)
 	if len(argv) == 0 {
 		_, err := io.WriteString(os.Stdout, text)
@@ -46,7 +43,7 @@ func runPager(text string) error {
 	cmd.Stdin = strings.NewReader(text)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if less, ok := lessEnv(os.LookupEnv, *searchFlag); ok {
+	if less, ok := lessEnv(os.LookupEnv, search); ok {
 		cmd.Env = append(os.Environ(), "LESS="+less)
 	}
 	if err := cmd.Run(); err != nil {
@@ -76,16 +73,4 @@ func lessEnv(look func(string) (string, bool), pattern string) (string, bool) {
 		less += " +/" + pattern
 	}
 	return less, true
-}
-
-// termWidth reports the width to wrap to: the terminal's own width, else
-// $COLUMNS, else a terminal-typical 100.
-func termWidth() int {
-	if w, _, err := term.GetSize(os.Stdout.Fd()); err == nil && w > 0 {
-		return w
-	}
-	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
-		return n
-	}
-	return 100
 }

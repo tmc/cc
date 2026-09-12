@@ -39,7 +39,7 @@
 //	            (default 40). FTS5 documents 64 tokens as the maximum and
 //	            returns one snippet per row, so that is the ceiling. 0
 //	            omits the snippet line.
-//	-render     Open the top hit's transcript in ccrender, positioned at
+//	-render     Open the top hit's transcript in the pager, positioned at
 //	            the first match of the query.
 //
 // # Examples

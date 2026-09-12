@@ -5,7 +5,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -15,9 +14,9 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-isatty"
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/internal/sessionview"
 	"github.com/tmc/cc/internal/transcript"
 )
 
@@ -53,20 +52,18 @@ func run() error {
 	// the navigation a reader wants (search, marks, line jumps). The viewport
 	// owns what a pager cannot do: follow a live session. A piped stdout gets
 	// the same text with no pager at all, so the two stay in lockstep.
+	opts := sessionview.Options{
+		Timestamps: *tsFlag,
+		Expand:     *expandFlag,
+		Max:        *maxFlag,
+		Search:     *searchFlag,
+	}
 	format := *formatFlag
 	if format == "" {
-		switch {
-		case !isatty.IsTerminal(os.Stdout.Fd()):
-			return writeTranscript(os.Stdout, file, 0)
-		case *followFlag || *tuiFlag:
+		if *followFlag || *tuiFlag {
 			return runTUI(file)
-		default:
-			var b strings.Builder
-			if err := writeTranscript(&b, file, termWidth()); err != nil {
-				return err
-			}
-			return runPager(b.String())
 		}
+		return sessionview.Page(context.Background(), file, opts)
 	}
 	// Batch formats belong to ccfmt.
 	cmd := exec.Command("ccfmt", "-format", format, file)
@@ -89,28 +86,6 @@ func runTUI(file string) error {
 		return err
 	}
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
-	return err
-}
-
-// writeTranscript writes the transcript the TUI would show. A width of 0
-// falls back to $COLUMNS, then to a terminal-typical 100.
-func writeTranscript(w io.Writer, file string, width int) error {
-	entries, err := cc.ReadFileWithSubagents(context.Background(), file)
-	if err != nil {
-		return err
-	}
-	if *maxFlag > 0 && len(entries) > *maxFlag {
-		entries = entries[len(entries)-*maxFlag:]
-	}
-	if width <= 0 {
-		width = termWidth()
-	}
-	_, err = io.WriteString(w, transcript.Render(entries, transcript.Options{
-		Timestamps: *tsFlag,
-		Expand:     *expandFlag,
-		Width:      width,
-		Style:      transcript.StyleFor(cc.Harness(file)),
-	}))
 	return err
 }
 

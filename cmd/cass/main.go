@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"github.com/tmc/cc/cass/service"
 	"github.com/tmc/cc/cass/store"
 	"github.com/tmc/cc/cass/web"
+	"github.com/tmc/cc/internal/sessionview"
 )
 
 func main() {
@@ -392,7 +392,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, searchOptions, error
 	sort := fs.String("sort", "", "sort order: recent, relevance, started, oldest")
 	limit := fs.Int("n", 20, "max results")
 	snippet := fs.Int("snippet", 40, "tokens of surrounding text in the match snippet (0-64, 0 disables)")
-	render := fs.Bool("render", false, "open the top hit's transcript in ccrender")
+	render := fs.Bool("render", false, "open the top hit's transcript in the pager")
 	fs.Parse(args)
 
 	query := strings.Join(fs.Args(), " ")
@@ -492,16 +492,20 @@ func runSearch(ctx context.Context, svc *service.Service, args []string, jsonOut
 	}
 	fmt.Println(countStyle.Render(fmt.Sprintf("(%d results)", result.TotalCount)))
 	if opts.render {
-		return renderHit(result.Hits[0], req.Query)
+		return renderHit(ctx, result.Hits[0], req.Query)
 	}
 	return nil
 }
 
-// renderHit opens a hit's transcript in ccrender, positioned at the first
-// match of the query. Transcript rendering belongs to ccrender: the FTS blob
-// has no roles, timestamps, or turn boundaries, and the pager already walks
-// every occurrence.
-func renderHit(h cass.Hit, query string) error {
+// resolveWindow is how far back a bare session ID is looked up, matching
+// ccrender's own -since default.
+const resolveWindow = 30 * 24 * time.Hour
+
+// renderHit shows a hit's transcript in the pager, positioned at the first
+// match of the query. Transcript rendering belongs to the session view: the
+// FTS blob has no roles, timestamps, or turn boundaries, and the pager already
+// walks every occurrence.
+func renderHit(ctx context.Context, h cass.Hit, query string) error {
 	target := h.SourcePath
 	if target == "" {
 		target = h.SessionID
@@ -509,19 +513,13 @@ func renderHit(h cass.Hit, query string) error {
 	if target == "" {
 		return fmt.Errorf("no session to render")
 	}
-	args := []string{}
-	if pat := searchPattern(query); pat != "" {
-		args = append(args, "-search", pat)
+	// A hit carries a transcript path when the index has one and a bare
+	// session ID otherwise; ResolveSessionFile takes either.
+	file, err := cc.ResolveSessionFile(ctx, target, resolveWindow)
+	if err != nil {
+		return err
 	}
-	args = append(args, target)
-	cmd := exec.Command("ccrender", args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ccrender: %w", err)
-	}
-	return nil
+	return sessionview.Page(ctx, file, sessionview.Options{Search: searchPattern(query)})
 }
 
 // searchPattern turns a query into a less pattern matching any of its terms.
