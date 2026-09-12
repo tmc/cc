@@ -27,6 +27,14 @@
 // the pane ID is extracted and resolved as above. By default the src pane (the
 // sender) is used; -sid-side=dst selects the recipient instead.
 //
+// # The search window
+//
+// Candidate sessions are selected by modification time, within the -since
+// window (7d by default), so the common search stays fast. The default is a
+// speed bound rather than part of the query: when nothing in the window
+// matches, ccresume says so on stderr and searches all history. Passing -since
+// explicitly bounds the search for real, and no widening happens.
+//
 // # Usage
 //
 //	ccresume [flags] [query...]
@@ -34,7 +42,8 @@
 // # Flags
 //
 //	-l           Launch claude instead of printing the resume command.
-//	-since dur   Only consider sessions modified within this duration (default 7d).
+//	-since dur   Only consider sessions modified within this duration (default 7d;
+//	             the default widens to all history when nothing matches).
 //	-1           Print only the single most recent match.
 //	-clip        Use the clipboard contents as the query when no args given (default true).
 //	-paths       Print raw session file paths instead of resume commands.

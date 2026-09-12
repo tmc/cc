@@ -161,82 +161,32 @@ func run() error {
 		return fmt.Errorf("invalid -sort %q (want relevance or recency)", *sortFlag)
 	}
 
-	// The metadata scan and the content grep look at disjoint data, and the
-	// grep is only needed when the metadata misses; both walk the same recent
-	// files, so scan once alongside the index read and use the grep only as a
-	// fallback.
-	contentQuery := query
-	switch {
-	case filepath.IsAbs(query):
-		contentQuery = jsonCWDField(query)
-	case query == wrote:
-		// A -wrote pattern is a path or glob, not free text; narrow candidates
-		// with a since-bounded literal grep (the dedicated block below then
-		// checks which actually wrote a matching file). Never fall through to
-		// the unbounded grepMatches, which would scan all history for a glob.
-		contentQuery = literalToken(wrote)
+	search := searchSpec{
+		query:      query,
+		has:        has,
+		cmdText:    cmdText,
+		resultText: resultText,
+		wrote:      wrote,
+		dir:        dir,
+		harness:    harness,
 	}
-	// Bound the scan by -since: candidate files are selected by mtime before
-	// anything reads them, so old history is never scanned or resolved.
-	scanCh := make(chan scanResult, 1)
-	go func() {
-		scanCh <- scanRecentSessions(query, contentQuery, since)
-	}()
-
-	matches, err := findMatches(query, since)
+	matches, err := search.run(since)
 	if err != nil {
 		return err
 	}
-	res := <-scanCh
-	if res.err != nil {
-		return res.err
-	}
-	// Claude Code stopped writing sessions-index.json, and codex never had one,
-	// so the index alone reports neither harness. The metadata scan derives the
-	// same fields from the session files themselves; merge the two so an
-	// indexed match from one harness cannot hide a live session from another.
-	matches = mergeEntries(matches, res.meta)
-	if len(matches) == 0 {
-		matches = res.content
-	}
-	if has != "" {
-		matches, err = filterContentMatches(matches, has)
+	// The -since default is ccresume's own speed bound, not part of the query:
+	// selecting candidates by mtime keeps the common search fast, but it also
+	// hides older sessions that a plain grep over the transcripts would find.
+	// When the bounded search comes up empty and nobody asked for the bound,
+	// search all history rather than report that nothing matches. An explicit
+	// -since is the user's own bound and is left alone.
+	if len(matches) == 0 && !sinceSet() {
+		fmt.Fprintf(os.Stderr, "ccresume: nothing modified within %s matches %q; searching all history\n", *sinceFlag, query)
+		matches, err = search.run(allHistory)
 		if err != nil {
 			return err
 		}
-		if len(matches) == 0 && query == has {
-			matches, err = grepContentMatches(has, since)
-			if err != nil {
-				return err
-			}
-		}
 	}
-	if cmdText != "" || resultText != "" {
-		matches, err = filterToolMatches(matches, cmdText, resultText)
-		if err != nil {
-			return err
-		}
-		if len(matches) == 0 && (query == cmdText || query == resultText) {
-			matches, err = grepToolMatches(query, cmdText, resultText, since)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	if wrote != "" {
-		matches = filterWroteMatches(matches, wrote)
-		// When -wrote is the only filter (so it drove the query), the metadata and
-		// literal-grep passes above cannot find a glob pattern; do the real
-		// structured scan over recent sessions.
-		if len(matches) == 0 && query == wrote {
-			matches, err = grepWroteMatches(wrote, since)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	matches = filterMatches(matches, dir, harness)
-
 	if len(matches) == 0 {
 		return fmt.Errorf("no sessions found matching %q", query)
 	}
@@ -1325,6 +1275,115 @@ func toolUseResultContains(res *cc.ToolUseResult, text string) bool {
 		containsFold(res.Error, text) ||
 		containsFold(res.Text, text) ||
 		containsFold(string(res.Content), text)
+}
+
+// allHistory is the window the widening fallback searches with: longer than
+// any session's age, so the mtime bound selects every candidate file.
+const allHistory = 100 * 365 * 24 * time.Hour
+
+// sinceSet reports whether -since was given on the command line.
+func sinceSet() bool {
+	set := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "since" {
+			set = true
+		}
+	})
+	return set
+}
+
+// searchSpec is one ccresume query: the text to look for and the filters that
+// narrow it. Holding it together lets the same search run twice, once bounded
+// by -since and again over all history when that bound hides everything.
+type searchSpec struct {
+	query      string
+	has        string
+	cmdText    string
+	resultText string
+	wrote      string
+	dir        string
+	harness    string
+}
+
+// run returns the sessions matching the spec among those modified within since.
+func (s searchSpec) run(since time.Duration) ([]cc.IndexEntry, error) {
+	// The metadata scan and the content grep look at disjoint data, and the
+	// grep is only needed when the metadata misses; both walk the same recent
+	// files, so scan once alongside the index read and use the grep only as a
+	// fallback.
+	contentQuery := s.query
+	switch {
+	case filepath.IsAbs(s.query):
+		contentQuery = jsonCWDField(s.query)
+	case s.query == s.wrote:
+		// A -wrote pattern is a path or glob, not free text; narrow candidates
+		// with a since-bounded literal grep (the dedicated block below then
+		// checks which actually wrote a matching file). Never fall through to
+		// the unbounded grepMatches, which would scan all history for a glob.
+		contentQuery = literalToken(s.wrote)
+	}
+	// Bound the scan by -since: candidate files are selected by mtime before
+	// anything reads them, so old history is never scanned or resolved.
+	scanCh := make(chan scanResult, 1)
+	go func() {
+		scanCh <- scanRecentSessions(s.query, contentQuery, since)
+	}()
+
+	matches, err := findMatches(s.query, since)
+	if err != nil {
+		return nil, err
+	}
+	res := <-scanCh
+	if res.err != nil {
+		return nil, res.err
+	}
+	// Claude Code stopped writing sessions-index.json, and codex never had one,
+	// so the index alone reports neither harness. The metadata scan derives the
+	// same fields from the session files themselves; merge the two so an
+	// indexed match from one harness cannot hide a live session from another.
+	matches = mergeEntries(matches, res.meta)
+	if len(matches) == 0 {
+		matches = res.content
+	}
+	if s.has != "" {
+		matches, err = filterContentMatches(matches, s.has)
+		if err != nil {
+			return nil, err
+		}
+		if len(matches) == 0 && s.query == s.has {
+			matches, err = grepContentMatches(s.has, since)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if s.cmdText != "" || s.resultText != "" {
+		matches, err = filterToolMatches(matches, s.cmdText, s.resultText)
+		if err != nil {
+			return nil, err
+		}
+		if len(matches) == 0 && (s.query == s.cmdText || s.query == s.resultText) {
+			matches, err = grepToolMatches(s.query, s.cmdText, s.resultText, since)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if s.wrote != "" {
+		matches = filterWroteMatches(matches, s.wrote)
+		// When -wrote is the only filter (so it drove the query), the metadata and
+		// literal-grep passes above cannot find a glob pattern; do the real
+		// structured scan over recent sessions.
+		if len(matches) == 0 && s.query == s.wrote {
+			matches, err = grepWroteMatches(s.wrote, since)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	matches = filterMatches(matches, s.dir, s.harness)
+
+	return matches, nil
 }
 
 func findMatches(query string, since time.Duration) ([]cc.IndexEntry, error) {

@@ -1112,3 +1112,42 @@ func TestFileHasToolMatchIgnoresCase(t *testing.T) {
 		t.Fatal("tool command/result match not found for a differently cased query")
 	}
 }
+
+func TestSearchRunWidensPastSinceWindow(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+	root := t.TempDir()
+	t.Setenv("CLAUDE_HOME", filepath.Join(root, ".claude"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, ".codex"))
+	t.Setenv("GEMINI_HOME", filepath.Join(root, ".gemini"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, ".antigravity"))
+	t.Setenv("OPENCODE_HOME", filepath.Join(root, ".opencode"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, ".pi"))
+	path := filepath.Join(root, ".claude", "projects", "-work", "b1c30ab6-2b2f-4b0b-9a51-3f7c2c0f0d21.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const query = "expected stderr to match the actual message"
+	writeJSONL(t, path, []map[string]any{{"sessionId": "b1c30ab6-2b2f-4b0b-9a51-3f7c2c0f0d21", "cwd": "/work", "text": query}})
+	old := time.Now().Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	s := searchSpec{query: query}
+	got, err := s.run(7 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("run(7d): %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("run(7d) = %#v, want no matches outside the window", got)
+	}
+	got, err = s.run(allHistory)
+	if err != nil {
+		t.Fatalf("run(allHistory): %v", err)
+	}
+	if len(got) != 1 || got[0].FullPath != path {
+		t.Fatalf("run(allHistory) = %#v, want single match for %s", got, path)
+	}
+}
