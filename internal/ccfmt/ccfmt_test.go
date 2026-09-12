@@ -1,4 +1,4 @@
-package main
+package ccfmt
 
 import (
 	"bytes"
@@ -28,10 +28,10 @@ func TestRunMarkdown(t *testing.T) {
 	}, "\n")+"\n")
 
 	resetFlagsForTest()
-	*formatFlag = "markdown"
+	topts.Format = "markdown"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -64,10 +64,10 @@ func TestRunMarkdownQuotesMessageBodies(t *testing.T) {
 	}, "\n")+"\n")
 
 	resetFlagsForTest()
-	*formatFlag = "markdown"
+	topts.Format = "markdown"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -96,10 +96,10 @@ func TestRunMarkdownInlinesLocalImage(t *testing.T) {
 	}, "\n")+"\n")
 
 	resetFlagsForTest()
-	*formatFlag = "markdown"
+	topts.Format = "markdown"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	got := out.String()
@@ -125,10 +125,10 @@ func TestRunMarkdownInlinesLocalImageThroughRedactor(t *testing.T) {
 	defer func() { redactImageDataFunc = old }()
 
 	resetFlagsForTest()
-	*formatFlag = "markdown"
+	topts.Format = "markdown"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if !strings.Contains(out.String(), base64.StdEncoding.EncodeToString(solidPNG(color.RGBA{G: 255, A: 255}))) {
@@ -145,10 +145,10 @@ func TestRunMarkdownToolResultRendersInlineImage(t *testing.T) {
 	}, "\n")+"\n")
 
 	resetFlagsForTest()
-	*formatFlag = "markdown"
+	topts.Format = "markdown"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	got := out.String()
@@ -176,10 +176,10 @@ func TestRunMarkdownToolResultImageUsesRedactor(t *testing.T) {
 	defer func() { redactImageDataFunc = old }()
 
 	resetFlagsForTest()
-	*formatFlag = "markdown"
+	topts.Format = "markdown"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	got := out.String()
@@ -208,10 +208,10 @@ func TestRunMarkdownIncludesSubagentEntries(t *testing.T) {
 	}, "\n")+"\n")
 
 	resetFlagsForTest()
-	*formatFlag = "markdown"
+	topts.Format = "markdown"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -235,10 +235,10 @@ func TestRunMarkdownRedactsMessageSecrets(t *testing.T) {
 	}, "\n")+"\n")
 
 	resetFlagsForTest()
-	*formatFlag = "markdown"
+	topts.Format = "markdown"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	got := out.String()
@@ -257,7 +257,7 @@ func TestToolCommandRedactsSecrets(t *testing.T) {
 		Name:  "Bash",
 		Input: jsonRaw(`{"cmd":"echo sk_test_67890 pk_test_12345"}`),
 	}
-	if got := toolCommand(block); got != "echo sk_test_XXXXX... pk_test_XXXXX..." {
+	if got := newTestFormatter(t).toolCommand(block); got != "echo sk_test_XXXXX... pk_test_XXXXX..." {
 		t.Fatalf("toolCommand redaction = %q", got)
 	}
 }
@@ -267,7 +267,7 @@ func TestToolResultTextRedactsSecrets(t *testing.T) {
 	block := cc.ContentBlock{
 		Content: "secret: sk_test_67890\npublishable: pk_test_12345",
 	}
-	got := toolResultText(block)
+	got := newTestFormatter(t).toolResultText(block)
 	if strings.Contains(got, "sk_test_67890") || strings.Contains(got, "pk_test_12345") {
 		t.Fatalf("tool result leaked secret: %q", got)
 	}
@@ -290,7 +290,7 @@ func TestRunTextSkipsMetaByDefault(t *testing.T) {
 	resetFlagsForTest()
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -314,11 +314,11 @@ func TestRunMarkdownPublishCleanupSummarizesTools(t *testing.T) {
 	}, "\n")+"\n")
 
 	resetFlagsForTest()
-	*formatFlag = "markdown"
-	*cleanupFlag = "publish"
+	topts.Format = "markdown"
+	topts.Cleanup = "publish"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -345,11 +345,11 @@ func TestRunOmitCommentaryAndToolResults(t *testing.T) {
 	}, "\n")+"\n")
 
 	resetFlagsForTest()
-	*commentaryFlag = false
-	*toolResultsFlag = "omit"
+	topts.Commentary = false
+	topts.ToolResults = "omit"
 
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -367,14 +367,14 @@ func TestToolCommandAcceptsCmdField(t *testing.T) {
 		Name:  "Bash",
 		Input: jsonRaw(`{"cmd":"rg --files ."}`),
 	}
-	if got := toolCommand(block); got != "rg --files ." {
-		t.Fatalf("toolCommand(cmd) = %q, want %q", got, "rg --files .")
+	if got := newTestFormatter(t).toolCommand(block); got != "rg --files ." {
+		t.Fatalf("newTestFormatter(t).toolCommand(cmd) = %q, want %q", got, "rg --files .")
 	}
 }
 
 func TestSummarizeToolResultPatchedFiles(t *testing.T) {
 	body := "Success. Updated the following files:\nM /tmp/a.go\nA /tmp/b.go\n"
-	if got := summarizeToolResult(body); got != "Updated files: /tmp/a.go, /tmp/b.go" {
+	if got := newTestFormatter(t).summarizeToolResult(body); got != "Updated files: /tmp/a.go, /tmp/b.go" {
 		t.Fatalf("summarizeToolResult = %q", got)
 	}
 }
@@ -400,30 +400,46 @@ func TestNoiseEntryIsDropped(t *testing.T) {
 }
 
 func runEntries(w *bytes.Buffer, source string, entries []cc.Entry) error {
-	switch *formatFlag {
+	f, err := New(topts)
+	if err != nil {
+		return err
+	}
+	switch topts.Format {
 	case "text":
-		return writeText(w, source, entries)
+		return f.writeText(w, source, entries)
 	case "markdown", "md":
-		return writeMarkdown(w, source, entries)
+		return f.writeMarkdown(w, source, entries)
 	default:
-		return fmt.Errorf("unsupported test format %q", *formatFlag)
+		return fmt.Errorf("unsupported test format %q", topts.Format)
 	}
 }
 
+// topts is the option set each test configures before calling runFormat.
+var topts Options
+
 func resetFlagsForTest() {
-	*formatFlag = "text"
-	*titleFlag = ""
-	*includeMeta = false
-	*includeStamp = false
-	*maxBytesFlag = 4000
-	*cleanupFlag = "none"
-	*commentaryFlag = true
-	*toolsFlag = "full"
-	*toolResultsFlag = "full"
-	*inlineImagesFlag = true
-	*redactImagesFlag = true
-	*redactFlag = true
-	*sinceFlag = "30d"
+	topts = Default()
+	topts.Format = "text"
+	topts.RedactImages = true
+}
+
+// newTestFormatter returns a Formatter for the current test options.
+func newTestFormatter(t *testing.T) *Formatter {
+	t.Helper()
+	f, err := New(topts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// runFormat formats args with the current test options.
+func runFormat(w io.Writer, args []string) error {
+	f, err := New(topts)
+	if err != nil {
+		return err
+	}
+	return f.Format(w, args)
 }
 
 func TestRunSkipsBodylessEntries(t *testing.T) {
@@ -439,7 +455,7 @@ func TestRunSkipsBodylessEntries(t *testing.T) {
 	// output drops them.
 	resetFlagsForTest()
 	var out bytes.Buffer
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	got := out.String()
@@ -452,9 +468,9 @@ func TestRunSkipsBodylessEntries(t *testing.T) {
 
 	// -meta keeps the raw record stream, labels and all.
 	resetFlagsForTest()
-	*includeMeta = true
+	topts.Meta = true
 	out.Reset()
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run -meta: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "[mode]") {
@@ -463,9 +479,9 @@ func TestRunSkipsBodylessEntries(t *testing.T) {
 
 	// Markdown drops them too.
 	resetFlagsForTest()
-	*formatFlag = "markdown"
+	topts.Format = "markdown"
 	out.Reset()
-	if err := run(&out, []string{path}); err != nil {
+	if err := runFormat(&out, []string{path}); err != nil {
 		t.Fatalf("run markdown: %v", err)
 	}
 	if got := out.String(); strings.Contains(got, "## Mode") {
@@ -492,15 +508,15 @@ func TestRunResolvesSessionID(t *testing.T) {
 	resetFlagsForTest()
 
 	var out bytes.Buffer
-	if err := run(&out, []string{"c82a34fb"}); err != nil {
+	if err := runFormat(&out, []string{"c82a34fb"}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if got := out.String(); !strings.Contains(got, "hello from a resolved session") {
 		t.Fatalf("output missing resolved session body:\n%s", got)
 	}
 
-	if err := run(io.Discard, []string{"deadbeef"}); err == nil || !strings.Contains(err.Error(), "no session matches") {
-		t.Fatalf("run(unknown ID) err = %v; want no-match error", err)
+	if err := runFormat(io.Discard, []string{"deadbeef"}); err == nil || !strings.Contains(err.Error(), "no session matches") {
+		t.Fatalf("runFormat(unknown ID) err = %v; want no-match error", err)
 	}
 }
 

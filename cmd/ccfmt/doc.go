@@ -34,7 +34,7 @@
 //	                     (default 4000; 0 disables truncation).
 //	-inline-images       Inline message images as base64 data URLs (default true).
 //	-redact              Redact obvious secrets (e.g. Stripe test keys, default true).
-//	-redact-images       Pass image bytes through redactImageDataFunc (default no-op).
+//	-redact-images       Pass image bytes through the image redactor (default no-op).
 //	-since DUR           How far back to search when resolving a session ID
 //	                     (default 30d).
 //

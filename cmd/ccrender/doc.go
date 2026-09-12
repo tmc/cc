@@ -14,8 +14,8 @@
 //
 // The viewport owns the one thing a pager cannot do, following a live session:
 // -follow uses it, and -tui selects it for a finished one. Document formats
-// belong to ccfmt: passing -format delegates there, keeping batch formatting in
-// one place.
+// belong to ccfmt: passing -format calls ccfmt's formatter directly, keeping
+// batch formatting in one place without depending on ccfmt being installed.
 //
 // # Usage
 //
@@ -24,8 +24,8 @@
 //
 // # Flags
 //
-//	-format FMT    Delegate to ccfmt with this format (text, transcript,
-//	               markdown/md, json, jsonl) instead of opening the TUI.
+//	-format FMT    Write this ccfmt format (text, transcript, markdown/md,
+//	               json, jsonl) instead of opening the TUI.
 //	-follow        Tail the session file for new entries (TUI only).
 //	-tui           Use the built-in viewport instead of the pager.
 //	-timestamps    Start with per-entry timestamps shown.

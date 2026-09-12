@@ -6,9 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -16,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/internal/ccfmt"
 	"github.com/tmc/cc/internal/sessionview"
 	"github.com/tmc/cc/internal/transcript"
 )
@@ -65,19 +64,18 @@ func run() error {
 		}
 		return sessionview.Page(context.Background(), file, opts)
 	}
-	// Batch formats belong to ccfmt.
-	cmd := exec.Command("ccfmt", "-format", format, file)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		// A closed downstream pipe (ccrender ... | head) is normal
-		// termination, not a rendering failure.
-		if strings.Contains(err.Error(), "broken pipe") {
-			return nil
-		}
-		return fmt.Errorf("ccfmt: %w", err)
+	// Batch formats belong to ccfmt, which ccrender calls rather than runs:
+	// the formatter is linked in already, and a subprocess would need ccfmt
+	// on $PATH to do the same work.
+	fmtOpts := ccfmt.Default()
+	fmtOpts.Format = format
+	fmtOpts.Timestamps = *tsFlag
+	fmtOpts.Since = *sinceFlag
+	f, err := ccfmt.New(fmtOpts)
+	if err != nil {
+		return err
 	}
-	return nil
+	return f.Format(os.Stdout, []string{file})
 }
 
 func runTUI(file string) error {
