@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tmc/cc"
+	"github.com/tmc/cc/internal/sessionargs"
 )
 
 var (
@@ -32,7 +33,7 @@ func main() {
 }
 
 func run() error {
-	readers, closers, err := inputs()
+	readers, closers, err := sessionargs.Open(context.Background(), flag.Args(), "")
 	if err != nil {
 		return err
 	}
@@ -89,27 +90,6 @@ func run() error {
 		fmt.Println(count)
 	}
 	return nil
-}
-
-func inputs() ([]io.Reader, []io.Closer, error) {
-	args := flag.Args()
-	if len(args) == 0 {
-		return []io.Reader{os.Stdin}, nil, nil
-	}
-	var readers []io.Reader
-	var closers []io.Closer
-	for _, path := range args {
-		f, err := os.Open(path)
-		if err != nil {
-			for _, c := range closers {
-				c.Close()
-			}
-			return nil, nil, err
-		}
-		readers = append(readers, f)
-		closers = append(closers, f)
-	}
-	return readers, closers, nil
 }
 
 func match(e cc.Entry) bool {

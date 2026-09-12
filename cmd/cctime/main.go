@@ -13,6 +13,7 @@ import (
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/internal/sessionargs"
 )
 
 var (
@@ -30,7 +31,7 @@ func main() {
 }
 
 func run() error {
-	readers, closers, err := inputs()
+	readers, closers, err := sessionargs.Open(context.Background(), flag.Args(), *sinceFlag)
 	if err != nil {
 		return err
 	}
@@ -375,34 +376,4 @@ func fmtDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%ds", int(d.Seconds()))
-}
-
-func inputs() ([]io.Reader, []io.Closer, error) {
-	args := flag.Args()
-	if *sinceFlag != "" && len(args) == 0 {
-		since, err := ccpaths.ParseDuration(*sinceFlag)
-		if err != nil {
-			return nil, nil, err
-		}
-		files, err := cc.FindSessionFiles(context.Background(), since, "")
-		if err != nil {
-			return nil, nil, err
-		}
-		args = files
-	}
-	if len(args) == 0 {
-		return []io.Reader{os.Stdin}, nil, nil
-	}
-	var readers []io.Reader
-	var closers []io.Closer
-	for _, p := range args {
-		f, err := os.Open(p)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", p, err)
-			continue
-		}
-		readers = append(readers, f)
-		closers = append(closers, f)
-	}
-	return readers, closers, nil
 }
