@@ -982,6 +982,27 @@ func TestResolveMatchDropsAntigravityBrainTarget(t *testing.T) {
 	}
 }
 
+func TestRawSessionPathUsesAntigravityFullTranscript(t *testing.T) {
+	brain := filepath.Join(t.TempDir(), ".gemini", "antigravity-cli", "brain", "conv-uuid")
+	logs := filepath.Join(brain, ".system_generated", "logs")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	compact := filepath.Join(logs, "transcript.jsonl")
+	full := filepath.Join(logs, "transcript_full.jsonl")
+	writeTextFile(t, compact, "compact\n")
+	writeTextFile(t, full, "full\n")
+	if got := rawSessionPath(brain); got != full {
+		t.Fatalf("rawSessionPath = %q, want %q", got, full)
+	}
+	if err := os.Remove(full); err != nil {
+		t.Fatal(err)
+	}
+	if got := rawSessionPath(brain); got != compact {
+		t.Fatalf("rawSessionPath without full = %q, want %q", got, compact)
+	}
+}
+
 func TestIndexEntryForCodexPath(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "sessions")
 	path := filepath.Join(root, "2026", "09", "10", "rollout-2026-09-10T08-00-00-01a088eb-04da-7fb0-a8e6-f6700080b679.jsonl")

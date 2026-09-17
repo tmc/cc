@@ -211,7 +211,7 @@ func run() error {
 	if *pathsFlag && !*launchFlag {
 		sortIndexMatches(query, matches, curGitCommonDir)
 		for _, m := range matches {
-			fmt.Println(m.FullPath)
+			fmt.Println(rawSessionPath(m.FullPath))
 			if *infoFlag || *runningFlag {
 				// Paths stay bare on stdout; the annotation goes to stderr.
 				r := resolveMatch(query, m)
@@ -299,6 +299,24 @@ func run() error {
 		fmt.Println(attachAnnotation(line, anns[i], on))
 	}
 	return nil
+}
+
+// rawSessionPath returns the file that contains the complete transcript for a
+// session. Antigravity stores sessions as directories and keeps a compact
+// transcript beside the full-fidelity copy; callers of -paths need the latter.
+func rawSessionPath(path string) string {
+	if !isAntigravityResumePath(path) {
+		return path
+	}
+	full := filepath.Join(path, ".system_generated", "logs", "transcript_full.jsonl")
+	if _, err := os.Stat(full); err == nil {
+		return full
+	}
+	compact := filepath.Join(path, ".system_generated", "logs", "transcript.jsonl")
+	if _, err := os.Stat(compact); err == nil {
+		return compact
+	}
+	return path
 }
 
 func cleanDirectory(dir string) (string, error) {
