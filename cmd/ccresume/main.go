@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -22,6 +23,7 @@ import (
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass/it2bind"
 	"github.com/tmc/cc/ccgit"
+	"github.com/tmc/cc/cchooks"
 	"github.com/tmc/cc/ccpaths"
 )
 
@@ -1130,15 +1132,30 @@ func resolveIt2SID(query string) string {
 	}
 	root, ok := it2bind.DefaultRoot()
 	if !ok {
+		fmt.Fprintln(os.Stderr, "ccresume: cannot locate it2 event store; searching transcript content")
+		return query
+	}
+	return resolveIt2SIDInStore(query, root, os.Stderr)
+}
+
+func resolveIt2SIDInStore(query, root string, diagnostics io.Writer) string {
+	if !it2SIDPattern.MatchString(query) {
 		return query
 	}
 	intervals, err := it2bind.Load(root)
+	if err == nil {
+		if sessions := it2bind.SessionsForSID(intervals, query); len(sessions) > 0 {
+			return sessions[0]
+		}
+	}
+	_, verdicts := cchooks.ReadStore(root)
+	for _, d := range verdicts {
+		fmt.Fprintf(diagnostics, "ccresume: %s: %s\n", d.Code, d.Message)
+	}
 	if err != nil {
-		return query
+		fmt.Fprintf(diagnostics, "ccresume: read it2 bindings: %v\n", err)
 	}
-	if sessions := it2bind.SessionsForSID(intervals, query); len(sessions) > 0 {
-		return sessions[0]
-	}
+	fmt.Fprintf(diagnostics, "ccresume: no binding for it2 pane %s; searching transcript content\n", query)
 	return query
 }
 

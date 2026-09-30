@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1170,5 +1171,50 @@ func TestSearchRunWidensPastSinceWindow(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].FullPath != path {
 		t.Fatalf("run(allHistory) = %#v, want single match for %s", got, path)
+	}
+}
+
+func TestResolveIt2SIDStoreVerdict(t *testing.T) {
+	const pane = "AAAAAAAA-1111-2222-3333-444444444444"
+	for _, tt := range []struct {
+		name, events, query, code, want string
+		directory, file                 bool
+	}{
+		{name: "absent", query: pane, code: "store-absent", want: pane},
+		{name: "unwritten", query: pane, code: "store-unwritten", want: pane, directory: true},
+		{name: "empty", query: pane, code: "store-empty", want: pane, directory: true, file: true},
+		{name: "unbound", query: pane, code: "store-unbound", want: pane, directory: true, file: true, events: `{"session_id":"s"}`},
+		{name: "bound", query: pane, want: "s", directory: true, file: true, events: `{"session_id":"s","hook_event_name":"SessionStart","_it2":{"it2_sid":"` + pane + `","boot_id":"b","ts":"2026-09-29T12:00:00Z"}}`},
+		{name: "unknown pane", query: "BBBBBBBB-1111-2222-3333-444444444444", want: "BBBBBBBB-1111-2222-3333-444444444444", directory: true, file: true, events: `{"session_id":"s","hook_event_name":"SessionStart","_it2":{"it2_sid":"` + pane + `","boot_id":"b","ts":"2026-09-29T12:00:00Z"}}`},
+		{name: "text", query: "hello", want: "hello"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "sessions")
+			dir := filepath.Join(root, pane, "artifacts")
+			if tt.directory {
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.file {
+				if err := os.WriteFile(filepath.Join(dir, "claude-code-events.ndjson"), []byte(tt.events), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var buf bytes.Buffer
+			if got := resolveIt2SIDInStore(tt.query, root, &buf); got != tt.want {
+				t.Fatalf("resolved = %q, want %q", got, tt.want)
+			}
+			if tt.code != "" && !strings.Contains(buf.String(), tt.code+":") {
+				t.Fatalf("diagnostic = %q, want %s", buf.String(), tt.code)
+			}
+			if tt.want == "s" || tt.query == "hello" {
+				if buf.Len() != 0 {
+					t.Fatalf("unexpected diagnostic: %s", &buf)
+				}
+			} else if !strings.Contains(buf.String(), "searching transcript content") {
+				t.Fatalf("missing fallback: %s", &buf)
+			}
+		})
 	}
 }
