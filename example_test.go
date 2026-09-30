@@ -44,3 +44,38 @@ func ExampleSummarize() {
 	fmt.Println(s.SessionID, s.UserMessages, s.AsstMessages, s.FirstPrompt)
 	// Output: s1 1 1 do the thing
 }
+
+func ExampleClassify() {
+	fmt.Println(cc.Classify(cc.Entry{Origin: "human"}))
+	fmt.Println(cc.Classify(cc.Entry{Origin: "auto-continuation"}))
+	// Output:
+	// human
+	// system
+}
+
+func ExampleClassificationRules() {
+	rules := append([]cc.ClassificationRule{func(e cc.Entry) string {
+		if e.Content == "consumer event" {
+			return "peer"
+		}
+		return ""
+	}}, cc.ClassificationRules()...)
+	for _, rule := range rules {
+		if kind := rule(cc.Entry{Content: "consumer event"}); kind != "" {
+			fmt.Println(kind)
+			break
+		}
+	}
+	// Output: peer
+}
+
+func ExampleClassificationRule() {
+	var rule cc.ClassificationRule = func(e cc.Entry) string {
+		if e.Content == "consumer event" {
+			return "peer"
+		}
+		return ""
+	}
+	fmt.Println(rule(cc.Entry{Content: "consumer event"}))
+	// Output: peer
+}
