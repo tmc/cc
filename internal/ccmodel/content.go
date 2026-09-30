@@ -169,3 +169,19 @@ func collectText(parts *[]string, v any) {
 		}
 	}
 }
+
+// BashWorkdir returns the explicit working directory of a Bash tool call.
+// It returns "" when absent, malformed, or not a Bash tool_use block. A
+// missing workdir must be resolved from session context by the caller.
+func (b ContentBlock) BashWorkdir() string {
+	if b.Type != "tool_use" || !strings.EqualFold(b.Name, "Bash") {
+		return ""
+	}
+	var input struct {
+		Workdir string `json:"workdir"`
+	}
+	if json.Unmarshal(b.Input, &input) != nil {
+		return ""
+	}
+	return input.Workdir
+}

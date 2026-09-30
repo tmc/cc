@@ -504,7 +504,11 @@ func normalizeCodexToolInput(name string, raw json.RawMessage) json.RawMessage {
 				command = strings.TrimSpace(v)
 			}
 		}
-		b, _ := json.Marshal(map[string]string{"command": command})
+		input := map[string]string{"command": command}
+		if workdir, ok := args["workdir"].(string); ok {
+			input["workdir"] = workdir
+		}
+		b, _ := json.Marshal(input)
 		return b
 
 	case "shell":
@@ -514,7 +518,11 @@ func normalizeCodexToolInput(name string, raw json.RawMessage) json.RawMessage {
 				command = strings.TrimSpace(v)
 			}
 		}
-		b, _ := json.Marshal(map[string]string{"command": command})
+		input := map[string]string{"command": command}
+		if workdir, ok := args["workdir"].(string); ok {
+			input["workdir"] = workdir
+		}
+		b, _ := json.Marshal(input)
 		return b
 	}
 

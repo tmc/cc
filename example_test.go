@@ -117,3 +117,18 @@ func ExampleSubagents() {
 	}
 	// Output: reviewer tool1
 }
+
+func ExampleContentBlock_BashWorkdir() {
+	block := cc.ContentBlock{Type: "tool_use", Name: "Bash", Input: []byte(`{"command":"pwd","workdir":"/repo"}`)}
+	fmt.Println(block.BashWorkdir())
+	// Output: /repo
+}
+
+func ExampleApplyPatchPaths() {
+	for _, path := range cc.ApplyPatchPaths("*** Update File: old.go\n*** Move to: new.go") {
+		fmt.Println(path)
+	}
+	// Output:
+	// old.go
+	// new.go
+}

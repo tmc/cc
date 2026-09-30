@@ -63,7 +63,7 @@ func writtenPathsForTool(tu cc.ContentBlock) []string {
 	// its own tool or embedded in a shell heredoc; handle both by scanning any
 	// input and the Bash command for the patch markers.
 	if tu.Name == "apply_patch" {
-		return applyPatchPaths(patchText(tu.Input))
+		return cc.ApplyPatchPaths(patchText(tu.Input))
 	}
 	if writeToolNames[tu.Name] {
 		if p := firstInputPath(tu.Input); p != "" {
@@ -77,12 +77,12 @@ func writtenPathsForTool(tu cc.ContentBlock) []string {
 	// whole text for both shell writes and patch markers.
 	if strings.EqualFold(tu.Name, "exec") || strings.EqualFold(tu.Name, "exec_command") {
 		text := strings.ReplaceAll(patchText(tu.Input), `\n`, "\n")
-		return append(bashWrittenFiles(text), applyPatchPaths(text)...)
+		return append(bashWrittenFiles(text), cc.ApplyPatchPaths(text)...)
 	}
 	if cmd := tu.BashCommand(); cmd != "" {
 		paths := bashWrittenFiles(cmd)
 		// A shell heredoc apply_patch writes files too; catch its markers.
-		paths = append(paths, applyPatchPaths(cmd)...)
+		paths = append(paths, cc.ApplyPatchPaths(cmd)...)
 		return paths
 	}
 	return nil
@@ -128,27 +128,6 @@ func patchText(input json.RawMessage) string {
 		return s
 	}
 	return string(input)
-}
-
-// applyPatchMarker matches the file headers in an apply_patch body:
-//
-//	*** Add File: path
-//	*** Update File: path
-//	*** Delete File: path
-var applyPatchMarker = regexp.MustCompile(`\*\*\* (?:Add|Update|Delete) File: (.+)`)
-
-// applyPatchPaths returns the files named by apply_patch markers in text.
-func applyPatchPaths(text string) []string {
-	if !strings.Contains(text, "*** ") {
-		return nil
-	}
-	var paths []string
-	for _, m := range applyPatchMarker.FindAllStringSubmatch(text, -1) {
-		if p := strings.TrimSpace(m[1]); p != "" {
-			paths = append(paths, p)
-		}
-	}
-	return paths
 }
 
 // Bash write patterns, mirroring cmd/ccfiles: the destinations a shell command

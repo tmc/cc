@@ -62,12 +62,12 @@ func TestApplyPatchPaths(t *testing.T) {
 		"*** Update File: pkg/edit.go\n" +
 		"*** Delete File: old.go\n" +
 		"*** End Patch"
-	got := applyPatchPaths(patch)
+	got := cc.ApplyPatchPaths(patch)
 	want := []string{"new.go", "pkg/edit.go", "old.go"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("applyPatchPaths = %v, want %v", got, want)
 	}
-	if applyPatchPaths("no markers here") != nil {
+	if cc.ApplyPatchPaths("no markers here") != nil {
 		t.Error("applyPatchPaths matched text with no markers")
 	}
 }
