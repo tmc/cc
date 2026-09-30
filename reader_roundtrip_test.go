@@ -53,3 +53,37 @@ func TestSampleSessionsRoundTripNormalizedJSONL(t *testing.T) {
 		})
 	}
 }
+
+func TestEntryLinkFieldsRoundTrip(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		input string
+	}{
+		{"origin", `{"type":"user","origin":"human"}`},
+		{"bridge", `{"type":"bridge-session","bridgeSessionId":"cse_123"}`},
+		{"pull request", `{"type":"pr-link","prNumber":42,"prUrl":"https://example.com/pr/42","prRepository":"tmc/cc"}`},
+		{"frame", `{"type":"frame-link","frameUrl":"https://example.com/frame","path":"/work","title":"session"}`},
+		{"timestamp", `{"type":"user","timestamp":"2026-09-29T12:00:00Z"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var entry Entry
+			if err := json.Unmarshal([]byte(tt.input), &entry); err != nil {
+				t.Fatal(err)
+			}
+			data, err := json.Marshal(entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got, want map[string]any
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(tt.input), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("round trip = %s, want %s", data, tt.input)
+			}
+		})
+	}
+}

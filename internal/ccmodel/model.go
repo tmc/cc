@@ -26,10 +26,20 @@ type Entry struct {
 	Type       string    `json:"type"`
 	SessionID  string    `json:"sessionId,omitempty"`
 	UUID       string    `json:"uuid,omitempty"`
-	Timestamp  time.Time `json:"timestamp,omitempty"`
+	Timestamp  time.Time `json:"timestamp,omitzero"`
+	Origin     string    `json:"origin,omitempty"`
 	Originator string    `json:"originator,omitempty"`
 	Source     string    `json:"source,omitempty"`
 	Phase      string    `json:"phase,omitempty"`
+
+	// Session links emitted by Claude Code.
+	BridgeSessionID string `json:"bridgeSessionId,omitempty"`
+	PRNumber        int    `json:"prNumber,omitempty"`
+	PRURL           string `json:"prUrl,omitempty"`
+	PRRepository    string `json:"prRepository,omitempty"`
+	FrameURL        string `json:"frameUrl,omitempty"`
+	Path            string `json:"path,omitempty"`
+	Title           string `json:"title,omitempty"`
 
 	// User/assistant message fields.
 	ParentUUID  string   `json:"parentUuid,omitempty"`
