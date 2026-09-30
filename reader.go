@@ -155,11 +155,11 @@ func (r *Reader) Next() bool {
 				return false
 			}
 		}
-		line := r.scanner.Text()
-		if line == "" {
+		line := r.scanner.Bytes()
+		if len(line) == 0 {
 			continue
 		}
-		entry, ok := decodeEntryLine([]byte(line))
+		entry, ok := decodeEntryLine(line)
 		if !ok {
 			continue
 		}
@@ -207,15 +207,20 @@ func (r *Reader) Next() bool {
 // every reader — streaming, whole-file, and tailing — from silently rendering a
 // two-kilobyte preview as if it were the whole result.
 func decodeEntryLine(line []byte) (Entry, bool) {
-	if entry, isCodex, ok := codexread.Decode(line); isCodex {
-		return entry, ok
+	// Decode the outer object once, preserving native fields and the Codex
+	// payload. Rollouts may interleave both formats, so dispatch per line.
+	var decoded struct {
+		Entry
+		Payload json.RawMessage `json:"payload"`
 	}
-	var entry Entry
-	if err := json.Unmarshal(line, &entry); err != nil {
+	if err := json.Unmarshal(line, &decoded); err != nil {
 		return Entry{}, false
 	}
-	resolvePersistedOutput(&entry)
-	return entry, true
+	if entry, isCodex, ok := codexread.DecodePayload(decoded.Type, decoded.Timestamp, decoded.Payload); isCodex {
+		return entry, ok
+	}
+	resolvePersistedOutput(&decoded.Entry)
+	return decoded.Entry, true
 }
 
 // Entry returns the current entry.

@@ -26,6 +26,13 @@ func Decode(line []byte) (entry ccmodel.Entry, isCodex, ok bool) {
 	if err := json.Unmarshal(line, &env); err != nil {
 		return ccmodel.Entry{}, false, false
 	}
+	return DecodePayload(env.Type, env.Timestamp, env.Payload)
+}
+
+// DecodePayload converts an already decoded envelope. A recognized type must
+// carry a payload; otherwise it is a normalized entry for the caller to keep.
+func DecodePayload(kind string, timestamp time.Time, payload json.RawMessage) (entry ccmodel.Entry, isCodex, ok bool) {
+	env := codexEnvelope{Type: kind, Timestamp: timestamp, Payload: payload}
 	if !isCodexEnvelopeType(env.Type) {
 		return ccmodel.Entry{}, false, false
 	}
