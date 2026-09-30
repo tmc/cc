@@ -2,8 +2,10 @@ package cc
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -178,5 +180,72 @@ func writeTestFile(t *testing.T, path, data string) {
 	}
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOpenCodeOffsetReads(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "storage", "session", "proj", "ses_tail.json")
+	writeTestFile(t, path, `{"id":"ses_tail","directory":"/work","title":"tail"}`)
+	message := filepath.Join(root, "storage", "message", "ses_tail", "msg_1.json")
+	writeTestFile(t, message, `{"id":"msg_1","sessionID":"ses_tail","role":"user"}`)
+	writeTestFile(t, filepath.Join(root, "storage", "part", "msg_1", "prt_1.json"), `{"id":"prt_1","type":"text","text":"first"}`)
+	want, err := ReadFile(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name        string
+		offset      int64
+		withOffset  bool
+		wantInvalid bool
+	}{
+		{"from start", 0, false, false},
+		{"with offset", 0, true, false},
+		{"end", info.Size(), false, true},
+		{"middle", 1, false, true},
+		{"past end", info.Size() + 1, false, true},
+		{"negative", -1, false, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []Entry
+			var offset int64
+			var partial *Entry
+			var err error
+			if tt.withOffset {
+				got, offset, partial, err = ReadFileWithOffset(context.Background(), path)
+			} else {
+				got, offset, partial, err = ReadFileFrom(context.Background(), path, tt.offset)
+			}
+			if tt.wantInvalid {
+				if !errors.Is(err, ErrTailInvalid) {
+					t.Fatalf("error = %v, want ErrTailInvalid", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) || offset != info.Size() || partial != nil {
+				t.Fatalf("read = %#v, %d, %v; want full session at %d", got, offset, partial, info.Size())
+			}
+		})
+	}
+	// A message changes without changing the metadata file. A byte-offset
+	// cache must be invalidated so the replacement snapshot includes it.
+	writeTestFile(t, filepath.Join(root, "storage", "part", "msg_1", "prt_1.json"), `{"id":"prt_1","type":"text","text":"updated"}`)
+	if _, _, _, err := ReadFileFrom(context.Background(), path, info.Size()); !errors.Is(err, ErrTailInvalid) {
+		t.Fatalf("changed part: %v", err)
+	}
+	got, _, _, err := ReadFileFrom(context.Background(), path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reflect.DeepEqual(got, want) {
+		t.Fatal("snapshot did not include changed part")
 	}
 }

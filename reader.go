@@ -279,10 +279,29 @@ var ErrTailInvalid = errors.New("tail offset invalid; reparse from start")
 // unattributed entry. Its tokens are counted either way; only their attribution
 // waits for a read that sees the whole session. ReadFileFrom returns
 // [ErrTailInvalid] when offset is past the file size or not on a line boundary;
-// the caller should reparse the whole file in that case.
+// the caller should reparse the whole file in that case. Opencode sessions
+// store messages in separate files: offset zero reads a full snapshot, and
+// every nonzero offset returns ErrTailInvalid because byte offsets cannot
+// track changes to those files.
 func ReadFileFrom(ctx context.Context, path string, offset int64) (entries []Entry, newOffset int64, partial *Entry, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, nil, err
+	}
+	if opencoderead.IsSessionPath(path) {
+		// Messages and parts live in separate files; the metadata file's
+		// byte offset cannot identify changes to the session.
+		if offset != 0 {
+			return nil, 0, nil, ErrTailInvalid
+		}
+		entries, err := opencoderead.ReadFile(ctx, path)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		return entries, info.Size(), nil, nil
 	}
 	if piread.IsSessionPath(path) {
 		entries, newOffset, err := piread.ReadFileFrom(ctx, path, offset)
@@ -346,6 +365,9 @@ func ReadFileFrom(ctx context.Context, path string, offset int64) (entries []Ent
 func ReadFileWithOffset(ctx context.Context, path string) (entries []Entry, offset int64, partial *Entry, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, nil, err
+	}
+	if opencoderead.IsSessionPath(path) {
+		return ReadFileFrom(ctx, path, 0)
 	}
 	if piread.IsSessionPath(path) {
 		entries, err := piread.ReadFile(ctx, path)
