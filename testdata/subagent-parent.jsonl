@@ -1,0 +1,2 @@
+{"type":"user","sessionId":"parent","message":{"role":"user","content":"review the code"}}
+{"type":"queue-operation","content":"<task-notification><task-id>reviewer</task-id><tool-use-id>tool1</tool-use-id><status>completed</status></task-notification>"}

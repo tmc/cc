@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -530,7 +531,7 @@ func ReadFileWithSubagents(ctx context.Context, path string) ([]Entry, error) {
 	}
 	subs, err := ReadSubagents(ctx, path)
 	if err != nil {
-		return entries, nil
+		return entries, err
 	}
 	entries = append(entries, subs...)
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -544,6 +545,9 @@ func ReadFileWithSubagents(ctx context.Context, path string) ([]Entry, error) {
 // AgentID derived from the filename and IsSidechain=true. Returns a nil slice
 // and nil error if the subagents directory does not exist.
 func ReadSubagents(ctx context.Context, path string) ([]Entry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	subagentDir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
 	infos, err := os.ReadDir(subagentDir)
 	if err != nil {
@@ -555,7 +559,7 @@ func ReadSubagents(ctx context.Context, path string) ([]Entry, error) {
 	var entries []Entry
 	for _, fi := range infos {
 		name := fi.Name()
-		if !strings.HasSuffix(name, ".jsonl") {
+		if fi.IsDir() || !strings.HasPrefix(name, "agent-") || !strings.HasSuffix(name, ".jsonl") {
 			continue
 		}
 		if strings.HasPrefix(name, "agent-acompact") {
@@ -563,7 +567,7 @@ func ReadSubagents(ctx context.Context, path string) ([]Entry, error) {
 		}
 		sub, err := ReadFile(ctx, filepath.Join(subagentDir, name))
 		if err != nil {
-			continue
+			return entries, fmt.Errorf("read subagent %q: %w", name, err)
 		}
 		agentID := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
 		for i := range sub {

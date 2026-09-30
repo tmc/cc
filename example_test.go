@@ -99,3 +99,21 @@ func ExampleRateLimit() {
 	fmt.Println(limit.UsedPercent, limit.WindowMinutes)
 	// Output: 25 300
 }
+
+func ExampleSubagent() {
+	child := cc.Subagent{ParentSessionID: "parent", AgentID: "child", ToolUseID: "tool1"}
+	fmt.Println(child.ParentSessionID, child.AgentID, child.ToolUseID)
+	// Output: parent child tool1
+}
+
+func ExampleSubagents() {
+	children, err := cc.Subagents(context.Background(), "testdata/subagent-parent.jsonl")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	for _, child := range children {
+		fmt.Println(child.AgentID, child.ToolUseID)
+	}
+	// Output: reviewer tool1
+}
