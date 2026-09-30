@@ -8,6 +8,8 @@ import "github.com/tmc/cc/internal/ccmodel"
 // cc.Message, and so on for all callers.
 type (
 	Entry               = ccmodel.Entry
+	RateLimits          = ccmodel.RateLimits
+	RateLimit           = ccmodel.RateLimit
 	Attachment          = ccmodel.Attachment
 	Message             = ccmodel.Message
 	ContentBlock        = ccmodel.ContentBlock

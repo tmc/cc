@@ -59,6 +59,7 @@ func TestEntryLinkFieldsRoundTrip(t *testing.T) {
 		name  string
 		input string
 	}{
+		{"rate limits", `{"type":"system","rateLimits":{"primary":{"used_percent":0,"window_minutes":300,"resets_at":1790000000}}}`},
 		{"origin", `{"type":"user","origin":"human"}`},
 		{"bridge", `{"type":"bridge-session","bridgeSessionId":"cse_123"}`},
 		{"pull request", `{"type":"pr-link","prNumber":42,"prUrl":"https://example.com/pr/42","prRepository":"tmc/cc"}`},

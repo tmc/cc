@@ -58,6 +58,7 @@ type Entry struct {
 	Todos                   json.RawMessage `json:"todos,omitempty"`
 	RequestID               string          `json:"requestId,omitempty"`
 	SourceToolAssistantUUID string          `json:"sourceToolAssistantUUID,omitempty"`
+	RateLimits              *RateLimits     `json:"rateLimits,omitempty"`
 	Usage                   *Usage          `json:"usage,omitempty"`
 
 	// TurnModel is the model a harness announces for a whole turn rather than
@@ -424,4 +425,17 @@ type TaskSummary struct {
 	Subject   string   `json:"subject,omitempty"`
 	Status    string   `json:"status,omitempty"`
 	BlockedBy []string `json:"blockedBy,omitempty"`
+}
+
+// RateLimits is a Codex rate-limit sample. Either window may be absent.
+type RateLimits struct {
+	Primary   *RateLimit `json:"primary,omitempty"`
+	Secondary *RateLimit `json:"secondary,omitempty"`
+}
+
+// RateLimit describes one provider window. ResetsAt is Unix seconds.
+type RateLimit struct {
+	UsedPercent   float64 `json:"used_percent"`
+	WindowMinutes int     `json:"window_minutes"`
+	ResetsAt      int64   `json:"resets_at"`
 }

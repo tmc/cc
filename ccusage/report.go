@@ -75,6 +75,7 @@ type Group struct {
 
 // SessionSpan is one session's extent within a window.
 type SessionSpan struct {
+	Tokens
 	SessionID   string
 	First, Last time.Time
 	Requests    int
@@ -665,6 +666,7 @@ func Aggregate(recs []Record) (hours []Hour, groups []Group, spans []SessionSpan
 			bySession[r.SessionID] = sp
 		}
 		sp.Requests++
+		sp.Add(t)
 		if r.Time.Before(sp.First) {
 			sp.First = r.Time
 		}
@@ -686,4 +688,23 @@ func Aggregate(recs []Record) (hours []Hour, groups []Group, spans []SessionSpan
 	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i].First.Before(spans[j].First) })
 	return hours, groups, spans
+}
+
+// Rolling returns usage grouped by conversation over [end-duration, end).
+// The records must already be normalized, for example by [FromEntries].
+// A nonpositive duration returns no spans. Future and undated records are
+// excluded. It does not infer a provider's budget or calibration constants.
+func Rolling(recs []Record, end time.Time, duration time.Duration) []SessionSpan {
+	if duration <= 0 {
+		return nil
+	}
+	start := end.Add(-duration)
+	var selected []Record
+	for _, r := range recs {
+		if !r.Time.IsZero() && !r.Time.Before(start) && r.Time.Before(end) {
+			selected = append(selected, r)
+		}
+	}
+	_, _, spans := Aggregate(selected)
+	return spans
 }

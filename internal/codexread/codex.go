@@ -374,8 +374,9 @@ func decodeCodexWebSearch(env codexEnvelope) (ccmodel.Entry, bool) {
 
 func decodeCodexEventMsg(env codexEnvelope) (ccmodel.Entry, bool) {
 	var payload struct {
-		Type string `json:"type"`
-		Info struct {
+		Type       string              `json:"type"`
+		RateLimits *ccmodel.RateLimits `json:"rate_limits"`
+		Info       struct {
 			LastTokenUsage  codexTokenUsage `json:"last_token_usage"`
 			TotalTokenUsage codexTokenUsage `json:"total_token_usage"`
 		} `json:"info"`
@@ -388,13 +389,17 @@ func decodeCodexEventMsg(env codexEnvelope) (ccmodel.Entry, bool) {
 	}
 	u := payload.Info.LastTokenUsage.usage()
 	if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadInputTokens == 0 {
-		return ccmodel.Entry{}, false
+		u = nil
+		if payload.RateLimits == nil {
+			return ccmodel.Entry{}, false
+		}
 	}
 	entry := ccmodel.Entry{
-		Type:      "system",
-		Subtype:   "token_count",
-		Timestamp: env.Timestamp,
-		Usage:     u,
+		Type:       "system",
+		Subtype:    "token_count",
+		Timestamp:  env.Timestamp,
+		Usage:      u,
+		RateLimits: payload.RateLimits,
 	}
 	if total := payload.Info.TotalTokenUsage; total.TotalTokens != 0 {
 		entry.UsageTotal = total.usage()

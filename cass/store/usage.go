@@ -209,9 +209,10 @@ type GroupRow struct {
 // SessionSpanRow is one session's extent within a filter, for the session
 // count and the longest-session figure reports print.
 type SessionSpanRow struct {
-	SessionID   string    `json:"session_id"`
-	First, Last time.Time `json:"-"`
-	Requests    int       `json:"requests"`
+	SessionID                             string    `json:"session_id"`
+	First, Last                           time.Time `json:"-"`
+	Requests                              int       `json:"requests"`
+	Input, CacheRead, CacheCreate, Output int
 }
 
 // Duration returns how long the session's requests spanned.
@@ -365,7 +366,9 @@ func (s *DB) UsageSessions(ctx context.Context, f UsageFilter) ([]SessionSpanRow
 	// orders of magnitude smaller than the window's requests.
 	where, args := f.hourWhere()
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT session_id, min(first_ts), max(last_ts), sum(requests)
+		SELECT session_id, min(first_ts), max(last_ts), sum(requests),
+coalesce(sum(input_tokens), 0), coalesce(sum(cache_read_tokens), 0),
+coalesce(sum(cache_creation_tokens), 0), coalesce(sum(output_tokens), 0)
 		FROM usage_session_hourly WHERE `+where+`
 		GROUP BY session_id ORDER BY 2`, args...)
 	if err != nil {
@@ -375,13 +378,13 @@ func (s *DB) UsageSessions(ctx context.Context, f UsageFilter) ([]SessionSpanRow
 	return scanSessionSpans(rows)
 }
 
-// scanSessionSpans reads session id, first, last, requests rows.
+// scanSessionSpans reads session extents, requests, and token totals.
 func scanSessionSpans(rows *sql.Rows) ([]SessionSpanRow, error) {
 	var result []SessionSpanRow
 	for rows.Next() {
 		var r SessionSpanRow
 		var first, last int64
-		if err := rows.Scan(&r.SessionID, &first, &last, &r.Requests); err != nil {
+		if err := rows.Scan(&r.SessionID, &first, &last, &r.Requests, &r.Input, &r.CacheRead, &r.CacheCreate, &r.Output); err != nil {
 			return nil, fmt.Errorf("scan usage session: %w", err)
 		}
 		r.First, r.Last = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
@@ -395,7 +398,9 @@ func scanSessionSpans(rows *sql.Rows) ([]SessionSpanRow, error) {
 func (s *DB) usageSessionsFromEvents(ctx context.Context, f UsageFilter) ([]SessionSpanRow, error) {
 	where, args := f.where()
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT session_id, min(ts), max(ts), count(*)
+		SELECT session_id, min(ts), max(ts), count(*),
+coalesce(sum(input_tokens), 0), coalesce(sum(cache_read_tokens), 0),
+coalesce(sum(cache_creation_tokens), 0), coalesce(sum(output_tokens), 0)
 		FROM usage_events WHERE `+where+`
 		GROUP BY session_id ORDER BY 2`, args...)
 	if err != nil {

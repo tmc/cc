@@ -47,7 +47,7 @@ func groupRows(rows []store.GroupRow) []ccusage.Group {
 func spanRows(rows []store.SessionSpanRow) []ccusage.SessionSpan {
 	out := make([]ccusage.SessionSpan, len(rows))
 	for i, r := range rows {
-		out[i] = ccusage.SessionSpan{SessionID: r.SessionID, First: r.First, Last: r.Last, Requests: r.Requests}
+		out[i] = ccusage.SessionSpan{SessionID: r.SessionID, First: r.First, Last: r.Last, Requests: r.Requests, Tokens: ccusage.Tokens{Input: r.Input, CacheRead: r.CacheRead, CacheCreate: r.CacheCreate, Output: r.Output}}
 	}
 	return out
 }

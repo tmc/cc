@@ -170,7 +170,10 @@ func (r *Reader) Next() bool {
 		}
 		if entry.Type == "system" && entry.Subtype == "token_count" && entry.Usage != nil {
 			if r.usage.add(entry) {
-				continue
+				if entry.RateLimits == nil {
+					continue
+				}
+				entry.Usage, entry.UsageTotal = nil, nil
 			}
 			// Unattributed: fall through so the tokens stay in the stream.
 		}
@@ -445,7 +448,10 @@ func readComplete(ctx context.Context, r io.Reader) (entries []Entry, consumed i
 				}
 				if entry.Type == "system" && entry.Subtype == "token_count" && entry.Usage != nil {
 					if usage.add(entry) {
-						continue
+						if entry.RateLimits == nil {
+							continue
+						}
+						entry.Usage, entry.UsageTotal = nil, nil
 					}
 					// Unattributed: fall through so the tokens stay in the stream.
 				}

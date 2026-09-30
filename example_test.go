@@ -79,3 +79,23 @@ func ExampleClassificationRule() {
 	fmt.Println(rule(cc.Entry{Content: "consumer event"}))
 	// Output: peer
 }
+
+func ExampleNewestRateLimits() {
+	sample := cc.NewestRateLimits([]cc.Entry{{RateLimits: &cc.RateLimits{
+		Primary: &cc.RateLimit{UsedPercent: 25, WindowMinutes: 300},
+	}}})
+	fmt.Println(sample.Primary.UsedPercent)
+	// Output: 25
+}
+
+func ExampleRateLimits() {
+	limits := cc.RateLimits{Primary: &cc.RateLimit{UsedPercent: 25, WindowMinutes: 300}}
+	fmt.Println(limits.Primary.WindowMinutes)
+	// Output: 300
+}
+
+func ExampleRateLimit() {
+	limit := cc.RateLimit{UsedPercent: 25, WindowMinutes: 300, ResetsAt: 1790000000}
+	fmt.Println(limit.UsedPercent, limit.WindowMinutes)
+	// Output: 25 300
+}

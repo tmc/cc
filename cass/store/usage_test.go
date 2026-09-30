@@ -280,6 +280,27 @@ func TestUsageSessions(t *testing.T) {
 	if len(windowed) != 1 || windowed[0].Duration() != time.Hour {
 		t.Errorf("windowed = %+v, want one session spanning an hour", windowed)
 	}
+	for _, tt := range []struct {
+		name string
+		rows []SessionSpanRow
+		want []ccusage.Tokens
+	}{
+		{"all", rows, []ccusage.Tokens{{Input: 16, CacheRead: 302, CacheCreate: 23, Output: 84}, {Input: 7, Output: 11}, {Input: 100, Output: 1}}},
+		{"windowed", windowed, []ccusage.Tokens{{Input: 15, CacheRead: 300, CacheCreate: 20, Output: 80}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.rows) != len(tt.want) {
+				t.Fatalf("rows = %d, want %d", len(tt.rows), len(tt.want))
+			}
+			for i, r := range tt.rows {
+				got := ccusage.Tokens{Input: r.Input, CacheRead: r.CacheRead, CacheCreate: r.CacheCreate, Output: r.Output}
+				if got != tt.want[i] {
+					t.Errorf("tokens[%d] = %+v, want %+v", i, got, tt.want[i])
+				}
+			}
+		})
+	}
+
 }
 
 // TestUsageEventsFollowSessionDelete checks that usage rows go with their
