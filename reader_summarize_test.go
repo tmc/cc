@@ -1,7 +1,9 @@
 package cc
 
 import (
+	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,8 +37,8 @@ func TestSummarizeTracksLatestAndDistinctCWDs(t *testing.T) {
 			t.Errorf("DistinctCWDs[%d] = %q, want %q", i, sum.DistinctCWDs[i], v)
 		}
 	}
-	if sum.WorktreePath == "" {
-		t.Errorf("WorktreePath empty for resolvable CWD %q", wd)
+	if sum.GitContext != (ccgit.GitContext{}) {
+		t.Errorf("unexpected git context: %+v", sum.GitContext)
 	}
 }
 
@@ -77,5 +79,44 @@ func TestSummaryGitContextJSON(t *testing.T) {
 	}
 	if back.WorktreePath != "/work" || back.Branch != "main" {
 		t.Errorf("round-trip lost git context: %+v", back.GitContext)
+	}
+}
+
+func TestSummarizeDoesNotRunGit(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "called")
+	script := "#!/bin/sh\necho called > '" + marker + "'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	path := filepath.Join(dir, "session.jsonl")
+	entry := Entry{Type: "user", CWD: dir, GitBranch: "recorded", Message: &Message{Role: "user", Content: json.RawMessage(`"hello"`)}}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name      string
+		summarize func() (SessionSummary, error)
+	}{
+		{"entries", func() (SessionSummary, error) { return Summarize(path, []Entry{entry}), nil }},
+		{"file", func() (SessionSummary, error) { return SummarizeFile(context.Background(), path) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sum, err := tt.summarize()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sum.GitContext != (ccgit.GitContext{}) || sum.GitBranch != "recorded" || sum.FirstPrompt != "hello" {
+				t.Fatalf("summary = %+v", sum)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("git ran: stat marker: %v", err)
+			}
+		})
 	}
 }

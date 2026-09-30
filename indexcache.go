@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/tmc/cc/ccfs"
+	"github.com/tmc/cc/ccgit"
 )
 
 // Building an index entry for a harness without its own index file means
@@ -189,6 +190,8 @@ func sessionStamp(path string) string {
 func SummarizeFileCached(ctx context.Context, path string) (SessionSummary, error) {
 	stamp := sessionStamp(path)
 	if s, ok := sessionCache.getSummary(path, stamp); ok {
+		// Older cache records may contain implicitly resolved git metadata.
+		s.GitContext = ccgit.GitContext{}
 		return s, nil
 	}
 	s, err := SummarizeFile(ctx, path)

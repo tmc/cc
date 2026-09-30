@@ -447,6 +447,11 @@ func resolveMatch(query string, m cc.IndexEntry) resolvedMatch {
 	if err != nil {
 		return r
 	}
+	if summary.CWD != "" {
+		if git, err := ccgit.ResolveGitContext(summary.CWD); err == nil {
+			summary.GitContext = git
+		}
+	}
 	r.summary = summary
 	if n := countFileOccurrences(query, m.FullPath); n > r.occurrences {
 		r.occurrences = n

@@ -11,6 +11,7 @@ import (
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/ccgit"
 	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/ccusage"
 )
@@ -163,6 +164,11 @@ func (c *ClaudeCode) parseSession(ctx context.Context, config cass.ScanConfig, p
 	}
 
 	sum := cc.Summarize(path, entries)
+	if sum.CWD != "" {
+		if git, err := ccgit.ResolveGitContext(sum.CWD); err == nil {
+			sum.GitContext = git
+		}
+	}
 
 	// Build normalized messages.
 	var messages []cass.Message

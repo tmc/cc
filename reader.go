@@ -546,8 +546,8 @@ func ReadSubagents(ctx context.Context, path string) ([]Entry, error) {
 
 // SessionSummary holds summarized metadata for a session file.
 // GitBranch is the branch recorded in the session entries; the embedded
-// GitContext fields are resolved from the latest CWD on the local
-// filesystem and may differ if the worktree has since moved or changed.
+// GitContext fields are left empty by summarization. Callers can populate them
+// with ccgit.ResolveGitContext using the latest CWD.
 type SessionSummary struct {
 	SessionID    string   `json:"session_id"`
 	File         string   `json:"file"`
@@ -570,13 +570,15 @@ type SessionSummary struct {
 	CustomTitle  string    `json:"custom_title,omitempty"`
 }
 
-// Summarize builds a SessionSummary from entries.
+// Summarize builds a SessionSummary from entries without running git.
+// To include local git metadata, assign ccgit.ResolveGitContext(s.CWD)
+// to the returned summary's GitContext, handling the error as appropriate.
 func Summarize(file string, entries []Entry) SessionSummary {
 	sum := newSummarizer(file)
 	for _, e := range entries {
 		sum.add(e)
 	}
-	return sum.finish()
+	return sum.s
 }
 
 // SummarizeFile summarizes the session at path without holding the decoded
@@ -603,7 +605,7 @@ func SummarizeFile(ctx context.Context, path string) (SessionSummary, error) {
 	if err := r.Err(); err != nil {
 		return SessionSummary{}, err
 	}
-	return sum.finish(), nil
+	return sum.s, nil
 }
 
 // summarizer folds entries into a SessionSummary incrementally.
@@ -679,15 +681,6 @@ func (sum *summarizer) add(e Entry) {
 			}
 		}
 	}
-}
-
-func (sum *summarizer) finish() SessionSummary {
-	if sum.s.CWD != "" {
-		if ctx, err := ccgit.ResolveGitContext(sum.s.CWD); err == nil {
-			sum.s.GitContext = ctx
-		}
-	}
-	return sum.s
 }
 
 // ExtractText pulls the first text content from a message content field.
