@@ -264,7 +264,8 @@ func ReadFile(ctx context.Context, path string) ([]Entry, error) {
 	return ReadAll(ctx, f)
 }
 
-// ErrTailInvalid reports that an offset passed to [ReadFileFrom] cannot be
+// ErrTailInvalid also reports file invalidation from [Tail.Poll]. Reset that
+// Tail before polling again. For [ReadFileFrom], it reports an offset that cannot be
 // safely tailed — the file is shorter than the offset (truncation or rewrite),
 // or the offset does not sit just past a newline. Callers should fall back to a
 // full [ReadFileWithOffset].
