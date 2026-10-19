@@ -31,7 +31,7 @@ type Enrichment struct {
 }
 
 // Event is one binding record appended by the SessionStart hook. The raw hook
-// payload provides SessionID, Source, HookEvent, TranscriptPath, and Cwd at the
+// payload provides SessionID, Source, HookEvent, TranscriptPath, and CWD at the
 // top level; the writer adds the [Enrichment] under the _it2 key. Non-object
 // hook payloads are wrapped by the writer as {raw, _it2}; those lack a
 // SessionID and are dropped by [ReadEvents] since they cannot be grouped.
@@ -40,7 +40,7 @@ type Event struct {
 	Source         string     `json:"source"`          // "startup" or "resume"
 	HookEvent      string     `json:"hook_event_name"` // e.g. "SessionStart"
 	TranscriptPath string     `json:"transcript_path"`
-	Cwd            string     `json:"cwd"`
+	CWD            string     `json:"cwd"`
 	It2            Enrichment `json:"_it2"`
 }
 
@@ -63,7 +63,7 @@ type Interval struct {
 	SessionID string
 	It2SID    string   // canonical (bare UUID)
 	BootIDs   []string // every boot this binding was seen in, in first-seen order
-	Cwd       string
+	CWD       string
 	Start     string
 	End       string
 	Events    []Event
@@ -191,7 +191,7 @@ func Intervals(events []Event) []Interval {
 			Events:    evs,
 			Start:     evs[0].Ts(),
 			End:       evs[len(evs)-1].Ts(),
-			Cwd:       evs[0].Cwd,
+			CWD:       evs[0].CWD,
 		}
 		out = append(out, iv)
 	}
