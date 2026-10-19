@@ -1926,56 +1926,55 @@ func splitLines(out []byte) []string {
 }
 
 func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.IndexEntry, bool) {
+	if !isResumeSessionPath(path, root.kind) {
+		return cc.IndexEntry{}, false
+	}
+	if root.kind == "claude" || root.kind == "gemini" {
+		// Resumable transcripts live directly in a project directory. Nested
+		// files belong to subagents, workflows, or other supporting data.
+		rel, err := filepath.Rel(root.dir, path)
+		if err != nil || len(strings.Split(rel, string(filepath.Separator))) != 2 {
+			return cc.IndexEntry{}, false
+		}
+	}
 	sessionID := sessionIDFromPath(path, root.kind)
 	projectPath := filepath.Dir(path)
 	modified := info.ModTime()
 	switch root.kind {
 	case "codex":
-		if strings.HasPrefix(sessionID, "rollout-") && len(sessionID) >= len("rollout-2006-01-02T15-04-05-")+1 {
-			sessionID = strings.TrimPrefix(sessionID[len("rollout-2006-01-02T15-04-05-"):], "-")
-		}
 		// codex files rollouts by date, so the directory says nothing about
 		// the project; the session_meta header on the first line is the only
 		// record of where the session ran and whether it is a subagent.
-		if h, ok := codexSessionHeader(path); ok {
-			if h.subagent {
-				return cc.IndexEntry{}, false
-			}
-			if h.id != "" {
-				sessionID = h.id
-			}
-			if h.cwd != "" {
-				projectPath = h.cwd
-			}
+		h, ok := codexSessionHeader(path)
+		if !ok || h.id == "" || h.subagent {
+			return cc.IndexEntry{}, false
+		}
+		sessionID = h.id
+		if h.cwd != "" {
+			projectPath = h.cwd
 		}
 	case "opencode":
-		projectPath = filepath.Dir(path)
+		var v struct {
+			ID        string `json:"id"`
+			Directory string `json:"directory"`
+		}
 		data, err := os.ReadFile(path)
-		if err == nil {
-			var v struct {
-				ID        string `json:"id"`
-				Directory string `json:"directory"`
-			}
-			if json.Unmarshal(data, &v) == nil {
-				if v.ID != "" {
-					sessionID = v.ID
-				}
-				if v.Directory != "" {
-					projectPath = v.Directory
-				}
-			}
+		if err != nil || json.Unmarshal(data, &v) != nil || v.ID == "" {
+			return cc.IndexEntry{}, false
+		}
+		sessionID = v.ID
+		if v.Directory != "" {
+			projectPath = v.Directory
 		}
 	case "pi":
-		// pi encodes the cwd into the session dir name lossily; the session
-		// header's id and cwd are authoritative.
-		projectPath = filepath.Dir(path)
-		if id, cwd, ok := piSessionHeader(path); ok {
-			if id != "" {
-				sessionID = id
-			}
-			if cwd != "" {
-				projectPath = cwd
-			}
+		// A pi transcript starts with a session header, even when empty.
+		id, cwd, ok := piSessionHeader(path)
+		if !ok || id == "" {
+			return cc.IndexEntry{}, false
+		}
+		sessionID = id
+		if cwd != "" {
+			projectPath = cwd
 		}
 	case "antigravity":
 		// Antigravity sessions are directories under brain/<conversation-uuid>.
@@ -2024,14 +2023,21 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 }
 
 func isResumeSessionPath(path, kind string) bool {
-	if kind == "antigravity" {
-		// Any file matched under brain/ resolves to its conversation directory.
-		return antigravityConversationIDFromPath(path) != ""
+	base := filepath.Base(path)
+	switch kind {
+	case "claude", "gemini":
+		return strings.HasSuffix(base, ".jsonl") && base != "journal.jsonl"
+	case "codex", "pi":
+		return strings.HasSuffix(base, ".jsonl")
+	case "opencode":
+		return strings.HasPrefix(base, "ses_") && strings.HasSuffix(base, ".json")
+	case "antigravity":
+		return (base == "transcript.jsonl" || base == "transcript_full.jsonl") &&
+			filepath.Base(filepath.Dir(path)) == "logs" &&
+			filepath.Base(filepath.Dir(filepath.Dir(path))) == ".system_generated" &&
+			antigravityConversationIDFromPath(path) != ""
 	}
-	if strings.HasSuffix(path, ".jsonl") {
-		return true
-	}
-	return kind == "opencode" && strings.HasPrefix(filepath.Base(path), "ses_") && strings.HasSuffix(path, ".json")
+	return false
 }
 
 func sessionIDFromPath(path, kind string) string {
@@ -2190,7 +2196,7 @@ func decodePath(encoded string) string {
 // runs) are spawned by a parent session and cannot be resumed on their own, so
 // they are never offered as results.
 func validSessionID(id string) bool {
-	return !strings.HasPrefix(id, "agent-")
+	return id != "" && !strings.HasPrefix(id, "agent-")
 }
 
 func containsAny(query string, fields ...string) bool {

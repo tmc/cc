@@ -1065,6 +1065,40 @@ func TestMetadataMatchesFindsClaudeAndCodexSessions(t *testing.T) {
 	}
 }
 
+func TestSearchIgnoresClaudeWorkflowJournals(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+	root := t.TempDir()
+	project := filepath.Join(root, "-work-wt-ds4-min")
+	path := filepath.Join(project, "session.jsonl")
+	writeTextFile(t, path, `{"type":"user","text":"wt-ds4-min"}`)
+	writeTextFile(t, filepath.Join(project, "session", "subagents", "workflows", "wf_1", "journal.jsonl"), `{"type":"started","text":"wt-ds4-min"}`)
+	roots := []searchRoot{{dir: root, kind: "claude"}}
+	lists, err := recentCandidates(roots, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := metadataMatches("ds4", roots, lists)
+	content, err := contentMatches("ds4", roots, lists)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name string
+		got  []cc.IndexEntry
+	}{
+		{"metadata", meta},
+		{"content", content},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.got) != 1 || tt.got[0].FullPath != path {
+				t.Fatalf("matches = %#v, want only %s", tt.got, path)
+			}
+		})
+	}
+}
+
 func TestMergeEntriesKeepsIndexedFields(t *testing.T) {
 	indexed := []cc.IndexEntry{{SessionID: "a", FullPath: "/p/a.jsonl", Summary: "indexed"}}
 	scanned := []cc.IndexEntry{{SessionID: "a", FullPath: "/p/a.jsonl"}, {SessionID: "b", FullPath: "/p/b.jsonl"}}
