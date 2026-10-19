@@ -945,22 +945,17 @@ func captureStdout(t *testing.T, fn func() error) string {
 		t.Fatal(err)
 	}
 	os.Stdout = w
+	out := drainPipe(t, r)
 
 	runErr := fn()
 
 	w.Close()
 	os.Stdout = old
 
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
-	r.Close()
-
 	if runErr != nil {
 		t.Fatalf("operation failed: %v", runErr)
 	}
-	return buf.String()
+	return out()
 }
 
 func captureStderr(t *testing.T, fn func()) string {
@@ -972,18 +967,13 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatal(err)
 	}
 	os.Stderr = w
+	out := drainPipe(t, r)
 
 	fn()
 
 	w.Close()
 	os.Stderr = old
-
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatal(err)
-	}
-	r.Close()
-	return buf.String()
+	return out()
 }
 
 func captureRunOutput(t *testing.T, fn func() error) (string, string) {
@@ -1001,6 +991,8 @@ func captureRunOutput(t *testing.T, fn func() error) (string, string) {
 	}
 	os.Stdout = outW
 	os.Stderr = errW
+	stdout := drainPipe(t, outR)
+	stderr := drainPipe(t, errR)
 
 	runErr := fn()
 
@@ -1009,20 +1001,31 @@ func captureRunOutput(t *testing.T, fn func() error) (string, string) {
 	os.Stdout = oldStdout
 	os.Stderr = oldStderr
 
-	var outBuf, errBuf bytes.Buffer
-	if _, err := outBuf.ReadFrom(outR); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := errBuf.ReadFrom(errR); err != nil {
-		t.Fatal(err)
-	}
-	outR.Close()
-	errR.Close()
-
 	if runErr != nil {
 		t.Fatalf("operation failed: %v", runErr)
 	}
-	return outBuf.String(), errBuf.String()
+	return stdout(), stderr()
+}
+
+// drainPipe reads r in the background until EOF, so that writers never
+// block on a full pipe buffer, and returns a function that waits for the
+// read to finish and returns what was read. The caller closes the write end.
+func drainPipe(t *testing.T, r *os.File) func() string {
+	t.Helper()
+	var buf bytes.Buffer
+	errc := make(chan error, 1)
+	go func() {
+		_, err := buf.ReadFrom(r)
+		r.Close()
+		errc <- err
+	}()
+	return func() string {
+		t.Helper()
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+		return buf.String()
+	}
 }
 
 func captureCharacteristicsOutputs(t *testing.T, files []string) (string, string) {
