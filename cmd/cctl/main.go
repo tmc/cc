@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,7 +72,7 @@ func resolveSubcommand(name string) (subcommandSpec, bool) {
 
 func main() {
 	if len(os.Args) < 2 {
-		usage()
+		usage(os.Stdout)
 		os.Exit(2)
 	}
 
@@ -84,7 +85,7 @@ func main() {
 		return
 
 	case "version", "--version", "-v":
-		printVersion()
+		printVersion(os.Stdout)
 		return
 	}
 
@@ -138,7 +139,7 @@ func runSubcommand(binary string, args []string) int {
 
 func runHelp(args []string) int {
 	if len(args) == 0 {
-		usage()
+		usage(os.Stdout)
 		return 0
 	}
 	spec, ok := resolveSubcommand(args[0])
@@ -150,8 +151,8 @@ func runHelp(args []string) int {
 	return runSubcommand(spec.binary, append(spec.args, "--help"))
 }
 
-func usage() {
-	fmt.Print(`cctl - Claude Code Utilities
+func usage(w io.Writer) {
+	fmt.Fprint(w, `cctl - Claude Code Utilities
 
 Usage:
   cctl <command> [options] [args]
@@ -191,9 +192,9 @@ Run 'cctl help <command>' for more information on a specific command.
 `)
 }
 
-func printVersion() {
-	fmt.Printf("cctl version %s\n", version)
-	fmt.Println("\nSubcommands:")
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "cctl version %s\n", version)
+	fmt.Fprintln(w, "\nSubcommands:")
 	names := make([]string, 0, len(subcommands))
 	for name := range subcommands {
 		if len(name) == 1 {
@@ -205,9 +206,9 @@ func printVersion() {
 	for _, name := range names {
 		spec := subcommands[name]
 		if path, err := exec.LookPath(spec.binary); err == nil {
-			fmt.Printf("  %-10s %s\n", name, path)
+			fmt.Fprintf(w, "  %-10s %s\n", name, path)
 		} else {
-			fmt.Printf("  %-10s (not installed)\n", name)
+			fmt.Fprintf(w, "  %-10s (not installed)\n", name)
 		}
 	}
 }

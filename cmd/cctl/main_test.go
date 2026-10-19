@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -145,23 +144,10 @@ func TestPrintVersionListsSubcommandsSorted(t *testing.T) {
 	oldPath := os.Getenv("PATH")
 	t.Setenv("PATH", t.TempDir()+string(os.PathListSeparator)+oldPath)
 
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-	printVersion()
-	w.Close()
-	os.Stdout = oldStdout
-
-	gotBytes, err := io.ReadAll(r)
-	r.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	var buf strings.Builder
+	printVersion(&buf)
 	var got []string
-	for _, line := range strings.Split(string(gotBytes), "\n") {
+	for _, line := range strings.Split(buf.String(), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "cctl version") || line == "Subcommands:" {
 			continue
@@ -182,22 +168,10 @@ func TestPrintVersionListsSubcommandsSorted(t *testing.T) {
 }
 
 func TestUsageListsRequests(t *testing.T) {
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-	usage()
-	w.Close()
-	os.Stdout = oldStdout
-
-	got, err := io.ReadAll(r)
-	r.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(got), "requests     Show indexed API request breakdown") {
+	var buf strings.Builder
+	usage(&buf)
+	got := buf.String()
+	if !strings.Contains(got, "requests     Show indexed API request breakdown") {
 		t.Fatalf("usage output missing requests entry:\n%s", got)
 	}
 	for _, want := range []string{
@@ -205,7 +179,7 @@ func TestUsageListsRequests(t *testing.T) {
 		"skills       Look up which sessions used a skill",
 		"web          Show the cass web UI",
 	} {
-		if !strings.Contains(string(got), want) {
+		if !strings.Contains(got, want) {
 			t.Fatalf("usage output missing %q:\n%s", want, got)
 		}
 	}
