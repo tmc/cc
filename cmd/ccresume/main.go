@@ -458,6 +458,10 @@ func resolveMatch(query string, m cc.IndexEntry) resolvedMatch {
 	if n := countFileOccurrences(query, m.FullPath); n > r.occurrences {
 		r.occurrences = n
 	}
+	if target := matchingWorkspace(query, m.FullPath); target != "" {
+		r.target = preferredProjectPath(target)
+		return r
+	}
 	if canPreferProjectPath(query, m) && dirExists(r.target) {
 		r.target = preferredProjectPath(r.target)
 		return r
