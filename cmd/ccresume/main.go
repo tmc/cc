@@ -28,23 +28,24 @@ import (
 )
 
 var (
-	launchFlag   = flag.Bool("l", false, "Launch claude instead of printing command")
-	sinceFlag    = flag.String("since", "7d", "Search sessions modified within duration")
-	oneFlag      = flag.Bool("1", false, "Show only the most recent match")
-	clipFlag     = flag.Bool("clip", true, "Use clipboard as search query (pbpaste)")
-	pathsFlag    = flag.Bool("paths", false, "Print raw session file paths instead of resume commands")
-	hasFlag      = flag.String("has", "", "Only include sessions whose transcript contains this literal text")
-	cmdFlag      = flag.String("cmd", "", "Only include sessions with a tool command containing this literal text")
-	resultFlag   = flag.String("result", "", "Only include sessions with a tool result containing this literal text")
-	wroteFlag    = flag.String("wrote", "", "Only include sessions that wrote a file matching this path or glob")
-	dirFlag      = flag.String("dir", "", "Only include sessions recorded in this directory")
-	harnessFlag  = flag.String("harness", "", "Only include sessions from this harness")
-	sidSideFlag  = flag.String("sid-side", "src", "When a query is an it2 send-text line, resume the src or dst pane")
-	sortFlag     = flag.String("sort", "relevance", "Order matches by relevance or recency")
-	infoFlag     = flag.Bool("info", false, "Annotate each resume line with session name, size, an occurrence sparkline, and running state (implies -show-is-running)")
-	runningFlag  = flag.Bool("show-is-running", false, "Annotate each resume line whose session is already running as a process")
-	infoLineFlag = flag.Bool("info-line", false, "Print the -info annotation on its own line under each resume command (implies -info)")
-	noColorFlag  = flag.Bool("no-color", false, "Disable ANSI color in -info annotations")
+	launchFlag    = flag.Bool("l", false, "Launch claude instead of printing command")
+	sinceFlag     = flag.String("since", "7d", "Search sessions modified within duration")
+	oneFlag       = flag.Bool("1", false, "Show only the most recent match")
+	clipFlag      = flag.Bool("clip", true, "Use clipboard as search query (pbpaste)")
+	pathsFlag     = flag.Bool("paths", false, "Print raw session file paths instead of resume commands")
+	subagentsFlag = flag.Bool("subagents", false, "Include subagent sessions (Claude subagents resume their parent)")
+	hasFlag       = flag.String("has", "", "Only include sessions whose transcript contains this literal text")
+	cmdFlag       = flag.String("cmd", "", "Only include sessions with a tool command containing this literal text")
+	resultFlag    = flag.String("result", "", "Only include sessions with a tool result containing this literal text")
+	wroteFlag     = flag.String("wrote", "", "Only include sessions that wrote a file matching this path or glob")
+	dirFlag       = flag.String("dir", "", "Only include sessions recorded in this directory")
+	harnessFlag   = flag.String("harness", "", "Only include sessions from this harness")
+	sidSideFlag   = flag.String("sid-side", "src", "When a query is an it2 send-text line, resume the src or dst pane")
+	sortFlag      = flag.String("sort", "relevance", "Order matches by relevance or recency")
+	infoFlag      = flag.Bool("info", false, "Annotate each resume line with session name, size, an occurrence sparkline, and running state (implies -show-is-running)")
+	runningFlag   = flag.Bool("show-is-running", false, "Annotate each resume line whose session is already running as a process")
+	infoLineFlag  = flag.Bool("info-line", false, "Print the -info annotation on its own line under each resume command (implies -info)")
+	noColorFlag   = flag.Bool("no-color", false, "Disable ANSI color in -info annotations")
 )
 
 const (
@@ -292,6 +293,9 @@ func run() error {
 	on := useColor(os.Stdout)
 	anns := alignedAnnotations(query, resolved, runs, isIDResolution, on)
 	for i := range resolved {
+		if *subagentsFlag && isSubagentSession(resolved[i].entry) {
+			anns[i] = strings.TrimSpace(anns[i] + " subagent " + resolved[i].entry.SessionID)
+		}
 		line := lines[i]
 		if !*infoLineFlag && anns[i] != "" {
 			if pad := annotateCol - utf8.RuneCountInString(line); pad > 0 {
@@ -345,6 +349,9 @@ func cleanHarness(harness string) (string, error) {
 func filterMatches(matches []cc.IndexEntry, dir, harness string) []cc.IndexEntry {
 	out := matches[:0]
 	for _, m := range matches {
+		if !*subagentsFlag && isSubagentSession(m) {
+			continue
+		}
 		if harness != "" && cc.Harness(m.FullPath) != harness {
 			continue
 		}
@@ -1386,8 +1393,9 @@ func (s searchSpec) run(since time.Duration) ([]cc.IndexEntry, error) {
 	// same fields from the session files themselves; merge the two so an
 	// indexed match from one harness cannot hide a live session from another.
 	matches = mergeEntries(matches, res.meta)
-	if len(matches) == 0 {
-		matches = res.content
+	matches = filterMatches(matches, s.dir, s.harness)
+	if len(matches) == 0 || *subagentsFlag {
+		matches = mergeEntries(matches, res.content)
 	}
 	if s.has != "" {
 		matches, err = filterContentMatches(matches, s.has)
@@ -1937,7 +1945,9 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 		// Resumable transcripts live directly in a project directory. Nested
 		// files belong to subagents, workflows, or other supporting data.
 		rel, err := filepath.Rel(root.dir, path)
-		if err != nil || len(strings.Split(rel, string(filepath.Separator))) != 2 {
+		parts := strings.Split(rel, string(filepath.Separator))
+		child := root.kind == "claude" && len(parts) == 4 && parts[2] == "subagents" && strings.HasPrefix(filepath.Base(path), "agent-")
+		if err != nil || len(parts) != 2 && !(*subagentsFlag && child) {
 			return cc.IndexEntry{}, false
 		}
 	}
@@ -1950,7 +1960,7 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 		// the project; the session_meta header on the first line is the only
 		// record of where the session ran and whether it is a subagent.
 		h, ok := codexSessionHeader(path)
-		if !ok || h.id == "" || h.subagent {
+		if !ok || h.id == "" || h.subagent && !*subagentsFlag {
 			return cc.IndexEntry{}, false
 		}
 		sessionID = h.id
@@ -1961,9 +1971,13 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 		var v struct {
 			ID        string `json:"id"`
 			Directory string `json:"directory"`
+			ParentID  string `json:"parentID"`
 		}
 		data, err := os.ReadFile(path)
 		if err != nil || json.Unmarshal(data, &v) != nil || v.ID == "" {
+			return cc.IndexEntry{}, false
+		}
+		if v.ParentID != "" && !*subagentsFlag {
 			return cc.IndexEntry{}, false
 		}
 		sessionID = v.ID
@@ -2128,10 +2142,11 @@ func codexSessionHeader(path string) (codexHeader, bool) {
 		var h struct {
 			Type    string `json:"type"`
 			Payload struct {
-				SessionID    string `json:"session_id"`
-				ID           string `json:"id"`
-				CWD          string `json:"cwd"`
-				ThreadSource string `json:"thread_source"`
+				SessionID    string          `json:"session_id"`
+				ID           string          `json:"id"`
+				CWD          string          `json:"cwd"`
+				ThreadSource string          `json:"thread_source"`
+				Source       json.RawMessage `json:"source"`
 			} `json:"payload"`
 		}
 		if json.Unmarshal([]byte(line), &h) != nil || h.Type != "session_meta" {
@@ -2141,7 +2156,12 @@ func codexSessionHeader(path string) (codexHeader, bool) {
 		if id == "" {
 			id = h.Payload.SessionID
 		}
-		return codexHeader{id: id, cwd: h.Payload.CWD, subagent: h.Payload.ThreadSource == "subagent"}, true
+		var source struct {
+			Subagent json.RawMessage `json:"subagent"`
+		}
+		json.Unmarshal(h.Payload.Source, &source)
+		subagent := h.Payload.ThreadSource == "subagent" || len(source.Subagent) > 0 && string(source.Subagent) != "null"
+		return codexHeader{id: id, cwd: h.Payload.CWD, subagent: subagent}, true
 	}
 	return codexHeader{}, false
 }
@@ -2196,11 +2216,9 @@ func decodePath(encoded string) string {
 }
 
 // validSessionID reports whether a session ID is a valid resume target.
-// Subagent transcripts (agent-<id>, including the agent-acompact-* compaction
-// runs) are spawned by a parent session and cannot be resumed on their own, so
-// they are never offered as results.
+// Subagent transcripts are included only when explicitly requested.
 func validSessionID(id string) bool {
-	return id != "" && !strings.HasPrefix(id, "agent-")
+	return id != "" && (*subagentsFlag || !strings.HasPrefix(id, "agent-"))
 }
 
 func containsAny(query string, fields ...string) bool {
@@ -2241,6 +2259,19 @@ func resumeInvocation(m cc.IndexEntry) (string, []string) {
 		// pi resumes by session file path, not by id.
 		return "pi", []string{"--session", m.FullPath}
 	default:
+		if strings.HasPrefix(m.SessionID, "agent-") {
+			if filepath.Base(filepath.Dir(m.FullPath)) == "subagents" {
+				return "claude", []string{"-r", filepath.Base(filepath.Dir(filepath.Dir(m.FullPath)))}
+			}
+			if entries, err := cc.ReadFile(context.Background(), m.FullPath); err == nil {
+				for _, e := range entries {
+					if e.SessionID != "" && !strings.HasPrefix(e.SessionID, "agent-") {
+						return "claude", []string{"-r", e.SessionID}
+					}
+				}
+			}
+			return "claude", nil
+		}
 		if m.SessionID != "" {
 			return "claude", []string{"-r", m.SessionID}
 		}
