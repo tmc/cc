@@ -57,6 +57,10 @@ type agStep struct {
 	Type            string       `json:"type"`
 	Status          string       `json:"status"`
 	CreatedAt       string       `json:"created_at"`
+	Model           string       `json:"model,omitempty"`
+	InputTokens     int          `json:"input_tokens,omitempty"`
+	CacheReadTokens int          `json:"cache_read_tokens,omitempty"`
+	OutputTokens    int          `json:"output_tokens,omitempty"`
 	Content         string       `json:"content,omitempty"`
 	Thinking        string       `json:"thinking,omitempty"`
 	ToolCalls       []agToolCall `json:"tool_calls,omitempty"`
@@ -292,6 +296,14 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 				})
 			}
 			msgContent, _ := json.Marshal(blocks)
+			var usage *ccmodel.Usage
+			if step.InputTokens > 0 || step.CacheReadTokens > 0 || step.OutputTokens > 0 {
+				usage = &ccmodel.Usage{
+					InputTokens:          step.InputTokens,
+					CacheReadInputTokens: step.CacheReadTokens,
+					OutputTokens:         step.OutputTokens,
+				}
+			}
 			entries = append(entries, ccmodel.Entry{
 				Type:      "assistant",
 				SessionID: sessionID,
@@ -301,6 +313,8 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 				Message: &ccmodel.Message{
 					Role:    "assistant",
 					Content: msgContent,
+					Model:   step.Model,
+					Usage:   usage,
 				},
 			})
 
@@ -484,10 +498,12 @@ func normalizeToolName(name string) string {
 	switch strings.ToLower(name) {
 	case "run_command":
 		return "Bash"
-	case "view_file":
+	case "view_file", "read_file":
 		return "View"
-	case "replace_file_content", "multi_replace_file_content", "write_to_file":
+	case "replace_file_content", "multi_replace_file_content", "write_to_file", "write_file":
 		return "Write"
+	case "edit_file":
+		return "Edit"
 	case "list_dir", "list_directory":
 		return "LS"
 	case "grep_search":

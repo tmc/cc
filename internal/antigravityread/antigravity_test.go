@@ -492,3 +492,41 @@ func TestReadTranscriptCompaction(t *testing.T) {
 		t.Errorf("entry 2 mismatch: got Type=%q, Subtype=%q, Content=%q", entries[2].Type, entries[2].Subtype, entries[2].Content)
 	}
 }
+
+func TestReadTranscriptModelUsageAndTools(t *testing.T) {
+	tmp := t.TempDir()
+	sessionDir := filepath.Join(tmp, "session-model-usage")
+	logDir := filepath.Join(sessionDir, ".system_generated", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	transcriptJSONL := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-11-14T21:15:22Z","content":"check files"}
+{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-14T21:15:23Z","model":"gemini-4-hydrogen-medium","input_tokens":8997,"cache_read_tokens":16358,"output_tokens":286,"tool_calls":[{"name":"read_file","args":{"Path":"/a.go"}},{"name":"write_file","args":{"Path":"/b.go"}},{"name":"edit_file","args":{"Path":"/c.go"}}]}
+`
+	if err := os.WriteFile(filepath.Join(logDir, "transcript.jsonl"), []byte(transcriptJSONL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := ReadFile(context.Background(), sessionDir)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(entries))
+	}
+	asst := entries[2]
+	if asst.Message == nil {
+		t.Fatal("assistant entry has nil Message")
+	}
+	if asst.Message.Model != "gemini-4-hydrogen-medium" {
+		t.Errorf("Model = %q, want gemini-4-hydrogen-medium", asst.Message.Model)
+	}
+	if asst.Message.Usage == nil || asst.Message.Usage.InputTokens != 8997 || asst.Message.Usage.CacheReadInputTokens != 16358 || asst.Message.Usage.OutputTokens != 286 {
+		t.Errorf("Usage = %+v", asst.Message.Usage)
+	}
+	tus := asst.Message.ToolUses()
+	if len(tus) != 3 || tus[0].Name != "View" || tus[1].Name != "Write" || tus[2].Name != "Edit" {
+		t.Errorf("ToolUses = %+v, want View, Write, Edit", tus)
+	}
+}

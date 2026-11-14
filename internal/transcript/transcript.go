@@ -662,7 +662,7 @@ func agyDetail(input json.RawMessage) string {
 	if err := json.Unmarshal(input, &fields); err != nil {
 		return ""
 	}
-	for _, key := range []string{"CommandLine", "AbsolutePath", "DirectoryPath", "toolSummary", "toolAction"} {
+	for _, key := range []string{"CommandLine", "AbsolutePath", "Path", "TargetFile", "DirectoryPath", "query", "toolSummary", "toolAction"} {
 		v, ok := fields[key].(string)
 		if !ok || v == "" {
 			continue
