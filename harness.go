@@ -6,6 +6,7 @@ import (
 
 	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/internal/antigravityread"
+	"github.com/tmc/cc/internal/geminiread"
 	"github.com/tmc/cc/internal/opencoderead"
 	"github.com/tmc/cc/internal/piread"
 )
@@ -28,6 +29,9 @@ func Harness(path string) string {
 	if antigravityread.IsSessionPath(path) {
 		return "antigravity"
 	}
+	if geminiread.IsSessionPath(path) {
+		return "gemini"
+	}
 	// 2. Home-prefix tier — claude, codex, gemini all fall through to
 	//    ReadAll/codexread and are indistinguishable by predicate, so use the
 	//    resolved home roots. Resolve once; ignore resolver errors (a missing
@@ -48,7 +52,7 @@ func Harness(path string) string {
 	if ch, _ := ccpaths.ClaudeHome(); under(abs, filepath.Join(ch, "projects")) {
 		return "claude"
 	}
-	if gh, _ := ccpaths.GeminiHome(); under(abs, filepath.Join(gh, "projects")) {
+	if gh, _ := ccpaths.GeminiHome(); under(abs, filepath.Join(gh, "projects")) || under(abs, filepath.Join(gh, "tmp")) {
 		return "gemini"
 	}
 	return "unknown"

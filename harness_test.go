@@ -85,6 +85,11 @@ func TestHarness(t *testing.T) {
 			want: "gemini",
 		},
 		{
+			name: "gemini tmp chat session",
+			path: filepath.Join(gemini, "tmp", "proj", "chats", "session-2026-04-03T22-56-d00a4143.json"),
+			want: "gemini",
+		},
+		{
 			name: "antigravity via home under gemini",
 			path: filepath.Join(antigravity, "brain", "task", "step.jsonl"),
 			want: "antigravity",

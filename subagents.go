@@ -45,13 +45,16 @@ func Subagents(ctx context.Context, path string) ([]Subagent, error) {
 		if parentID == "" {
 			parentID = e.SessionID
 		}
-		if e.Subtype == "session_meta" {
+		if e.Subtype == "session_meta" && (e.Source == "" || e.Source == "codex") {
 			codex = true
 			parentID = e.SessionID
 		}
 	}
 	if codex {
 		return codexSubagents(ctx, path, parentID)
+	}
+	if !strings.HasSuffix(path, ".jsonl") {
+		return nil, nil
 	}
 	dir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
 	files, err := os.ReadDir(dir)

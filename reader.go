@@ -17,6 +17,7 @@ import (
 	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/internal/antigravityread"
 	"github.com/tmc/cc/internal/codexread"
+	"github.com/tmc/cc/internal/geminiread"
 	"github.com/tmc/cc/internal/opencoderead"
 	"github.com/tmc/cc/internal/piread"
 )
@@ -256,6 +257,9 @@ func ReadFile(ctx context.Context, path string) ([]Entry, error) {
 	if antigravityread.IsSessionPath(path) {
 		return antigravityread.ReadFile(ctx, path)
 	}
+	if geminiread.IsSessionPath(path) {
+		return geminiread.ReadFile(ctx, path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -317,8 +321,8 @@ func ReadFileFrom(ctx context.Context, path string, offset int64) (entries []Ent
 		entries, newOffset, err := piread.ReadFileFrom(ctx, path, offset)
 		return entries, newOffset, nil, err
 	}
-	if antigravityread.IsSessionPath(path) {
-		entries, err := antigravityread.ReadFile(ctx, path)
+	if antigravityread.IsSessionPath(path) || geminiread.IsSessionPath(path) {
+		entries, err := ReadFile(ctx, path)
 		if err != nil {
 			return nil, 0, nil, err
 		}
@@ -390,8 +394,8 @@ func ReadFileWithOffset(ctx context.Context, path string) (entries []Entry, offs
 		}
 		return entries, info.Size(), nil, nil
 	}
-	if antigravityread.IsSessionPath(path) {
-		entries, err := antigravityread.ReadFile(ctx, path)
+	if antigravityread.IsSessionPath(path) || geminiread.IsSessionPath(path) {
+		entries, err := ReadFile(ctx, path)
 		if err != nil {
 			return nil, 0, nil, err
 		}
@@ -549,6 +553,9 @@ func ReadSubagents(ctx context.Context, path string) ([]Entry, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if !strings.HasSuffix(path, ".jsonl") {
+		return nil, nil
+	}
 	subagentDir := filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents")
 	infos, err := os.ReadDir(subagentDir)
 	if err != nil {
@@ -623,7 +630,7 @@ func Summarize(file string, entries []Entry) SessionSummary {
 // transcript in memory: entries stream through the summary one line at a time.
 // It yields the same result as [ReadFile] followed by [Summarize].
 func SummarizeFile(ctx context.Context, path string) (SessionSummary, error) {
-	if opencoderead.IsSessionPath(path) || piread.IsSessionPath(path) || antigravityread.IsSessionPath(path) {
+	if opencoderead.IsSessionPath(path) || piread.IsSessionPath(path) || antigravityread.IsSessionPath(path) || geminiread.IsSessionPath(path) {
 		entries, err := ReadFile(ctx, path)
 		if err != nil {
 			return SessionSummary{}, err
@@ -760,6 +767,7 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	dirs := []rootDir{{path: filepath.Join(ch, "projects"), kind: "claude"}}
 	if gh != "" {
 		dirs = append(dirs, rootDir{path: filepath.Join(gh, "projects"), kind: "gemini"})
+		dirs = append(dirs, rootDir{path: filepath.Join(gh, "tmp"), kind: "gemini-cli"})
 	}
 	if xh != "" {
 		dirs = append(dirs, rootDir{path: filepath.Join(xh, "sessions"), kind: "codex"})
@@ -832,6 +840,10 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 			}
 			if dir.kind == "opencode" {
 				if !opencoderead.IsSessionPath(path) {
+					return nil
+				}
+			} else if dir.kind == "gemini-cli" {
+				if !geminiread.IsSessionPath(path) {
 					return nil
 				}
 			} else if !strings.HasSuffix(path, ".jsonl") {
