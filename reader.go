@@ -435,77 +435,122 @@ type SessionSummary struct {
 
 // Summarize builds a SessionSummary from entries.
 func Summarize(file string, entries []Entry) SessionSummary {
-	s := SessionSummary{File: file}
-	seenCWDs := map[string]bool{}
+	sum := newSummarizer(file)
 	for _, e := range entries {
-		s.TotalLines++
-		if e.SessionID != "" && s.SessionID == "" {
-			s.SessionID = e.SessionID
+		sum.add(e)
+	}
+	return sum.finish()
+}
+
+// SummarizeFile summarizes the session at path without holding the decoded
+// transcript in memory: entries stream through the summary one line at a time.
+// It yields the same result as [ReadFile] followed by [Summarize].
+func SummarizeFile(ctx context.Context, path string) (SessionSummary, error) {
+	if opencoderead.IsSessionPath(path) || piread.IsSessionPath(path) || antigravityread.IsSessionPath(path) {
+		entries, err := ReadFile(ctx, path)
+		if err != nil {
+			return SessionSummary{}, err
 		}
-		if e.Version != "" && s.Version == "" {
-			s.Version = e.Version
+		return Summarize(path, entries), nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return SessionSummary{}, err
+	}
+	defer f.Close()
+	sum := newSummarizer(path)
+	r := NewReader(ctx, f)
+	for r.Next() {
+		sum.add(r.Entry())
+	}
+	if err := r.Err(); err != nil {
+		return SessionSummary{}, err
+	}
+	return sum.finish(), nil
+}
+
+// summarizer folds entries into a SessionSummary incrementally.
+type summarizer struct {
+	s        SessionSummary
+	seenCWDs map[string]bool
+}
+
+func newSummarizer(file string) *summarizer {
+	return &summarizer{s: SessionSummary{File: file}, seenCWDs: map[string]bool{}}
+}
+
+func (sum *summarizer) add(e Entry) {
+	s, seenCWDs := &sum.s, sum.seenCWDs
+	s.TotalLines++
+	if e.SessionID != "" && s.SessionID == "" {
+		s.SessionID = e.SessionID
+	}
+	if e.Version != "" && s.Version == "" {
+		s.Version = e.Version
+	}
+	if e.CWD != "" {
+		s.CWD = e.CWD
+		if !seenCWDs[e.CWD] {
+			seenCWDs[e.CWD] = true
+			s.DistinctCWDs = append(s.DistinctCWDs, e.CWD)
 		}
-		if e.CWD != "" {
-			s.CWD = e.CWD
-			if !seenCWDs[e.CWD] {
-				seenCWDs[e.CWD] = true
-				s.DistinctCWDs = append(s.DistinctCWDs, e.CWD)
+	}
+	if e.GitBranch != "" && s.GitBranch == "" {
+		s.GitBranch = e.GitBranch
+	}
+	if e.Slug != "" && s.Slug == "" {
+		s.Slug = e.Slug
+	}
+	if !e.Timestamp.IsZero() {
+		if s.FirstTime.IsZero() {
+			s.FirstTime = e.Timestamp
+		}
+		s.LastTime = e.Timestamp
+	}
+	if e.Type == "custom-title" && e.CustomTitle != "" {
+		s.CustomTitle = e.CustomTitle
+	}
+	if e.Type == "system" && e.Subtype == "compact_boundary" {
+		s.Compactions++
+	}
+	if e.Message != nil && !e.IsCompactSummary {
+		switch e.Message.Role {
+		case "user":
+			if e.Message.IsToolResultOnly() {
+				break
 			}
-		}
-		if e.GitBranch != "" && s.GitBranch == "" {
-			s.GitBranch = e.GitBranch
-		}
-		if e.Slug != "" && s.Slug == "" {
-			s.Slug = e.Slug
-		}
-		if !e.Timestamp.IsZero() {
-			if s.FirstTime.IsZero() {
-				s.FirstTime = e.Timestamp
+			s.UserMessages++
+			if s.FirstPrompt == "" && !e.IsMeta && !IsHarnessPreamble(e.Message.TextContent()) {
+				s.FirstPrompt = ExtractText(e.Message.Content)
 			}
-			s.LastTime = e.Timestamp
-		}
-		if e.Type == "custom-title" && e.CustomTitle != "" {
-			s.CustomTitle = e.CustomTitle
-		}
-		if e.Type == "system" && e.Subtype == "compact_boundary" {
-			s.Compactions++
-		}
-		if e.Message != nil && !e.IsCompactSummary {
-			switch e.Message.Role {
-			case "user":
-				if e.Message.IsToolResultOnly() {
-					break
-				}
-				s.UserMessages++
-				if s.FirstPrompt == "" && !e.IsMeta && !IsHarnessPreamble(e.Message.TextContent()) {
-					s.FirstPrompt = ExtractText(e.Message.Content)
-				}
-				if s.Model == "" && e.Message.Model != "" {
-					s.Model = e.Message.Model
-				}
-			case "assistant":
-				s.AsstMessages++
-				if s.Model == "" && e.Message.Model != "" {
-					s.Model = e.Message.Model
-				}
-				// Count tool uses.
-				var blocks []ContentBlock
-				if json.Unmarshal(e.Message.Content, &blocks) == nil {
-					for _, b := range blocks {
-						if b.Type == "tool_use" {
-							s.ToolUses++
-						}
+			if s.Model == "" && e.Message.Model != "" {
+				s.Model = e.Message.Model
+			}
+		case "assistant":
+			s.AsstMessages++
+			if s.Model == "" && e.Message.Model != "" {
+				s.Model = e.Message.Model
+			}
+			// Count tool uses.
+			var blocks []ContentBlock
+			if json.Unmarshal(e.Message.Content, &blocks) == nil {
+				for _, b := range blocks {
+					if b.Type == "tool_use" {
+						s.ToolUses++
 					}
 				}
 			}
 		}
 	}
-	if s.CWD != "" {
-		if ctx, err := ccgit.ResolveGitContext(s.CWD); err == nil {
-			s.GitContext = ctx
+}
+
+func (sum *summarizer) finish() SessionSummary {
+	if sum.s.CWD != "" {
+		if ctx, err := ccgit.ResolveGitContext(sum.s.CWD); err == nil {
+			sum.s.GitContext = ctx
 		}
 	}
-	return s
+	return sum.s
 }
 
 // ExtractText pulls the first text content from a message content field.
