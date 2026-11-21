@@ -2,6 +2,7 @@ package cc
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -103,6 +104,16 @@ func TestReadFilePi(t *testing.T) {
 	results := toolResult.Message.ToolResults()
 	if len(results) != 1 || results[0].ToolUseID != "call_01" || results[0].Content != "package main" || results[0].IsError {
 		t.Fatalf("tool results = %#v", results)
+	}
+}
+
+func TestReadFileFromPiInvalidOffset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".pi", "agent", "sessions", "proj", "session.jsonl")
+	writeTestFile(t, path, piSession)
+	for _, offset := range []int64{-1, 1, int64(len(piSession) + 1)} {
+		if _, _, _, err := ReadFileFrom(context.Background(), path, offset); !errors.Is(err, ErrTailInvalid) {
+			t.Errorf("ReadFileFrom offset %d: got %v, want ErrTailInvalid", offset, err)
+		}
 	}
 }
 

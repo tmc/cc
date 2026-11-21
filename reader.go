@@ -319,6 +319,9 @@ func ReadFileFrom(ctx context.Context, path string, offset int64) (entries []Ent
 	}
 	if piread.IsSessionPath(path) {
 		entries, newOffset, err := piread.ReadFileFrom(ctx, path, offset)
+		if errors.Is(err, piread.ErrTailInvalid) {
+			return nil, 0, nil, ErrTailInvalid
+		}
 		return entries, newOffset, nil, err
 	}
 	if antigravityread.IsSessionPath(path) || geminiread.IsSessionPath(path) {

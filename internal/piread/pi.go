@@ -12,6 +12,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -242,6 +243,10 @@ func ReadFile(ctx context.Context, path string) ([]ccmodel.Entry, error) {
 	return entries, nil
 }
 
+// ErrTailInvalid reports that an offset is outside the file or is not on a
+// line boundary.
+var ErrTailInvalid = errors.New("tail offset invalid")
+
 // ReadFileFrom reads messages appended after offset. Offset must be at a line
 // boundary returned by a previous call. Pi's header is read separately so the
 // appended messages retain the session metadata needed for normalization.
@@ -255,8 +260,8 @@ func ReadFileFrom(ctx context.Context, path string, offset int64) ([]ccmodel.Ent
 	if err != nil {
 		return nil, 0, err
 	}
-	if offset > info.Size() {
-		return nil, 0, fmt.Errorf("tail offset invalid")
+	if offset < 0 || offset > info.Size() {
+		return nil, 0, ErrTailInvalid
 	}
 	if offset == 0 {
 		entries, err := ReadFile(ctx, path)
@@ -264,7 +269,7 @@ func ReadFileFrom(ctx context.Context, path string, offset int64) ([]ccmodel.Ent
 	}
 	var b [1]byte
 	if _, err := f.ReadAt(b[:], offset-1); err != nil || b[0] != '\n' {
-		return nil, 0, fmt.Errorf("tail offset invalid")
+		return nil, 0, ErrTailInvalid
 	}
 	header, version, err := readHeader(path)
 	if err != nil {
