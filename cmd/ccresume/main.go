@@ -1393,10 +1393,8 @@ func (s searchSpec) run(since time.Duration) ([]cc.IndexEntry, error) {
 	// same fields from the session files themselves; merge the two so an
 	// indexed match from one harness cannot hide a live session from another.
 	matches = mergeEntries(matches, res.meta)
+	matches = mergeEntries(matches, res.content)
 	matches = filterMatches(matches, s.dir, s.harness)
-	if len(matches) == 0 || *subagentsFlag {
-		matches = mergeEntries(matches, res.content)
-	}
 	if s.has != "" {
 		matches, err = filterContentMatches(matches, s.has)
 		if err != nil {
