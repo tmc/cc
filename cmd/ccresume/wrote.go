@@ -53,6 +53,8 @@ var writeToolNames = map[string]bool{
 	"MultiEdit":                  true,
 	"NotebookEdit":               true,
 	"write_to_file":              true,
+	"write_file":                 true,
+	"edit_file":                  true,
 	"replace_file_content":       true,
 	"multi_replace_file_content": true,
 }
@@ -99,7 +101,7 @@ func firstInputPath(input json.RawMessage) string {
 	if json.Unmarshal(input, &m) != nil {
 		return ""
 	}
-	for _, key := range []string{"file_path", "filePath", "notebook_path", "TargetFile", "path"} {
+	for _, key := range []string{"file_path", "filePath", "notebook_path", "TargetFile", "Path", "path"} {
 		if raw, ok := m[key]; ok {
 			var s string
 			if json.Unmarshal(raw, &s) == nil && strings.TrimSpace(s) != "" {
