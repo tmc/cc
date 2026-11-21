@@ -81,3 +81,27 @@ func TestStyleFor(t *testing.T) {
 		t.Error("StyleFor default != ClaudeStyle")
 	}
 }
+
+func TestUserText(t *testing.T) {
+	in := "<USER_REQUEST> do the thing </USER_REQUEST> <ADDITIONAL_METADATA> noise </ADDITIONAL_METADATA>"
+	if got := userText(in); got != "do the thing" {
+		t.Errorf("userText = %q, want %q", got, "do the thing")
+	}
+	if got := userText("plain"); got != "plain" {
+		t.Errorf("userText(plain) = %q", got)
+	}
+}
+
+func TestAgyDetail(t *testing.T) {
+	in := json.RawMessage(`{"CommandLine":"\"go version\"","Cwd":"\"/x\"","toolAction":"\"Running\""}`)
+	if got := agyDetail(in); got != "go version" {
+		t.Errorf("agyDetail = %q, want %q", got, "go version")
+	}
+	in = json.RawMessage(`{"toolSummary":"\"Read doc.go\""}`)
+	if got := agyDetail(in); got != "Read doc.go" {
+		t.Errorf("agyDetail = %q, want %q", got, "Read doc.go")
+	}
+	if got := agyDetail(json.RawMessage(`{"other":1}`)); got != "" {
+		t.Errorf("agyDetail(no keys) = %q, want empty", got)
+	}
+}

@@ -32,17 +32,25 @@ type Style struct {
 // Styles by harness name (as reported by cc.Harness). ClaudeStyle is the
 // default for unknown harnesses.
 var (
-	ClaudeStyle = Style{User: "❯", Asst: "⏺", Tool: "⏺", Result: "⎿  ", ResultRows: 1}
-	CodexStyle  = Style{User: "›", Asst: "•", Tool: "•", Result: "└ ", RanVerb: true, ResultRows: 3}
+	ClaudeStyle      = Style{User: "❯", Asst: "⏺", Tool: "⏺", Result: "⎿  ", ResultRows: 1}
+	CodexStyle       = Style{User: "›", Asst: "•", Tool: "•", Result: "└ ", RanVerb: true, ResultRows: 3}
+	AntigravityStyle = Style{User: ">", Asst: " ", Tool: "●", Result: "⎿  ", ResultRows: 1}
+	PiStyle          = Style{User: "›", Asst: " ", Tool: "⏺", Result: "⎿  ", ResultRows: 1}
 )
 
 // StyleFor returns the native style for a harness name ("claude", "codex",
 // ...), defaulting to ClaudeStyle.
 func StyleFor(harness string) Style {
-	if harness == "codex" {
+	switch harness {
+	case "codex":
 		return CodexStyle
+	case "antigravity", "gemini":
+		return AntigravityStyle
+	case "pi":
+		return PiStyle
+	default:
+		return ClaudeStyle
 	}
-	return ClaudeStyle
 }
 
 // Options controls rendering.
@@ -77,7 +85,7 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 				}
 				continue
 			}
-			if txt := e.Message.TextContent(); txt != "" && !ccmodel.IsHarnessPreamble(txt) {
+			if txt := userText(e.Message.TextContent()); txt != "" && !ccmodel.IsHarnessPreamble(txt) {
 				fmt.Fprintf(&b, "%s%s %s\n\n", prefix, userStyle.Render(st.User), wrap(txt, opts.Width-2, "  "))
 			}
 		case "assistant":
@@ -125,6 +133,19 @@ func renderResult(b *strings.Builder, prefix string, tr ccmodel.ContentBlock, st
 	b.WriteString("\n")
 }
 
+// userText strips the Antigravity prompt envelope, which wraps the actual
+// request in <USER_REQUEST>…</USER_REQUEST> followed by metadata blocks the
+// agent's own TUI never displays.
+func userText(txt string) string {
+	if _, rest, ok := strings.Cut(txt, "<USER_REQUEST>"); ok {
+		if inner, _, ok := strings.Cut(rest, "</USER_REQUEST>"); ok {
+			return strings.TrimSpace(inner)
+		}
+		return strings.TrimSpace(rest)
+	}
+	return txt
+}
+
 // toolCall renders a tool_use block the way its harness displays it:
 // Name(detail) for Claude-style TUIs, "Ran <cmd>" for Codex shell calls.
 func toolCall(blk ccmodel.ContentBlock, st Style) string {
@@ -137,12 +158,37 @@ func toolCall(blk ccmodel.ContentBlock, st Style) string {
 	}
 	detail := cmd
 	if detail == "" {
+		detail = agyDetail(blk.Input)
+	}
+	if detail == "" {
 		detail = collapse(string(blk.Input), 120)
 	}
 	if detail == "" {
 		return blk.Name
 	}
 	return blk.Name + "(" + collapse(detail, 160) + ")"
+}
+
+// agyDetail extracts the primary argument from an Antigravity tool input,
+// whose field values are JSON strings encoded a second time (e.g.
+// {"CommandLine":"\"go version\"","toolAction":"\"Running go version\""}).
+func agyDetail(input json.RawMessage) string {
+	var fields map[string]any
+	if err := json.Unmarshal(input, &fields); err != nil {
+		return ""
+	}
+	for _, key := range []string{"CommandLine", "AbsolutePath", "DirectoryPath", "toolSummary", "toolAction"} {
+		v, ok := fields[key].(string)
+		if !ok || v == "" {
+			continue
+		}
+		var s string
+		if err := json.Unmarshal([]byte(v), &s); err == nil {
+			return s
+		}
+		return v
+	}
+	return ""
 }
 
 // codexCommand extracts the shell command from a Codex exec tool call, whose
