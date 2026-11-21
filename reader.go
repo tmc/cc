@@ -808,7 +808,7 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 					if info.IsDir() {
 						// The directory's mtime goes stale: appending to the
 						// nested transcript only touches its own parent.
-						if st, err := os.Stat(filepath.Join(path, ".system_generated", "logs", "transcript.jsonl")); err == nil {
+						if _, st := antigravityread.TranscriptFile(path); st != nil {
 							mod = st.ModTime()
 						}
 					}

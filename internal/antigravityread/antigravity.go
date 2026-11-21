@@ -27,7 +27,7 @@ import (
 func IsSessionPath(path string) bool {
 	info, err := os.Stat(path)
 	if err == nil && info.IsDir() {
-		if _, err := os.Stat(filepath.Join(path, ".system_generated", "logs", "transcript.jsonl")); err == nil {
+		if _, transcript := TranscriptFile(path); transcript != nil {
 			return true
 		}
 		if _, err := os.Stat(filepath.Join(path, "task.md")); err == nil {
@@ -49,6 +49,19 @@ func IsSessionPath(path string) bool {
 		}
 	}
 	return false
+}
+
+// TranscriptFile returns the preferred transcript in dir and its file info.
+// If neither transcript exists, it returns an empty path and nil.
+func TranscriptFile(dir string) (string, os.FileInfo) {
+	for _, name := range []string{"transcript.jsonl", "transcript_full.jsonl"} {
+		path := filepath.Join(dir, ".system_generated", "logs", name)
+		info, err := os.Stat(path)
+		if err == nil && info.Mode().IsRegular() {
+			return path, info
+		}
+	}
+	return "", nil
 }
 
 type agStep struct {
@@ -145,13 +158,8 @@ func ReadFile(ctx context.Context, path string) ([]ccmodel.Entry, error) {
 	}
 
 	if info.IsDir() {
-		transcriptPath := filepath.Join(path, ".system_generated", "logs", "transcript.jsonl")
-		if _, err := os.Stat(transcriptPath); err == nil {
-			return readTranscriptFile(ctx, transcriptPath, filepath.Base(path), path)
-		}
-		transcriptFull := filepath.Join(path, ".system_generated", "logs", "transcript_full.jsonl")
-		if _, err := os.Stat(transcriptFull); err == nil {
-			return readTranscriptFile(ctx, transcriptFull, filepath.Base(path), path)
+		if transcript, _ := TranscriptFile(path); transcript != "" {
+			return readTranscriptFile(ctx, transcript, filepath.Base(path), path)
 		}
 		return readLegacySession(ctx, path)
 	}
