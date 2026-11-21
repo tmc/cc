@@ -152,6 +152,27 @@ func resumeCommand(r row) string {
 	var bin string
 	var args []string
 	switch cc.Harness(r.file) {
+	case "antigravity":
+		if m := (cc.IndexEntry{FullPath: r.file, SessionID: r.sum.SessionID}); m.SessionID != "" || m.FullPath != "" {
+			id := strings.TrimPrefix(m.SessionID, "ag-")
+			if id == "" {
+				sep := string(filepath.Separator)
+				if _, rest, ok := strings.Cut(r.file, sep+"brain"+sep); ok {
+					if cid, _, ok := strings.Cut(rest, sep); ok {
+						id = cid
+					} else {
+						id = rest
+					}
+				}
+			}
+			if id != "" {
+				bin, args = "agy", []string{"--conversation", id}
+			} else {
+				bin, args = "agy", nil
+			}
+		} else {
+			bin, args = "agy", nil
+		}
 	case "codex":
 		bin, args = "codex", []string{"resume", r.sum.SessionID}
 	case "gemini":

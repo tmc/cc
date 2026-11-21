@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -89,5 +91,24 @@ func TestResumeCommand(t *testing.T) {
 	got := resumeCommand(r)
 	if want := "cd /a/b; claude -r 1234"; got != want {
 		t.Errorf("resumeCommand = %q, want %q", got, want)
+	}
+
+	tmp := t.TempDir()
+	agDir := filepath.Join(tmp, "01a0d5e8-1382-4948-8b07-224f79072339")
+	if err := os.MkdirAll(agDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agFile := filepath.Join(agDir, "task.md")
+	if err := os.WriteFile(agFile, []byte("# task"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rAg := row{
+		file: agDir,
+		sum:  cc.SessionSummary{SessionID: "ag-01a0d5e8-1382-4948-8b07-224f79072339", CWD: "/a/b"},
+	}
+	gotAg := resumeCommand(rAg)
+	if want := "cd /a/b; agy --conversation 01a0d5e8-1382-4948-8b07-224f79072339"; gotAg != want {
+		t.Errorf("resumeCommand(antigravity) = %q, want %q", gotAg, want)
 	}
 }
