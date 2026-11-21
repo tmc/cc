@@ -139,6 +139,8 @@ func TestNormalizeTargetCodex(t *testing.T) {
 		{in: "codex", wantTarget: "codex-cli", wantBin: "codex"},
 		{in: "codex-cli", wantTarget: "codex-cli", wantBin: "codex"},
 		{in: "codex-app", wantTarget: "codex-cli", wantBin: "codex"},
+		{in: "antigravity", wantTarget: "antigravity", wantBin: "agy"},
+		{in: "agy", wantTarget: "antigravity", wantBin: "agy"},
 	}
 
 	for _, tt := range tests {
@@ -176,6 +178,20 @@ func TestInferSourceAgentCodexMetadata(t *testing.T) {
 				{Originator: "Codex Desktop", Source: "vscode"},
 			},
 			want: "codex-app",
+		},
+		{
+			name: "antigravity source",
+			path: "/tmp/session.jsonl",
+			entries: []cc.Entry{
+				{Source: "antigravity"},
+			},
+			want: "antigravity",
+		},
+		{
+			name:    "antigravity brain path",
+			path:    filepath.Join("/home/u", ".gemini", "antigravity-cli", "brain", "uuid", "transcript.jsonl"),
+			entries: nil,
+			want:    "antigravity",
 		},
 		{
 			name:    "path fallback",

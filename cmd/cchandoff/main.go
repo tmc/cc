@@ -115,14 +115,18 @@ func normalizeTarget(v string) (targetAgent, launchBin string, err error) {
 		return "codex-cli", "codex", nil
 	case "opencode", "open-code":
 		return "opencode", "opencode", nil
+	case "antigravity", "agy":
+		return "antigravity", "agy", nil
 	default:
-		return "", "", fmt.Errorf("unsupported -to %q (want gemini|gemini-cli|claude|claude-code|codex|codex-cli|codex-app|opencode)", v)
+		return "", "", fmt.Errorf("unsupported -to %q (want gemini|gemini-cli|claude|claude-code|codex|codex-cli|codex-app|opencode|antigravity|agy)", v)
 	}
 }
 
 func inferSourceAgent(path string, entries []cc.Entry) string {
 	for _, e := range entries {
 		switch {
+		case e.Source == "antigravity":
+			return "antigravity"
 		case e.Source == "opencode":
 			return "opencode"
 		case e.Originator == "codex_cli_rs" || e.Source == "cli":
@@ -134,6 +138,8 @@ func inferSourceAgent(path string, entries []cc.Entry) string {
 
 	p := strings.ToLower(path)
 	switch {
+	case strings.Contains(p, "brain") || strings.Contains(p, "antigravity"):
+		return "antigravity"
 	case strings.Contains(p, ".codex"):
 		return "codex-cli"
 	case strings.Contains(p, ".claude"):
@@ -271,12 +277,14 @@ func buildHandoff(sourcePath, sourceAgent, targetAgent, launchBin string, entrie
 
 		for _, tu := range e.Message.ToolUses() {
 			switch tu.Name {
-			case "Write", "Edit", "MultiEdit":
-				if fp := fieldString(tu.Input, "file_path", "filePath", "path"); fp != "" {
+			case "Write", "Edit", "MultiEdit", "write_to_file", "replace_file_content", "multi_replace_file_content":
+				if fp := fieldString(tu.Input, "file_path", "filePath", "path", "TargetFile"); fp != "" {
 					files.Add(fp)
 				}
-			case "Bash":
-				if cmd := fieldString(tu.Input, "command"); cmd != "" {
+			case "Bash", "run_command":
+				if cmd := tu.BashCommand(); cmd != "" {
+					commands.Add(truncateLine(cmd, 220))
+				} else if cmd := fieldString(tu.Input, "command", "CommandLine"); cmd != "" {
 					commands.Add(truncateLine(cmd, 220))
 				}
 			}
