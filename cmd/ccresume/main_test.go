@@ -16,6 +16,13 @@ import (
 )
 
 func TestResumeInvocation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(root, "cx"))
+	t.Setenv("GEMINI_HOME", filepath.Join(root, "gm"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "agy"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi-data"))
+	piPath := filepath.Join(root, "pi-data", "sessions", "--p--", "ts_id.jsonl")
+	writeTextFile(t, piPath, `{"type":"session","id":"pi-session-id"}`+"\n")
 	tests := []struct {
 		name     string
 		entry    cc.IndexEntry
@@ -25,7 +32,7 @@ func TestResumeInvocation(t *testing.T) {
 		{
 			name: "codex",
 			entry: cc.IndexEntry{
-				FullPath:  filepath.Join("/tmp", ".codex", "sessions", "2026", "02", "25", "rollout.jsonl"),
+				FullPath:  filepath.Join(root, "cx", "sessions", "2026", "02", "25", "rollout.jsonl"),
 				SessionID: "codex-session-id",
 			},
 			wantBin:  "codex",
@@ -34,16 +41,25 @@ func TestResumeInvocation(t *testing.T) {
 		{
 			name: "gemini",
 			entry: cc.IndexEntry{
-				FullPath:  filepath.Join("/tmp", ".gemini", "projects", "p", "s.jsonl"),
+				FullPath:  filepath.Join(root, "gm", "projects", "p", "s.jsonl"),
 				SessionID: "gemini-session-id",
 			},
 			wantBin:  "gemini",
 			wantArgs: []string{"-r", "gemini-session-id"},
 		},
 		{
+			name: "gemini CLI",
+			entry: cc.IndexEntry{
+				FullPath:  filepath.Join(root, "gm", "tmp", "p", "chats", "session-fixture.json"),
+				SessionID: "gemini-cli-id",
+			},
+			wantBin:  "gemini",
+			wantArgs: []string{"-r", "gemini-cli-id"},
+		},
+		{
 			name: "opencode",
 			entry: cc.IndexEntry{
-				FullPath:  filepath.Join("/tmp", "opencode", "storage", "session", "p", "ses_resume.json"),
+				FullPath:  filepath.Join(root, "oc", "storage", "session", "p", "ses_resume.json"),
 				SessionID: "ses_resume",
 			},
 			wantBin:  "opencode",
@@ -52,16 +68,16 @@ func TestResumeInvocation(t *testing.T) {
 		{
 			name: "pi",
 			entry: cc.IndexEntry{
-				FullPath:  filepath.Join("/tmp", ".pi", "agent", "sessions", "--p--", "ts_id.jsonl"),
+				FullPath:  piPath,
 				SessionID: "pi-session-id",
 			},
 			wantBin:  "pi",
-			wantArgs: []string{"--session", filepath.Join("/tmp", ".pi", "agent", "sessions", "--p--", "ts_id.jsonl")},
+			wantArgs: []string{"--session", piPath},
 		},
 		{
 			name: "antigravity",
 			entry: cc.IndexEntry{
-				FullPath:  filepath.Join("/tmp", ".gemini", "antigravity", "brain", "conv-uuid"),
+				FullPath:  filepath.Join(root, "agy", "brain", "conv-uuid"),
 				SessionID: "ag-conv-uuid",
 			},
 			wantBin:  "agy",
@@ -70,7 +86,7 @@ func TestResumeInvocation(t *testing.T) {
 		{
 			name: "antigravity from path",
 			entry: cc.IndexEntry{
-				FullPath: filepath.Join("/tmp", ".gemini", "antigravity-cli", "brain", "conv-uuid", ".system_generated", "logs", "transcript.jsonl"),
+				FullPath: filepath.Join(root, "gm", "antigravity-cli", "brain", "conv-uuid", ".system_generated", "logs", "transcript.jsonl"),
 			},
 			wantBin:  "agy",
 			wantArgs: []string{"--conversation", "conv-uuid"},
@@ -78,7 +94,7 @@ func TestResumeInvocation(t *testing.T) {
 		{
 			name: "claude",
 			entry: cc.IndexEntry{
-				FullPath:  filepath.Join("/tmp", ".claude", "projects", "p", "s.jsonl"),
+				FullPath:  filepath.Join(root, ".claude", "projects", "p", "s.jsonl"),
 				SessionID: "claude-session-id",
 			},
 			wantBin:  "claude",

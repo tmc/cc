@@ -2094,14 +2094,6 @@ func sessionIDFromPath(path, kind string) string {
 	return id
 }
 
-// isPiResumePath reports whether a session path is a pi session, by its default
-// ~/.pi/ location or the agent/sessions layout used under PI_CODING_AGENT_DIR.
-func isPiResumePath(path string) bool {
-	sep := string(filepath.Separator)
-	return strings.Contains(path, sep+".pi"+sep) ||
-		strings.Contains(path, sep+"agent"+sep+"sessions"+sep)
-}
-
 // isAntigravityResumePath reports whether a session path is an Antigravity (agy)
 // session, by the "brain" directory that holds per-conversation session dirs.
 func isAntigravityResumePath(path string) bool {
@@ -2251,31 +2243,30 @@ func containsAny(query string, fields ...string) bool {
 }
 
 func resumeInvocation(m cc.IndexEntry) (string, []string) {
-	switch {
-	case strings.Contains(m.FullPath, string(filepath.Separator)+".codex"+string(filepath.Separator)):
+	switch cc.Harness(m.FullPath) {
+	case "codex":
 		if m.SessionID != "" {
 			return "codex", []string{"resume", m.SessionID}
 		}
 		return "codex", []string{"resume"}
-	case strings.Contains(m.FullPath, string(filepath.Separator)+"opencode"+string(filepath.Separator)):
+	case "opencode":
 		if m.SessionID != "" {
 			return "opencode", []string{"--session", m.SessionID}
 		}
 		return "opencode", nil
-	case isAntigravityResumePath(m.FullPath):
+	case "antigravity":
 		// Antigravity resumes a conversation by its bare UUID, which is the
-		// brain session directory name. This must be checked before .gemini
-		// since the default Antigravity home lives under ~/.gemini.
+		// brain session directory name.
 		if id := antigravityConversationID(m); id != "" {
 			return "agy", []string{"--conversation", id}
 		}
 		return "agy", nil
-	case strings.Contains(m.FullPath, string(filepath.Separator)+".gemini"+string(filepath.Separator)):
+	case "gemini":
 		if m.SessionID != "" {
 			return "gemini", []string{"-r", m.SessionID}
 		}
 		return "gemini", nil
-	case isPiResumePath(m.FullPath):
+	case "pi":
 		// pi resumes by session file path, not by id.
 		return "pi", []string{"--session", m.FullPath}
 	default:
