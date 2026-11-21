@@ -109,3 +109,31 @@ func TestReadFile(t *testing.T) {
 		t.Errorf("toolResults = %+v", trs)
 	}
 }
+
+func TestReadNestedContent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GEMINI_HOME", dir)
+	path := filepath.Join(dir, "session.json")
+	const session = `{
+		"sessionId":"s1",
+		"messages":[
+			{"type":"user","content":{"parts":[{"text":"first"},{"inlineData":{}},{"text":"second"}]}},
+			{"type":"gemini","content":{"parts":[{"text":"answer"}]}}
+		]
+	}`
+	if err := os.WriteFile(path, []byte(session), 0600); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := ReadFile(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+	for i, want := range []string{"first\nsecond", "answer"} {
+		if got := entries[i].Message.TextContent(); got != want {
+			t.Errorf("entry %d text = %q, want %q", i, got, want)
+		}
+	}
+}

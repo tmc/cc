@@ -249,19 +249,26 @@ func extractContentText(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &s) == nil {
 		return s
 	}
-	var arr []struct {
+	type part struct {
 		Text string `json:"text"`
 	}
-	if json.Unmarshal(raw, &arr) == nil {
-		var parts []string
-		for _, item := range arr {
-			if item.Text != "" {
-				parts = append(parts, item.Text)
-			}
+	var parts []part
+	if json.Unmarshal(raw, &parts) != nil {
+		var content struct {
+			Parts []part `json:"parts"`
 		}
-		return strings.Join(parts, "\n")
+		if json.Unmarshal(raw, &content) != nil {
+			return ""
+		}
+		parts = content.Parts
 	}
-	return ""
+	var texts []string
+	for _, part := range parts {
+		if part.Text != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 func extractToolResultText(raw json.RawMessage) string {
