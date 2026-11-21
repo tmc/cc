@@ -4,6 +4,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tmc/cc"
 )
@@ -92,5 +93,35 @@ func TestAntigravityDirFileContainsAndCount(t *testing.T) {
 	}
 	if n := countFileOccurrences("nd encodes no NVIDIA hardware/ISA specific", dir); n != 1 {
 		t.Errorf("countFileOccurrences(%q) = %d, want 1", dir, n)
+	}
+}
+
+func TestGeminiCLIDirectoryDiscovery(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("CLAUDE_HOME", filepath.Join(root, "claude-data"))
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex-data"))
+	t.Setenv("GEMINI_HOME", filepath.Join(root, "gemini-data"))
+	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode-data"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi-data"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "agy-data"))
+	t.Setenv("NAC_HOME", filepath.Join(root, "nac-data"))
+	t.Setenv("CC_NAC_STORE", "")
+	project := filepath.Join(root, "gemini-data", "tmp", "project")
+	workspace := filepath.Join(root, "workspace")
+	path := filepath.Join(project, "chats", "session-test.json")
+	writeTextFile(t, filepath.Join(project, ".project_root"), workspace+"\n")
+	writeTextFile(t, path, `{"sessionId":"gemini-chat","messages":[{"type":"user","content":"hello"}]}`)
+
+	spec := searchSpec{query: workspace, dir: workspace, harness: "gemini"}
+	got, err := spec.run(time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].FullPath != path || got[0].SessionID != "gemini-chat" {
+		t.Fatalf("search by workspace = %#v, want session gemini-chat at %q", got, path)
 	}
 }

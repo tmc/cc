@@ -1550,9 +1550,10 @@ func sinceMinutes(since time.Duration) int {
 
 // metadataMatches returns the candidate sessions whose identity, session ID or
 // project path, contains query. It covers only the harnesses AllIndexEntries
-// misses: Claude Code no longer writes sessions-index.json and codex has no
-// index at all. opencode, pi, and antigravity are already scanned (and cached)
-// there, and deriving them again here would reparse every transcript.
+// misses: Claude Code no longer writes sessions-index.json, and Codex and
+// Gemini CLI have no index. Gemini CLI stores the workspace outside the chat
+// JSON, so a directory lookup must read that workspace metadata. Other Gemini
+// CLI queries can use the content pass.
 func metadataMatches(query string, roots []searchRoot, lists [][]string) []cc.IndexEntry {
 	type candidate struct {
 		root searchRoot
@@ -1562,6 +1563,10 @@ func metadataMatches(query string, roots []searchRoot, lists [][]string) []cc.In
 	for i, root := range roots {
 		switch root.kind {
 		case "claude", "gemini", "codex":
+		case "gemini-cli":
+			if !filepath.IsAbs(query) {
+				continue
+			}
 		default:
 			continue
 		}
@@ -1572,7 +1577,7 @@ func metadataMatches(query string, roots []searchRoot, lists [][]string) []cc.In
 		}
 	}
 
-	// A codex candidate costs a header read, so resolve them concurrently.
+	// Resolve the candidates concurrently because some require disk reads.
 	q := strings.ToLower(query)
 	entries := make([]cc.IndexEntry, len(cands))
 	hit := make([]bool, len(cands))
