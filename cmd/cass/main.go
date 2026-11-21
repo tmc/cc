@@ -598,6 +598,9 @@ func runResume(ctx context.Context, svc *service.Service, args []string) error {
 
 	// Output the resume command for the user to execute.
 	cmd := resumeCommand(h)
+	if cmd == "" {
+		return fmt.Errorf("resume unavailable for agent %q", h.Agent)
+	}
 	fmt.Println()
 	fmt.Println(titleStyle.Render("run:"))
 	fmt.Println(cmd)
@@ -1600,10 +1603,14 @@ func outputResume(result *cass.SearchResult) error {
 			title = title[:60] + "..."
 		}
 		fmt.Printf("# %s (%s)\n", title, h.StartedAt)
-		if h.Workspace != "" {
-			fmt.Println(resumeCommand(h))
-		} else if h.SourcePath != "" {
-			fmt.Printf("%s  # source: %s\n", resumeCommand(h), h.SourcePath)
+		cmd := resumeCommand(h)
+		switch {
+		case cmd == "":
+			fmt.Fprintf(os.Stderr, "resume unavailable for agent %q\n", h.Agent)
+		case h.Workspace != "" || h.SourcePath == "":
+			fmt.Println(cmd)
+		default:
+			fmt.Printf("%s  # source: %s\n", cmd, h.SourcePath)
 		}
 		fmt.Println()
 	}
@@ -1618,7 +1625,25 @@ func resumeCommand(h cass.Hit) string {
 
 	switch h.Agent {
 	case "gemini-cli":
+		// CASS keys Gemini sessions by path. The native ID is in the transcript.
+		if entries, err := cc.ReadFile(context.Background(), h.SourcePath); err == nil {
+			for _, entry := range entries {
+				if entry.SessionID != "" {
+					return prefix + "gemini --resume " + shellQuote(entry.SessionID)
+				}
+			}
+		}
 		return prefix + "gemini --resume"
+	case "pi":
+		if h.SourcePath != "" {
+			return prefix + "pi --session " + shellQuote(h.SourcePath)
+		}
+		return ""
+	case "antigravity":
+		if h.SourcePath != "" {
+			return prefix + "agy --conversation " + shellQuote(filepath.Base(h.SourcePath))
+		}
+		return ""
 	case "codex-cli", "codex-app":
 		if h.SessionID != "" {
 			return prefix + "codex resume " + shellQuote(h.SessionID)
@@ -1629,11 +1654,13 @@ func resumeCommand(h cass.Hit) string {
 			return prefix + "opencode --session " + shellQuote(h.SessionID)
 		}
 		return prefix + "opencode"
-	default:
+	case "claude-code":
 		if id := claudeResumeID(h); id != "" {
 			return prefix + "claude --resume " + shellQuote(id)
 		}
 		return prefix + "claude --resume"
+	default:
+		return ""
 	}
 }
 

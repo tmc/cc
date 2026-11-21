@@ -78,6 +78,43 @@ func TestResumeCommandSkipsClaudeSubagentPath(t *testing.T) {
 	}
 }
 
+func TestResumeCommandUsesHarness(t *testing.T) {
+	tests := []struct {
+		agent, path, want string
+	}{
+		{"pi", "/work/pi session.jsonl", "cd /work && pi --session '/work/pi session.jsonl'"},
+		{"pi", "", ""},
+		{"antigravity", "/work/brain/probe", "cd /work && agy --conversation probe"},
+		{"antigravity", "", ""},
+		{"openclaw", "/work/probe.jsonl", ""},
+		{"cursor", "/work/state.vscdb", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			got := resumeCommand(cass.Hit{Agent: tt.agent, SourcePath: tt.path, Workspace: "/work"})
+			if got != tt.want {
+				t.Fatalf("resumeCommand = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResumeCommandUsesGeminiTranscriptID(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "chats")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "session-fixture.json")
+	data := []byte(`{"sessionId":"gemini-native-id","messages":[{"type":"user","content":"fixture"}]}`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := resumeCommand(cass.Hit{Agent: "gemini-cli", SourcePath: path, SessionID: "cass-sha-id"})
+	if want := "gemini --resume gemini-native-id"; got != want {
+		t.Fatalf("resumeCommand = %q, want %q", got, want)
+	}
+}
+
 func TestWorkflowEntryFromRowDecodesPhasesAndAgents(t *testing.T) {
 	got := workflowEntryFromRow(store.WorkflowRow{
 		ParentSessionID: "parent-1",
