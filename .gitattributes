@@ -1,0 +1,5 @@
+# Transcript rendering goldens retain the renderer's final blank line.
+internal/transcript/testdata/claude.txt whitespace=-blank-at-eof
+internal/transcript/testdata/codex.txt whitespace=-blank-at-eof
+internal/transcript/testdata/long-tail.txt whitespace=-blank-at-eof
+internal/transcript/testdata/pi.txt whitespace=-blank-at-eof
