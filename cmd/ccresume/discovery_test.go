@@ -69,3 +69,24 @@ func TestDiscoveryRejectsSupportingFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestAntigravityDirFileContainsAndCount(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+	dir := filepath.Join(t.TempDir(), "brain", "4b0d0191-27af-4f4f-be0d-20ad2ea18a83")
+	logsDir := filepath.Join(dir, ".system_generated", "logs")
+	writeTextFile(t, filepath.Join(logsDir, "transcript.jsonl"), `{"step_index":0,"type":"USER_INPUT","content":"hello","truncated_fields":["content"]}`+"\n")
+	writeTextFile(t, filepath.Join(logsDir, "transcript_full.jsonl"), `{"step_index":0,"type":"USER_INPUT","content":"nd encodes no NVIDIA hardware/ISA specific"}`+"\n")
+
+	ok, err := fileContains(dir, "nd encodes no NVIDIA hardware/ISA specific")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Errorf("fileContains(%q) = false, want true", dir)
+	}
+	if n := countFileOccurrences("nd encodes no NVIDIA hardware/ISA specific", dir); n != 1 {
+		t.Errorf("countFileOccurrences(%q) = %d, want 1", dir, n)
+	}
+}

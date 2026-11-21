@@ -571,6 +571,7 @@ func countIndexOccurrences(query string, m cc.IndexEntry) int {
 // which ccresume already relies on for the content search; reading the file
 // into memory is the fallback.
 func countFileOccurrences(query, path string) int {
+	path = rawSessionPath(path)
 	if n, ok := rgCountMatches(query, path); ok {
 		return n
 	}
@@ -1206,6 +1207,7 @@ func grepContentMatches(contains string, since time.Duration) ([]cc.IndexEntry, 
 func fileContains(path, contains string) (bool, error) {
 	// Transcripts reach hundreds of megabytes; let rg fold the case rather
 	// than allocating a lowered copy of the whole file.
+	path = rawSessionPath(path)
 	if n, ok := rgCountMatches(contains, path); ok {
 		return n > 0, nil
 	}
