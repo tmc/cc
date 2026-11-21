@@ -11,9 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tmc/cc"
@@ -246,10 +248,22 @@ func run() error {
 		return nil
 	}
 
+	// Resolving a match decodes its whole transcript (cc.SummarizeFile), which
+	// for large sessions dominates the run time. Resolve concurrently, bounded
+	// so a wide match set doesn't saturate memory.
 	resolved := make([]resolvedMatch, len(matches))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
 	for i, m := range matches {
-		resolved[i] = resolveMatch(query, m)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			resolved[i] = resolveMatch(query, m)
+		}()
 	}
+	wg.Wait()
 	sort.SliceStable(resolved, func(i, j int) bool {
 		if resolved[i].occurrences != resolved[j].occurrences {
 			return resolved[i].occurrences > resolved[j].occurrences
@@ -358,13 +372,26 @@ func sortIndexMatches(query string, matches []cc.IndexEntry, curGitCommonDir str
 	// session's tool results but in no index field), otherwise the cheaper
 	// index-metadata count. This keeps the -1/--paths ordering consistent with
 	// the default sort, which ranks by occurrences before the cwd tiebreaker.
+	counts := make([]int, len(matches))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	for i, m := range matches {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			n := countIndexOccurrences(query, m)
+			if n == 0 {
+				n = countFileOccurrences(query, m.FullPath)
+			}
+			counts[i] = n
+		}()
+	}
+	wg.Wait()
 	occ := make(map[string]int, len(matches))
-	for _, m := range matches {
-		n := countIndexOccurrences(query, m)
-		if n == 0 {
-			n = countFileOccurrences(query, m.FullPath)
-		}
-		occ[m.FullPath] = n
+	for i, m := range matches {
+		occ[m.FullPath] = counts[i]
 	}
 	sort.SliceStable(matches, func(i, j int) bool {
 		if oi, oj := occ[matches[i].FullPath], occ[matches[j].FullPath]; oi != oj {
@@ -391,11 +418,11 @@ type resolvedMatch struct {
 func resolveMatch(query string, m cc.IndexEntry) resolvedMatch {
 	r := resolvedMatch{entry: m, target: m.ProjectPath}
 	r.occurrences = countIndexOccurrences(query, m)
-	entries, err := cc.ReadFile(context.Background(), m.FullPath)
+	summary, err := cc.SummarizeFile(context.Background(), m.FullPath)
 	if err != nil {
 		return r
 	}
-	r.summary = cc.Summarize(m.FullPath, entries)
+	r.summary = summary
 	if n := countFileOccurrences(query, m.FullPath); n > r.occurrences {
 		r.occurrences = n
 	}
