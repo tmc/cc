@@ -205,6 +205,31 @@ func TestTailNativeSnapshots(t *testing.T) {
 	}
 }
 
+func TestTailGeminiSnapshots(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chats", "session-synthetic.json")
+	tail, err := NewTail(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, text := range []string{"first prompt", "revised prompt"} {
+		writeTestFile(t, path, fmt.Sprintf(`{
+			"sessionId": "fixture",
+			"messages": [{"id": "message", "type": "user", "content": %q}]
+		}`, text))
+		update, err := tail.Poll(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !update.Replace || len(update.Entries) != 1 {
+			t.Fatalf("snapshot for %q = %+v", text, update)
+		}
+		if got := update.Entries[0].Message.TextContent(); got != text {
+			t.Errorf("snapshot content = %q, want %q", got, text)
+		}
+	}
+}
+
 func TestTailLineLimitRollback(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	writeTestFile(t, path, "{\"type\":\"user\"}\n"+string(bytes.Repeat([]byte("x"), MaxLineSize)))

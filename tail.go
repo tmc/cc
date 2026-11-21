@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/tmc/cc/internal/antigravityread"
+	"github.com/tmc/cc/internal/geminiread"
 	"github.com/tmc/cc/internal/opencoderead"
 	"github.com/tmc/cc/internal/piread"
 )
@@ -85,8 +86,8 @@ func (t *Tail) Reset() {
 // The anchor does not detect rewrites elsewhere in a growing prefix. Writers
 // must append; this is not an integrity check over the complete prefix.
 //
-// Pi, opencode and Antigravity use their native readers and return replacement
-// snapshots on every poll because their storage is not this JSONL fold format.
+// Pi, OpenCode, Antigravity, and Gemini CLI use their native readers and
+// return replacement snapshots on every poll.
 func (t *Tail) Poll(ctx context.Context) (TailUpdate, error) {
 	if t == nil || t.path == "" {
 		return TailUpdate{}, fmt.Errorf("tail is not initialized")
@@ -98,7 +99,7 @@ func (t *Tail) Poll(ctx context.Context) (TailUpdate, error) {
 	if err := ctx.Err(); err != nil {
 		return TailUpdate{}, err
 	}
-	if piread.IsSessionPath(t.path) || opencoderead.IsSessionPath(t.path) || antigravityread.IsSessionPath(t.path) {
+	if piread.IsSessionPath(t.path) || opencoderead.IsSessionPath(t.path) || antigravityread.IsSessionPath(t.path) || geminiread.IsSessionPath(t.path) {
 		entries, err := ReadFile(ctx, t.path)
 		if err != nil {
 			return TailUpdate{}, err
