@@ -13,7 +13,7 @@ func TestEncodePath(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"absolute", "/Volumes/tmc/go/src/github.com/tmc/cc", "-Volumes-tmc-go-src-github-com-tmc-cc"},
+		{"absolute", "/Volumes/example/go/src/github.com/tmc/cc", "-Volumes-example-go-src-github-com-tmc-cc"},
 		{"with dot", "/home/user/.config/claude", "-home-user--config-claude"},
 		{"empty", "", ""},
 		{"root", "/", "-"},
@@ -128,14 +128,26 @@ func TestCodexHomeOverride(t *testing.T) {
 	}
 }
 
-func TestOpenCodeHomeOverride(t *testing.T) {
-	t.Setenv("OPENCODE_HOME", "/custom/opencode")
-	got, err := OpenCodeHome()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "/custom/opencode" {
-		t.Errorf("OpenCodeHome with OPENCODE_HOME = %q, want /custom/opencode", got)
+func TestOpenCodeHome(t *testing.T) {
+	for _, tt := range []struct {
+		name, override, xdg, want string
+	}{
+		{"override", "/custom/opencode", "/var/data", "/custom/opencode"},
+		{"XDG", "", "/var/data", "/var/data/opencode"},
+		{"default", "", "", "/home/user/.local/share/opencode"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", "/home/user")
+			t.Setenv("OPENCODE_HOME", tt.override)
+			t.Setenv("XDG_DATA_HOME", tt.xdg)
+			got, err := OpenCodeHome()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("OpenCodeHome() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

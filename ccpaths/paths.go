@@ -12,8 +12,8 @@ import (
 // EncodePath converts a filesystem path to Claude Code's project-directory
 // encoding: "/" and "." are both replaced with "-".
 //
-//	/Volumes/tmc/go/src/github.com/tmc/cc
-//	→ -Volumes-tmc-go-src-github-com-tmc-cc
+//	/Volumes/example/go/src/github.com/tmc/cc
+//	→ -Volumes-example-go-src-github-com-tmc-cc
 func EncodePath(path string) string {
 	s := strings.ReplaceAll(path, string(filepath.Separator), "-")
 	return strings.ReplaceAll(s, ".", "-")
@@ -103,10 +103,14 @@ func CodexHome() (string, error) {
 }
 
 // OpenCodeHome returns the base directory for opencode data.
-// It uses OPENCODE_HOME if set, otherwise defaults to ~/.local/share/opencode.
+// It uses OPENCODE_HOME or $XDG_DATA_HOME/opencode, in that order, and
+// defaults to ~/.local/share/opencode.
 func OpenCodeHome() (string, error) {
 	if h := os.Getenv("OPENCODE_HOME"); h != "" {
 		return h, nil
+	}
+	if h := os.Getenv("XDG_DATA_HOME"); h != "" {
+		return filepath.Join(h, "opencode"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
