@@ -754,7 +754,6 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	xh, _ := ccpaths.CodexHome()
 	oh, _ := ccpaths.OpenCodeHome()
 	ph, _ := ccpaths.PiHome()
-	ah, _ := ccpaths.AntigravityHome()
 
 	cutoff := time.Now().Add(-since)
 	var files []string
@@ -778,14 +777,9 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 	if ph != "" {
 		dirs = append(dirs, rootDir{path: filepath.Join(ph, "sessions"), kind: "pi"})
 	}
-	if ah != "" {
-		dirs = append(dirs, rootDir{path: filepath.Join(ah, "brain"), kind: "antigravity"})
-	}
-	if gh != "" {
-		cliPath := filepath.Join(gh, "antigravity-cli", "brain")
-		if info, err := os.Stat(cliPath); err == nil && info.IsDir() {
-			dirs = append(dirs, rootDir{path: cliPath, kind: "antigravity"})
-		}
+	antigravityRoots, _ := antigravitySessionRoots()
+	for _, root := range antigravityRoots {
+		dirs = append(dirs, rootDir{path: root, kind: "antigravity"})
 	}
 
 	for _, dir := range dirs {

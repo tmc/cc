@@ -247,22 +247,37 @@ func openCodeIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error
 	return entries, nil
 }
 
-func antigravityIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error) {
+func antigravitySessionRoots() ([]string, error) {
+	var roots []string
+	appendRoot := func(path string) {
+		info, err := os.Stat(path)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		abs, _ := filepath.Abs(path)
+		for _, root := range roots {
+			rootAbs, _ := filepath.Abs(root)
+			if path == root || abs != "" && abs == rootAbs {
+				return
+			}
+		}
+		roots = append(roots, path)
+	}
+
 	home, err := ccpaths.AntigravityHome()
+	if err == nil {
+		appendRoot(filepath.Join(home, "brain"))
+	}
+	if home, err := ccpaths.GeminiHome(); err == nil && home != "" {
+		appendRoot(filepath.Join(home, "antigravity-cli", "brain"))
+	}
+	return roots, err
+}
+
+func antigravityIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error) {
+	roots, err := antigravitySessionRoots()
 	if err != nil {
 		return nil, err
-	}
-	root := filepath.Join(home, "brain")
-
-	var roots []string
-	if info, err := os.Stat(root); err == nil && info.IsDir() {
-		roots = append(roots, root)
-	}
-	if gHome, err := ccpaths.GeminiHome(); err == nil && gHome != "" {
-		cliPath := filepath.Join(gHome, "antigravity-cli", "brain")
-		if info, err := os.Stat(cliPath); err == nil && info.IsDir() {
-			roots = append(roots, cliPath)
-		}
 	}
 
 	var paths []string
@@ -274,7 +289,11 @@ func antigravityIndexEntries(cutoff time.Time, project string) ([]IndexEntry, er
 			if !antigravityread.IsSessionPath(path) {
 				return nil
 			}
-			if !info.ModTime().Before(cutoff) {
+			mod := info.ModTime()
+			if _, transcript := antigravityread.TranscriptFile(path); transcript != nil {
+				mod = transcript.ModTime()
+			}
+			if !mod.Before(cutoff) {
 				paths = append(paths, path)
 			}
 			return filepath.SkipDir
