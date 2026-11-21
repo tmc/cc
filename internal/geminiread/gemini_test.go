@@ -2,6 +2,9 @@ package geminiread
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -135,5 +138,29 @@ func TestReadNestedContent(t *testing.T) {
 		if got := entries[i].Message.TextContent(); got != want {
 			t.Errorf("entry %d text = %q, want %q", i, got, want)
 		}
+	}
+}
+
+func TestWorkspaceHashTakesPriority(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GEMINI_HOME", home)
+	path := filepath.Join(home, "tmp", "alias", "chats", "session.json")
+	const hashed = "/work/hashed"
+	cfg := struct {
+		Projects map[string]string `json:"projects"`
+	}{Projects: map[string]string{"/other/alias": "alias", "/another/alias": "alias", hashed: "different-alias"}}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "projects.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashed)))
+	if got := workspaceFromPath(path, ""); got != "" {
+		t.Errorf("ambiguous alias resolved to %q", got)
+	}
+	if got := workspaceFromPath(path, hash); got != hashed {
+		t.Errorf("workspace = %q, want %q", got, hashed)
 	}
 }

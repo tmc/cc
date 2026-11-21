@@ -323,19 +323,27 @@ func workspaceFromPath(path, projectHash string) string {
 	if json.Unmarshal(data, &cfg) != nil {
 		return ""
 	}
-	base := filepath.Base(projectDir)
-	for p, name := range cfg.Projects {
-		if projectHash != "" {
+	if projectHash != "" {
+		for p := range cfg.Projects {
 			h := sha256.Sum256([]byte(p))
 			if hex.EncodeToString(h[:]) == projectHash {
 				return p
 			}
 		}
-		if name != "" && name == base {
-			return p
-		}
 	}
-	return ""
+
+	base := filepath.Base(projectDir)
+	var match string
+	for p, name := range cfg.Projects {
+		if p == "" || name != base {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = p
+	}
+	return match
 }
 
 func parseTime(s string) time.Time {
