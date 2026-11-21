@@ -324,11 +324,10 @@ func checkAntigravityCompanion(path string) (int, error) {
 	}
 	compactPath := filepath.Join(dir, "transcript.jsonl")
 	fullPath := filepath.Join(dir, "transcript_full.jsonl")
-	if filepath.Base(path) == "transcript_full.jsonl" {
-		compactPath = filepath.Join(filepath.Dir(path), "transcript.jsonl")
-		fullPath = path
-	}
 	compact, err := readRawSteps(compactPath)
+	if filepath.Base(path) == "transcript_full.jsonl" && errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
 	if err != nil {
 		return 0, err
 	}

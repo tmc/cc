@@ -175,3 +175,21 @@ func TestRunGeminiCLI(t *testing.T) {
 		t.Fatalf("reports = %+v, want [%+v]", reports, want)
 	}
 }
+
+func TestRunAntigravityFullOnly(t *testing.T) {
+	relative := filepath.Join(".system_generated", "logs", "transcript_full.jsonl")
+	path := filepath.Join(t.TempDir(), relative)
+	copyFixture(t, filepath.Join("testdata", "agy", relative), path)
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"-strict", "-json", path}, &stdout, &stderr); err != nil {
+		t.Fatalf("run: %v\n%s\n%s", err, stderr.String(), stdout.String())
+	}
+	var reports []report
+	if err := json.Unmarshal(stdout.Bytes(), &reports); err != nil {
+		t.Fatal(err)
+	}
+	want := report{Path: path, Harness: "antigravity", Entries: 4, ToolUses: 1, ToolResults: 1}
+	if len(reports) != 1 || reports[0] != want {
+		t.Fatalf("reports = %+v, want [%+v]", reports, want)
+	}
+}
