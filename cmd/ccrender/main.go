@@ -128,6 +128,8 @@ type model struct {
 	file       string
 	entries    []cc.Entry
 	offset     int64
+	tailable   bool // offset-based tailing works (raw claude/codex JSONL)
+	size       int64
 	viewport   viewport.Model
 	timestamps bool
 	follow     bool
@@ -139,17 +141,32 @@ type model struct {
 type tickMsg struct{}
 
 func newModel(file string) (model, error) {
-	entries, offset, _, err := cc.ReadFileWithOffset(context.Background(), file)
-	if err != nil {
-		return model{}, err
-	}
-	return model{
+	m := model{
 		file:       file,
-		entries:    entries,
-		offset:     offset,
 		timestamps: *tsFlag,
 		follow:     *followFlag,
-	}, nil
+	}
+	// Offset tailing reads raw claude/codex JSONL lines; the other formats
+	// (pi, opencode, antigravity) need their dedicated readers, so follow
+	// mode falls back to re-reading the whole file when it grows.
+	switch cc.Harness(file) {
+	case "claude", "codex":
+		entries, offset, _, err := cc.ReadFileWithOffset(context.Background(), file)
+		if err != nil {
+			return model{}, err
+		}
+		m.entries, m.offset, m.tailable = entries, offset, true
+	default:
+		entries, err := cc.ReadFile(context.Background(), file)
+		if err != nil {
+			return model{}, err
+		}
+		m.entries = entries
+		if fi, err := os.Stat(file); err == nil {
+			m.size = fi.Size()
+		}
+	}
+	return m, nil
 }
 
 func tick() tea.Cmd {
@@ -183,17 +200,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.follow {
 			return m, nil
 		}
-		entries, newOffset, _, err := cc.ReadFileFrom(context.Background(), m.file, m.offset)
-		if err == nil && len(entries) > 0 {
-			atBottom := m.viewport.AtBottom()
-			m.entries = append(m.entries, entries...)
-			m.offset = newOffset
-			m.viewport.SetContent(m.render())
-			if atBottom {
-				m.viewport.GotoBottom()
+		if m.tailable {
+			entries, newOffset, _, err := cc.ReadFileFrom(context.Background(), m.file, m.offset)
+			if err == nil && len(entries) > 0 {
+				atBottom := m.viewport.AtBottom()
+				m.entries = append(m.entries, entries...)
+				m.offset = newOffset
+				m.viewport.SetContent(m.render())
+				if atBottom {
+					m.viewport.GotoBottom()
+				}
+			} else if err == nil {
+				m.offset = newOffset
 			}
-		} else if err == nil {
-			m.offset = newOffset
+			return m, tick()
+		}
+		if fi, err := os.Stat(m.file); err == nil && fi.Size() != m.size {
+			if entries, err := cc.ReadFile(context.Background(), m.file); err == nil {
+				atBottom := m.viewport.AtBottom()
+				m.entries = entries
+				m.size = fi.Size()
+				m.viewport.SetContent(m.render())
+				if atBottom {
+					m.viewport.GotoBottom()
+				}
+			}
 		}
 		return m, tick()
 
