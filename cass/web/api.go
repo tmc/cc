@@ -884,6 +884,14 @@ func readFileTailEntries(ctx context.Context, path string, limit int) ([]cc.Entr
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	switch cc.Harness(path) {
+	case "antigravity", "opencode", "pi":
+		return readSessionEntries(path)
+	case "gemini":
+		if filepath.Ext(path) == ".json" {
+			return readSessionEntries(path)
+		}
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

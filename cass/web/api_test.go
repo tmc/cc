@@ -817,3 +817,26 @@ func TestSessionMetaNotFound(t *testing.T) {
 		t.Fatalf("status = %d, want 404; body %q", rr.Code, rr.Body.String())
 	}
 }
+
+func TestSessionRecentPageReadsGeminiChat(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "chats")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "session-fixture.json")
+	data := []byte(`{"sessionId":"gemini-test","messages":[
+		{"id":"u","type":"user","content":"prompt","timestamp":"2026-11-19T10:00:00Z"},
+		{"id":"a","type":"gemini","content":"reply","timestamp":"2026-11-19T10:00:01Z"}
+	]}`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/?order=desc&limit=1", nil)
+	entries, err := readRecentSessionEntriesWithSubagents(path, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Message == nil || entries[0].Message.TextContent() != "reply" {
+		t.Fatalf("latest entries = %+v, want the reply", entries)
+	}
+}
