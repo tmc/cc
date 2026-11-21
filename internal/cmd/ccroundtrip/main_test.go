@@ -140,3 +140,38 @@ func TestSessionFilesSkipsAntigravityFullCompanion(t *testing.T) {
 		t.Fatalf("paths = %v, want compact transcript only", paths)
 	}
 }
+
+func TestRunGeminiCLI(t *testing.T) {
+	chats := filepath.Join(t.TempDir(), "chats")
+	if err := os.Mkdir(chats, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(chats, "session-2026-04-03T22-57-d00a4143.json")
+	session := `{
+		"sessionId": "d00a4143-e123-42c2-a19f-874687c50621",
+		"startTime": "2026-04-03T22:57:32.508Z",
+		"messages": [
+			{"id":"user-1","type":"user","content":"hello"},
+			{"id":"model-1","type":"gemini","content":"inspecting","toolCalls":[
+				{"id":"call-1","name":"read_file","args":{"file_path":"main.go"},
+				"result":[{"functionResponse":{"response":{"output":"package main"}}}],
+				"status":"success"}
+			]}
+		]
+	}`
+	if err := os.WriteFile(path, []byte(session), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"-strict", "-json", path}, &stdout, &stderr); err != nil {
+		t.Fatalf("run: %v\n%s\n%s", err, stderr.String(), stdout.String())
+	}
+	var reports []report
+	if err := json.Unmarshal(stdout.Bytes(), &reports); err != nil {
+		t.Fatal(err)
+	}
+	want := report{Path: path, Harness: "gemini", Entries: 4, ToolUses: 1, ToolResults: 1}
+	if len(reports) != 1 || reports[0] != want {
+		t.Fatalf("reports = %+v, want [%+v]", reports, want)
+	}
+}
