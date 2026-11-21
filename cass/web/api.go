@@ -16,6 +16,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/cass/collector"
 	"github.com/tmc/cc/cass/store"
 	"github.com/tmc/cc/ccinboxstore"
 	"github.com/tmc/cc/ccpaths"
@@ -361,11 +362,11 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 
 	// Check if client wants SSE streaming or JSON dump.
 	if r.Header.Get("Accept") == "text/event-stream" {
-		s.streamSession(w, r, sourcePath)
+		s.streamSession(w, r, sourcePath, id)
 		return
 	}
 
-	if wantsRecentPage(r) {
+	if wantsRecentPage(r) && !isCursorSessionSource(sourcePath, id) {
 		entries, err := readRecentSessionEntriesWithSubagents(sourcePath, r)
 		if err != nil {
 			writeError(w, err, http.StatusInternalServerError)
@@ -376,7 +377,7 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Default: return all entries as JSON array (including subagent entries).
-	entries, err := readSessionEntriesWithSubagents(sourcePath)
+	entries, err := readIndexedSessionEntries(r.Context(), sourcePath, id)
 	if err != nil {
 		writeError(w, err, http.StatusInternalServerError)
 		return
@@ -402,7 +403,7 @@ func (s *Server) handleWorkflowAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Header.Get("Accept") == "text/event-stream" {
-		s.streamSession(w, r, path)
+		s.streamSession(w, r, path, "")
 		return
 	}
 	if wantsRecentPage(r) {
@@ -456,7 +457,7 @@ func validateWorkflowAgentPath(p string) (string, error) {
 	return resolved, nil
 }
 
-func (s *Server) streamSession(w http.ResponseWriter, r *http.Request, path string) {
+func (s *Server) streamSession(w http.ResponseWriter, r *http.Request, path, id string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -467,9 +468,9 @@ func (s *Server) streamSession(w http.ResponseWriter, r *http.Request, path stri
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	follow := r.URL.Query().Get("follow") == "true"
+	follow := r.URL.Query().Get("follow") == "true" && !isCursorSessionSource(path, id)
 
-	entries, err := readSessionEntriesWithSubagents(path)
+	entries, err := readIndexedSessionEntries(r.Context(), path, id)
 	if err != nil {
 		fmt.Fprintf(w, "event: error\ndata: %q\n\n", err.Error())
 		flusher.Flush()
@@ -642,6 +643,48 @@ func (s *Server) tailSession(ctx context.Context, w http.ResponseWriter, flusher
 			}
 		}
 	}
+}
+
+func isCursorSessionSource(path, id string) bool {
+	return strings.HasPrefix(id, "cur-") && filepath.Base(path) == "state.vscdb"
+}
+
+func readIndexedSessionEntries(ctx context.Context, path, id string) ([]cc.Entry, error) {
+	if !isCursorSessionSource(path, id) {
+		return readSessionEntriesWithSubagents(path)
+	}
+
+	// A Cursor database holds multiple sessions. Use the collector's IDs
+	// to select the same conversation that was indexed.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	out := make(chan cass.Session)
+	done := make(chan error, 1)
+	go func() {
+		done <- new(collector.Cursor).Scan(ctx, cass.ScanConfig{Paths: []string{path}}, out)
+	}()
+	var entries []cc.Entry
+	for session := range out {
+		if session.ID != id {
+			continue
+		}
+		for _, m := range session.Messages {
+			content, _ := json.Marshal(m.Content)
+			entries = append(entries, cc.Entry{
+				Type: m.Role, SessionID: id, UUID: m.ID, CWD: session.Workspace,
+				Timestamp: m.CreatedAt, Source: "cursor",
+				Message: &cc.Message{ID: m.ID, Role: m.Role, Content: content},
+			})
+		}
+		cancel()
+	}
+	if err := <-done; err != nil && len(entries) == 0 {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("cursor session not found: %s", id)
+	}
+	return entries, nil
 }
 
 func readSessionEntries(path string) ([]cc.Entry, error) {
