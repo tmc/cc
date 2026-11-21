@@ -193,6 +193,17 @@ func ReadFileFrom(ctx context.Context, path string, offset int64) (entries []Ent
 		entries, newOffset, err := piread.ReadFileFrom(ctx, path, offset)
 		return entries, newOffset, nil, err
 	}
+	if antigravityread.IsSessionPath(path) {
+		entries, err := antigravityread.ReadFile(ctx, path)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		return entries, info.Size(), nil, nil
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, 0, nil, err
@@ -243,6 +254,17 @@ func ReadFileWithOffset(ctx context.Context, path string) (entries []Entry, offs
 	}
 	if piread.IsSessionPath(path) {
 		entries, err := piread.ReadFile(ctx, path)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		return entries, info.Size(), nil, nil
+	}
+	if antigravityread.IsSessionPath(path) {
+		entries, err := antigravityread.ReadFile(ctx, path)
 		if err != nil {
 			return nil, 0, nil, err
 		}
