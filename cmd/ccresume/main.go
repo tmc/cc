@@ -25,6 +25,7 @@ import (
 	"github.com/tmc/cc/ccgit"
 	"github.com/tmc/cc/cchooks"
 	"github.com/tmc/cc/ccpaths"
+	"github.com/tmc/cc/internal/opencoderead"
 )
 
 var (
@@ -571,6 +572,14 @@ func countIndexOccurrences(query string, m cc.IndexEntry) int {
 // which ccresume already relies on for the content search; reading the file
 // into memory is the fallback.
 func countFileOccurrences(query, path string) int {
+	if hasSplitTranscript(path) {
+		entries, err := cc.ReadFile(context.Background(), path)
+		if err != nil {
+			return 0
+		}
+		raw, _ := json.Marshal(entries)
+		return countOccurrences(query, string(raw))
+	}
 	path = rawSessionPath(path)
 	if n, ok := rgCountMatches(query, path); ok {
 		return n
@@ -1205,6 +1214,14 @@ func grepContentMatches(contains string, since time.Duration) ([]cc.IndexEntry, 
 }
 
 func fileContains(path, contains string) (bool, error) {
+	if hasSplitTranscript(path) {
+		entries, err := cc.ReadFile(context.Background(), path)
+		if err != nil {
+			return false, err
+		}
+		data, err := json.Marshal(entries)
+		return containsFold(string(data), contains), err
+	}
 	// Transcripts reach hundreds of megabytes; let rg fold the case rather
 	// than allocating a lowered copy of the whole file.
 	path = rawSessionPath(path)
@@ -1216,6 +1233,12 @@ func fileContains(path, contains string) (bool, error) {
 		return false, nil
 	}
 	return containsFold(string(data), contains), nil
+}
+
+// hasSplitTranscript reports whether path identifies a session whose content
+// is stored outside the file identified by the path.
+func hasSplitTranscript(path string) bool {
+	return opencoderead.IsSessionPath(path)
 }
 
 // containsFold reports whether s contains substr, ignoring case. The filters
@@ -1382,7 +1405,7 @@ func (s searchSpec) run(since time.Duration) ([]cc.IndexEntry, error) {
 		scanCh <- scanRecentSessions(s.query, contentQuery, since)
 	}()
 
-	matches, err := findMatches(s.query, since)
+	matches, err := findIndexedMatches(s.query, since, s.query == s.wrote || s.query == s.cmdText || s.query == s.resultText)
 	if err != nil {
 		return nil, err
 	}
@@ -1438,7 +1461,7 @@ func (s searchSpec) run(since time.Duration) ([]cc.IndexEntry, error) {
 	return matches, nil
 }
 
-func findMatches(query string, since time.Duration) ([]cc.IndexEntry, error) {
+func findIndexedMatches(query string, since time.Duration, allSplitTranscripts bool) ([]cc.IndexEntry, error) {
 	entries, err := cc.AllIndexEntries(since, "")
 	if err != nil {
 		return nil, err
@@ -1450,7 +1473,18 @@ func findMatches(query string, since time.Duration) ([]cc.IndexEntry, error) {
 		if !validSessionID(e.SessionID) {
 			continue
 		}
-		if containsAny(q, e.SessionID, e.ProjectPath, e.FirstPrompt, e.Summary, e.GitBranch) {
+		match := containsAny(q, e.SessionID, e.ProjectPath, e.FirstPrompt, e.Summary, e.GitBranch)
+		if !match && hasSplitTranscript(e.FullPath) {
+			if allSplitTranscripts {
+				match = true
+			} else {
+				match, err = fileContains(e.FullPath, query)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if match {
 			matches = append(matches, e)
 		}
 	}
