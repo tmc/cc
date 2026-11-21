@@ -1,6 +1,7 @@
 package ccgit
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -79,6 +80,11 @@ func absoluteGitPath(dir, p string) string {
 func OriginRemote(path string) (string, error) {
 	out, err := exec.Command("git", "-C", gitDirArg(path), "config", "--get", "remote.origin.url").Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		// Git reports an unset key with status 1 and no diagnostic.
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(exitErr.Stderr) == 0 {
+			return "", nil
+		}
 		return "", fmt.Errorf("git config remote.origin.url: %w", err)
 	}
 	return NormalizeRemote(strings.TrimSpace(string(out))), nil

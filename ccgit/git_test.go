@@ -76,6 +76,24 @@ func real(t *testing.T, path string) string {
 	return p
 }
 
+func TestOriginRemote(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	repo := t.TempDir()
+	run(t, repo, "init", "-q")
+
+	if got, err := OriginRemote(repo); got != "" || err != nil {
+		t.Errorf("OriginRemote without origin = %q, %v; want empty string, nil", got, err)
+	}
+	run(t, repo, "remote", "add", "origin", "git@example.com:org/repo.git")
+	if got, err := OriginRemote(repo); got != "example.com/org/repo" || err != nil {
+		t.Errorf("OriginRemote with origin = %q, %v; want %q, nil", got, err, "example.com/org/repo")
+	}
+	if _, err := OriginRemote(filepath.Join(repo, "missing")); err == nil {
+		t.Error("OriginRemote for missing directory succeeded")
+	}
+}
+
 // NormalizeRemote reduces the URL forms one repository is cloned by to one key.
 func TestNormalizeRemote(t *testing.T) {
 	tests := []struct{ url, want string }{
