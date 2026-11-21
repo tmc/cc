@@ -1474,6 +1474,9 @@ func sessionRoots() ([]searchRoot, error) {
 		if d := filepath.Join(gh, "projects"); dirExists(d) {
 			roots = append(roots, searchRoot{dir: d, kind: "gemini"})
 		}
+		if d := filepath.Join(gh, "tmp"); dirExists(d) {
+			roots = append(roots, searchRoot{dir: d, kind: "gemini-cli"})
+		}
 	}
 	xh, _ := ccpaths.CodexHome()
 	if xh != "" {
@@ -1906,7 +1909,8 @@ func isRecentSessionFile(name string, info os.FileInfo, cutoff time.Time) bool {
 		return false
 	}
 	return strings.HasSuffix(name, ".jsonl") ||
-		(strings.HasPrefix(name, "ses_") && strings.HasSuffix(name, ".json"))
+		(strings.HasPrefix(name, "ses_") && strings.HasSuffix(name, ".json")) ||
+		(strings.HasPrefix(name, "session-") && strings.HasSuffix(name, ".json"))
 }
 
 // grepFiles returns the files among paths that contain the literal query,
@@ -2018,6 +2022,19 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 				modified = s.LastTime
 			}
 		}
+	case "gemini-cli":
+		if entries, err := cc.ReadFile(context.Background(), path); err == nil {
+			s := cc.Summarize(path, entries)
+			if s.SessionID != "" {
+				sessionID = s.SessionID
+			}
+			if s.CWD != "" {
+				projectPath = s.CWD
+			}
+			if !s.LastTime.IsZero() {
+				modified = s.LastTime
+			}
+		}
 	default:
 		rel, err := filepath.Rel(root.dir, path)
 		if err != nil {
@@ -2049,6 +2066,9 @@ func isResumeSessionPath(path, kind string) bool {
 		return strings.HasSuffix(base, ".jsonl")
 	case "opencode":
 		return strings.HasPrefix(base, "ses_") && strings.HasSuffix(base, ".json")
+	case "gemini-cli":
+		return strings.HasPrefix(base, "session-") && strings.HasSuffix(base, ".json") &&
+			filepath.Base(filepath.Dir(path)) == "chats"
 	case "antigravity":
 		return (base == "transcript.jsonl" || base == "transcript_full.jsonl") &&
 			filepath.Base(filepath.Dir(path)) == "logs" &&
