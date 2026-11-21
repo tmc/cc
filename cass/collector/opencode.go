@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/ccusage"
 )
 
@@ -623,11 +624,11 @@ func (c *OpenCode) root() (string, error) {
 	if c.Root != "" {
 		return c.Root, nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := ccpaths.OpenCodeHome()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".local", "share", "opencode", "storage"), nil
+	return filepath.Join(home, "storage"), nil
 }
 
 func (c *OpenCode) storageRootFromSessionPath(path string) string {

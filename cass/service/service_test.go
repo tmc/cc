@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/cass/collector"
 )
 
 type collectorFunc struct {
@@ -171,5 +172,39 @@ func TestCollectorForCursorPath(t *testing.T) {
 		if got := collectorForPath(filepath.FromSlash(path)).Name(); got != "cursor" {
 			t.Errorf("collectorForPath(%q) = %s, want cursor", path, got)
 		}
+	}
+}
+
+func TestOpenCodeCustomHomeIndexing(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OPENCODE_HOME", root)
+	storage := filepath.Join(root, "storage")
+	project := filepath.Join(storage, "session", "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(project, "ses_override.json")
+	data := []byte(`{"id":"ses_override","projectID":"project","directory":"/work","title":"override","time":{"created":1780000000000}}`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		DBPath:     filepath.Join(t.TempDir(), "index.db"),
+		Collectors: []cass.Collector{new(collector.OpenCode)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	ctx := t.Context()
+	if n, err := svc.Index(ctx, true); err != nil || n != 1 {
+		t.Fatalf("Index = %d, %v, want one OpenCode session", n, err)
+	}
+	if n, err := svc.IndexRoots(ctx, []string{storage}); err != nil || n != 1 {
+		t.Fatalf("IndexRoots = %d, %v, want one OpenCode session", n, err)
+	}
+	hit, err := svc.Session(ctx, "ses_override")
+	if err != nil || hit.Agent != "opencode" || hit.SourcePath != path {
+		t.Fatalf("Session = %+v, %v, want OpenCode source %s", hit, err, path)
 	}
 }

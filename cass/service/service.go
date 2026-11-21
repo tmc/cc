@@ -19,6 +19,7 @@ import (
 	"github.com/tmc/cc/cass/collector"
 	"github.com/tmc/cc/cass/collector/har"
 	"github.com/tmc/cc/cass/store"
+	"github.com/tmc/cc/ccpaths"
 )
 
 // Config configures the service.
@@ -694,8 +695,16 @@ func changedFilesSince(filePaths []string) time.Time {
 }
 
 func collectorForPath(path string) cass.Collector {
-	if cc.Harness(path) == "antigravity" {
+	switch cc.Harness(path) {
+	case "antigravity":
 		return &collector.Antigravity{}
+	case "opencode":
+		return &collector.OpenCode{}
+	}
+	if home, err := ccpaths.OpenCodeHome(); err == nil {
+		if rel, err := filepath.Rel(filepath.Join(home, "storage"), path); err == nil && filepath.IsLocal(rel) {
+			return &collector.OpenCode{}
+		}
 	}
 	path = strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
 	switch {
