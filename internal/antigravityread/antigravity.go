@@ -206,6 +206,12 @@ func readTranscriptFile(ctx context.Context, path, sessionID, sessionDir string)
 					Text: step.Thinking,
 				})
 			}
+			if step.Content != "" {
+				blocks = append(blocks, ccmodel.ContentBlock{
+					Type: "text",
+					Text: step.Content,
+				})
+			}
 			if len(step.ToolCalls) > 0 {
 				pendingToolCalls = pendingToolCalls[:0]
 			}
