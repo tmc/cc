@@ -1,24 +1,29 @@
 package collector
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
+	"github.com/tmc/cc/ccpaths"
 )
 
 func TestWorkspaceFromPath(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "go", "src", "github.com", "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name string
 		path string
 		want string
 	}{
 		{
-			name: "standard absolute path",
-			path: "/home/user/.claude/projects/-Volumes-tmc-go-src-github-com-tmc-cc/abc123.jsonl",
-			// decodePath checks filesystem: /Volumes/tmc/go/src/github.com exists
-			// so "github-com" resolves to "github.com" not "github/com".
-			want: "/Volumes/tmc/go/src/github.com/tmc/cc",
+			name: "absolute path with a dotted directory",
+			path: filepath.Join("/home/user/.claude/projects", ccpaths.EncodePath(workspace), "session.jsonl"),
+			want: workspace,
 		},
 		{
 			name: "home directory path",
@@ -52,8 +57,8 @@ func TestWorkspaceFromPath(t *testing.T) {
 		},
 		{
 			name: "subagent session nested under session-id dir",
-			path: "/home/user/.claude/projects/-Volumes-tmc-myproject/7b720b28-662f-4c46/subagents/agent-a95e4e0.jsonl",
-			want: "/Volumes/tmc/myproject",
+			path: "/home/user/.claude/projects/-Volumes-example-myproject/session-id/subagents/agent-example.jsonl",
+			want: "/Volumes/example/myproject",
 		},
 		{
 			name: "tool-results file nested under session-id dir",
