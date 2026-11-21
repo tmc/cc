@@ -2023,17 +2023,17 @@ func indexEntryForPath(path string, root searchRoot, info os.FileInfo) (cc.Index
 			}
 		}
 	case "gemini-cli":
-		if entries, err := cc.ReadFile(context.Background(), path); err == nil {
-			s := cc.Summarize(path, entries)
-			if s.SessionID != "" {
-				sessionID = s.SessionID
-			}
-			if s.CWD != "" {
-				projectPath = s.CWD
-			}
-			if !s.LastTime.IsZero() {
-				modified = s.LastTime
-			}
+		entries, err := cc.ReadFile(context.Background(), path)
+		if err != nil {
+			return cc.IndexEntry{}, false
+		}
+		s := cc.Summarize(path, entries)
+		sessionID = s.SessionID
+		if s.CWD != "" {
+			projectPath = s.CWD
+		}
+		if !s.LastTime.IsZero() {
+			modified = s.LastTime
 		}
 	default:
 		rel, err := filepath.Rel(root.dir, path)

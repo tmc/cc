@@ -25,6 +25,8 @@ func TestDiscoveryRejectsSupportingFiles(t *testing.T) {
 		{"gemini", "needle/session/events.jsonl", `{"type":"started","text":"needle"}`, false},
 		{"gemini-cli", "proj/chats/session-2026-04-03T22-56-d00a4143.json", `{"sessionId":"d00a4143","messages":[{"type":"user","content":"needle"}]}`, true},
 		{"gemini-cli", "proj/logs.json", `{"text":"needle"}`, false},
+		{"gemini-cli", "proj/chats/session-corrupt.json", `needle invalid json`, false},
+		{"gemini-cli", "proj/chats/session-support.json", `{"text":"needle"}`, false},
 		{"codex", "2026/rollout.jsonl", `{"type":"session_meta","payload":{"id":"needle","cwd":"/work"}}`, true},
 		{"codex", "2026/journal.jsonl", `{"type":"started","text":"needle"}`, false},
 		{"codex", "2026/rollout.jsonl", `{"type":"session_meta","payload":{"cwd":"/needle"}}`, false},
