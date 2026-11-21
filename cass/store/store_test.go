@@ -967,12 +967,12 @@ func TestSkillsRoundTrip(t *testing.T) {
 			result.TotalCount, len(result.Hits))
 	}
 
-	skills, err := s.Skills(ctx, "nlm", "selected", 10)
+	skills, err := s.SkillSessions(ctx, cass.SkillQuery{Skill: "nlm", Kinds: []string{"selected"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(skills) != 1 || skills[0].Name != "nlm" || skills[0].SessionID != "skill-session" {
-		t.Fatalf("Skills = %+v, want selected nlm hit", skills)
+	if len(skills) != 1 || skills[0].SessionID != "skill-session" || len(skills[0].Skills) != 1 || skills[0].Skills[0].Name != "nlm" {
+		t.Fatalf("SkillSessions = %+v, want one session with selected nlm", skills)
 	}
 
 	agg, err := s.AggregateStats(ctx, time.Time{}, time.Time{})

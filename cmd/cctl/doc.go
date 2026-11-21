@@ -36,7 +36,7 @@
 //	handoff, ho  → cchandoff   Build cross-tool handoff prompts.
 //	memory,  mm  → ccmemory    List and read auto-memory files.
 //	goals        → cass goals   Show goal-mode objectives indexed by cass.
-//	skills       → cass skills  Show skill usage indexed by cass.
+//	skills       → cass skills  Look up which sessions used a skill.
 //	requests     → cass requests Show indexed API request breakdown.
 //	web          → cass web     Start the cass web UI server.
 //

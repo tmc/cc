@@ -173,7 +173,7 @@ Commands:
   handoff, ho  Build cross-tool session handoff prompt
   memory, mm   List and read auto-memory files
   goals        Show goal-mode objectives indexed by cass
-  skills       Show skill usage indexed by cass
+  skills       Look up which sessions used a skill
   requests     Show indexed API request breakdown
   web          Show the cass web UI
   help         Show help for a command

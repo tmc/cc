@@ -226,10 +226,11 @@ func (c *OpenCode) parseSession(path string) (cass.Session, error) {
 	}
 
 	root := c.storageRootFromSessionPath(path)
-	messages, stats, usage, meta, err := readOpenCodeMessages(root, sf.ID, sf.ParentID)
+	tr, err := readOpenCodeMessages(root, sf.ID, sf.ParentID)
 	if err != nil {
 		return cass.Session{}, err
 	}
+	messages, stats, meta := tr.messages, tr.stats, tr.meta
 	if sf.Version != "" {
 		meta["version"] = sf.Version
 	}
@@ -282,7 +283,8 @@ func (c *OpenCode) parseSession(path string) (cass.Session, error) {
 		EndedAt:    ended,
 		Messages:   messages,
 		Stats:      stats,
-		Usage:      usage,
+		Usage:      tr.usage,
+		Skills:     tr.skills,
 		Metadata:   meta,
 	}, nil
 }
@@ -299,11 +301,11 @@ func (c *OpenCode) parseSession(path string) (cass.Session, error) {
 // so the caller passes it: without it every subagent request would look like
 // ordinary work and -no-sidechain would mean something different here than for
 // every other harness.
-func readOpenCodeMessages(root, sessionID, parentID string) ([]cass.Message, cass.SessionStats, []cass.UsageEvent, map[string]any, error) {
+func readOpenCodeMessages(root, sessionID, parentID string) (openCodeTranscript, error) {
 	messageDir := filepath.Join(root, "message", sessionID)
 	files, err := os.ReadDir(messageDir)
 	if err != nil {
-		return nil, cass.SessionStats{ToolBreakdown: map[string]int{}}, nil, map[string]any{}, nil
+		return openCodeTranscript{stats: cass.SessionStats{ToolBreakdown: map[string]int{}}, meta: map[string]any{}}, nil
 	}
 
 	var records []openCodeMessageFile
@@ -329,6 +331,7 @@ func readOpenCodeMessages(root, sessionID, parentID string) ([]cass.Message, cas
 	var usage []cass.UsageEvent
 	meta := map[string]any{}
 	var messages []cass.Message
+	var skills skillSet
 	var model, provider, mode, agent string
 	var cost float64
 	var last time.Time
@@ -355,6 +358,12 @@ func readOpenCodeMessages(root, sessionID, parentID string) ([]cass.Message, cas
 			stats.ToolCalls++
 			stats.ToolBreakdown[name]++
 			countOpenCodeTool(name, &stats)
+		}
+		for _, part := range parts {
+			if part.Type == "tool" && part.Tool != "" {
+				input, _ := json.Marshal(part.State["input"])
+				skills.addToolUse(part.Tool, input, created)
+			}
 		}
 		stats.InputTokens += rec.Tokens.Input
 		stats.OutputTokensSnapshot += rec.Tokens.Output
@@ -404,7 +413,22 @@ func readOpenCodeMessages(root, sessionID, parentID string) ([]cass.Message, cas
 		messages[len(messages)-1].CreatedAt = last
 	}
 	stats.Sparkline = openCodeSparkline(messages)
-	return messages, stats, usage, meta, nil
+	return openCodeTranscript{
+		messages: messages,
+		stats:    stats,
+		usage:    usage,
+		meta:     meta,
+		skills:   skills.list("opencode"),
+	}, nil
+}
+
+// openCodeTranscript is what readOpenCodeMessages derives from one session.
+type openCodeTranscript struct {
+	messages []cass.Message
+	stats    cass.SessionStats
+	usage    []cass.UsageEvent
+	meta     map[string]any
+	skills   []cass.SkillUse
 }
 
 // openCodeModelID renders opencode's split model id as one "provider/model"

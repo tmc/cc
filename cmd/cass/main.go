@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/tmc/cc"
@@ -50,7 +51,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "  search     search indexed sessions")
 		fmt.Fprintln(os.Stderr, "  resume     search and resume a session interactively")
 		fmt.Fprintln(os.Stderr, "  goals      list goal-mode objectives")
-		fmt.Fprintln(os.Stderr, "  skills     list skill usage")
+		fmt.Fprintln(os.Stderr, "  skills     look up which sessions used a skill")
 		fmt.Fprintln(os.Stderr, "  links      show inter-session communication graph")
 		fmt.Fprintln(os.Stderr, "  map        show iTerm2 <-> Claude session ID mappings")
 		fmt.Fprintln(os.Stderr, "  stats      show index statistics")
@@ -278,7 +279,20 @@ func runIndex(ctx context.Context, svc *service.Service, args []string, jsonOut 
 	sessionDir := fs.String("session-dir", "", "file or directory of .proxymansessionv2/.proxymanlogv2 files to ingest")
 	artifactDirs := fs.Bool("artifact-dirs", true, "scan ~/.it2/sessions/*/proxy-traffic.*.jsonl (default on)")
 	noArtifactDirs := fs.Bool("no-artifact-dirs", false, "disable artifact dir scanning")
+	skills := fs.Bool("skills", false, "re-extract skill use from every session file, rewriting only skill rows")
 	fs.Parse(args)
+
+	if *skills {
+		n, err := svc.RefreshSkills(ctx)
+		if err != nil {
+			return fmt.Errorf("refresh skills: %w", err)
+		}
+		if jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(map[string]int{"skill_sessions": n})
+		}
+		fmt.Printf("refreshed skills for %d sessions\n", n)
+		return nil
+	}
 
 	var (
 		count    int
@@ -383,7 +397,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, searchOptions, error
 	workspace := fs.String("workspace", "", "filter by workspace path or project name")
 	gitCommonDir := fs.String("git-common-dir", "", "filter by resolved git common dir (stable across worktrees)")
 	goalStatus := fs.String("goal-status", "", "filter by goal status")
-	skill := fs.String("skill", "", "filter by used skill name or path substring")
+	skill := fs.String("skill", "", "filter to sessions that used a skill (name, glob or path substring)")
 	producedArtifacts := fs.Bool("produced-artifacts", false, "filter to sessions with Artifact tool publications")
 	pwd := fs.Bool("pwd", false, "filter to current working directory")
 	since := fs.Duration("since", 0, "sessions within duration (e.g. 12h, 24h, 168h)")
@@ -399,15 +413,7 @@ func buildSearchRequest(args []string) (cass.SearchRequest, searchOptions, error
 
 	ws := *workspace
 	if *pwd && ws == "" {
-		if wd, err := os.Getwd(); err == nil {
-			if rp, err := filepath.EvalSymlinks(wd); err == nil {
-				wd = rp
-			}
-			// The workspace path stored in the DB uses dash-encoded paths
-			// where dots in domain names become slashes (github.com → github/com).
-			// Match using the last path components to avoid this mismatch.
-			ws = filepath.Base(filepath.Dir(wd)) + "/" + filepath.Base(wd)
-		}
+		ws = pwdWorkspace()
 	}
 
 	opts := searchOptions{snippet: *snippet, render: *render}
@@ -450,6 +456,21 @@ func buildSearchRequest(args []string) (cass.SearchRequest, searchOptions, error
 		req.Filters.Before = t
 	}
 	return req, opts, nil
+}
+
+// pwdWorkspace returns a workspace filter for the current directory.
+func pwdWorkspace() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if rp, err := filepath.EvalSymlinks(wd); err == nil {
+		wd = rp
+	}
+	// The workspace path stored in the DB uses dash-encoded paths
+	// where dots in domain names become slashes (github.com → github/com).
+	// Match using the last path components to avoid this mismatch.
+	return filepath.Base(filepath.Dir(wd)) + "/" + filepath.Base(wd)
 }
 
 func runSearch(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
@@ -611,28 +632,24 @@ func printHit(num int, h cass.Hit, snippet bool) {
 		}
 		fmt.Printf("    %s %s\n", statusStyle(status), obj)
 	}
-	if len(h.Skills) > 0 {
-		var names []string
-		for _, sk := range h.Skills {
-			if sk.Kind == "available" {
-				continue
-			}
-			names = append(names, sk.Name)
-			if len(names) == 4 {
-				break
-			}
+	var names []string
+	seen := map[string]bool{}
+	for _, sk := range h.Skills {
+		if sk.Kind != "selected" && sk.Kind != "loaded" {
+			continue
 		}
-		if len(names) == 0 {
-			for _, sk := range h.Skills {
-				names = append(names, sk.Name)
-				if len(names) == 4 {
-					break
-				}
-			}
+		name := sk.Name
+		if i := strings.LastIndex(name, ":"); i >= 0 {
+			name = name[i+1:]
 		}
-		if len(names) > 0 {
-			fmt.Printf("    %s %s\n", statusStyle("skill"), strings.Join(names, ", "))
+		if seen[name] || len(names) == 4 {
+			continue
 		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	if len(names) > 0 {
+		fmt.Printf("    %s %s\n", statusStyle("skill"), strings.Join(names, ", "))
 	}
 
 	// Line 3: project, time, duration, and stats.
@@ -840,58 +857,125 @@ func runGoals(ctx context.Context, svc *service.Service, args []string, jsonOut 
 
 func runSkills(ctx context.Context, svc *service.Service, args []string, jsonOut bool) error {
 	fs := flag.NewFlagSet("skills", flag.ExitOnError)
-	skill := fs.String("skill", "", "filter by skill name or path substring")
-	kind := fs.String("kind", "", "filter by signal kind")
-	limit := fs.Int("limit", 50, "max rows to return")
-	if err := fs.Parse(args); err != nil {
-		return err
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: cass skills [flags] [skill]")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "With no skill, cass skills lists skills by how many sessions used them.")
+		fmt.Fprintln(os.Stderr, "With a skill name, glob (go-team-*) or path substring, it lists the")
+		fmt.Fprintln(os.Stderr, "sessions that used it, most recent first.")
+		fmt.Fprintln(os.Stderr)
+		fs.PrintDefaults()
 	}
-	if fs.NArg() > 0 && *skill == "" {
-		*skill = fs.Arg(0)
+	kind := fs.String("kind", "", "comma-separated signal kinds, or all (default selected,loaded)")
+	agent := fs.String("agent", "", "filter by harness (claude-code, codex, pi, ...)")
+	workspace := fs.String("workspace", "", "filter by workspace path or project name")
+	pwd := fs.Bool("pwd", false, "filter to current working directory")
+	since := fs.Duration("since", 0, "signals within duration (e.g. 24h, 168h)")
+	summary := fs.Bool("summary", false, "list skills with session counts, even when a skill is given")
+	limit := fs.Int("n", 50, "max sessions, or skills with -summary")
+	fs.Parse(args)
+	if fs.NArg() > 1 {
+		fs.Usage()
+		return fmt.Errorf("skills: want at most one skill, got %d", fs.NArg())
 	}
 
-	skills, err := svc.Skills(ctx, *skill, *kind, *limit)
+	q := cass.SkillQuery{
+		Skill:     fs.Arg(0),
+		Kinds:     cass.ParseSkillKinds(*kind),
+		Agent:     *agent,
+		Workspace: *workspace,
+		Limit:     *limit,
+	}
+	if *pwd && q.Workspace == "" {
+		q.Workspace = pwdWorkspace()
+	}
+	if *since > 0 {
+		q.Since = time.Now().Add(-*since)
+	}
+	if t, err := svc.SkillsRefreshedAt(ctx); err == nil && t.IsZero() {
+		fmt.Fprintln(os.Stderr, "cass: sessions indexed by an older cass have no skill rows; run 'cass index -skills' once")
+	}
+
+	if *summary || q.Skill == "" {
+		stats, err := svc.SkillStats(ctx, q)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return json.NewEncoder(os.Stdout).Encode(stats)
+		}
+		return printSkillStats(os.Stdout, stats)
+	}
+
+	sessions, err := svc.SkillSessions(ctx, q)
 	if err != nil {
 		return err
 	}
 	if jsonOut {
-		return json.NewEncoder(os.Stdout).Encode(skills)
+		return json.NewEncoder(os.Stdout).Encode(sessions)
 	}
-	if len(skills) == 0 {
-		fmt.Println("no skills")
+	if len(sessions) == 0 {
+		fmt.Printf("no sessions used %s\n", q.Skill)
 		return nil
 	}
-	for _, sk := range skills {
-		when := relativeTime(sk.EndedAt)
-		name := sk.Name
-		if sk.Path != "" {
-			name += "  " + sk.Path
+	for _, ss := range sessions {
+		when := ""
+		if !ss.LastSeen.IsZero() {
+			when = relativeTime(ss.LastSeen.Format(time.RFC3339))
 		}
-		meta := shortProject(sk.Workspace)
-		if sk.Count > 1 {
-			if meta != "" {
-				meta += "  "
-			}
-			meta += fmt.Sprintf("%d signals", sk.Count)
-		}
-		if len(sk.Evidence) > 0 {
-			if meta != "" {
-				meta += "  "
-			}
-			meta += strings.Join(sk.Evidence, "; ")
-		}
-		if when != "" {
-			if meta != "" {
-				meta += "  "
-			}
-			meta += when
-		}
-		fmt.Printf("%-10s  %-10s  %s\n", statusStyle(sk.Kind), short(sk.SessionID), name)
-		if meta != "" {
-			fmt.Printf("                        %s\n", meta)
-		}
+		fmt.Printf("%-10s  %-11s  %s  %s  %s\n", when, ss.Agent, short(ss.SessionID), shortProject(ss.Workspace), ss.Title)
+		fmt.Printf("            %s\n", describeSkillUses(ss.Skills))
 	}
 	return nil
+}
+
+// printSkillStats prints one line per skill: sessions, last use and the
+// harnesses that used it.
+func printSkillStats(w io.Writer, stats []cass.SkillStat) error {
+	if len(stats) == 0 {
+		fmt.Fprintln(w, "no skills")
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "SKILL\tSESSIONS\tLAST USED\tHARNESSES")
+	for _, st := range stats {
+		agents := make([]string, 0, len(st.Agents))
+		for a := range st.Agents {
+			agents = append(agents, a)
+		}
+		sort.Slice(agents, func(i, j int) bool {
+			if st.Agents[agents[i]] != st.Agents[agents[j]] {
+				return st.Agents[agents[i]] > st.Agents[agents[j]]
+			}
+			return agents[i] < agents[j]
+		})
+		for i, a := range agents {
+			agents[i] = fmt.Sprintf("%s %d", a, st.Agents[a])
+		}
+		last := ""
+		if !st.LastSeen.IsZero() {
+			last = relativeTime(st.LastSeen.Format(time.RFC3339))
+		}
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", st.Name, st.Sessions, last, strings.Join(agents, ", "))
+	}
+	return tw.Flush()
+}
+
+// describeSkillUses summarizes how a session used its skills, for example
+// "selected goal (slash command /goal); loaded goal".
+func describeSkillUses(skills []cass.SkillUse) string {
+	var parts []string
+	for _, sk := range skills {
+		p := sk.Kind + " " + sk.Name
+		if len(sk.Evidence) > 0 {
+			p += " (" + sk.Evidence[0] + ")"
+		}
+		if sk.Count > 1 {
+			p += fmt.Sprintf(" ×%d", sk.Count)
+		}
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func statusStyle(status string) string {

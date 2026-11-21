@@ -202,7 +202,7 @@ func TestUsageListsRequests(t *testing.T) {
 	}
 	for _, want := range []string{
 		"goals        Show goal-mode objectives indexed by cass",
-		"skills       Show skill usage indexed by cass",
+		"skills       Look up which sessions used a skill",
 		"web          Show the cass web UI",
 	} {
 		if !strings.Contains(string(got), want) {

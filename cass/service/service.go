@@ -177,12 +177,56 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 		}
 	}
 
+	// Attribution forks git and is guarded by its own lock, so it runs
+	// before walk takes the write lock: one collector's git work overlaps
+	// another's writes.
+	total, err := s.walk(ctx, since, extraPaths, attr.attribute, func(batch []cass.Session) (int, error) {
+		return len(batch), s.indexBatch(ctx, attr, batch)
+	})
+	if err != nil {
+		return total, err
+	}
+
+	// Record last indexed time. Only reached by a walk that covered every
+	// detected path, so the cursor is a truthful coverage claim.
+	if err := s.store.SetMeta(ctx, "last_indexed_at", strconv.FormatInt(start.Unix(), 10)); err != nil {
+		return total, fmt.Errorf("set last_indexed_at: %w", err)
+	}
+
+	return total, nil
+}
+
+// RefreshSkills re-extracts skill signals from every detected session file
+// and rewrites only the skill rows of sessions already indexed, so that
+// sessions indexed by an older extractor can be looked up by skill without
+// a full rebuild. It returns the number of sessions updated.
+func (s *Service) RefreshSkills(ctx context.Context) (int, error) {
+	start := time.Now()
+	total, err := s.walk(ctx, time.Time{}, nil, nil, func(batch []cass.Session) (int, error) {
+		return s.store.ReplaceSessionSkills(ctx, batch)
+	})
+	if err != nil {
+		return total, err
+	}
+	if err := s.store.SetSkillsRefreshedAt(ctx, start); err != nil {
+		return total, fmt.Errorf("set skills refresh time: %w", err)
+	}
+	return total, nil
+}
+
+// walk scans every detected collector for sessions modified since since
+// (zero means all) and passes them to write in batches, one write at a time.
+// prepare, if non-nil, runs on each batch before the write lock is taken.
+// write returns how many sessions it stored; walk returns the sum.
+//
+// walk keeps going after a collector fails and returns the failures joined.
+func (s *Service) walk(ctx context.Context, since time.Time, extraPaths []string, prepare func([]cass.Session), write func([]cass.Session) (int, error)) (int, error) {
 	var (
-		total int
-		errs  []error
-		mu    sync.Mutex
-		write sync.Mutex
-		wg    sync.WaitGroup
+		total   int
+		errs    []error
+		mu      sync.Mutex
+		writeMu sync.Mutex
+		wg      sync.WaitGroup
 	)
 
 	fail := func(err error) {
@@ -225,43 +269,33 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 				}, ch)
 			}()
 
+			flush := func(batch []cass.Session) {
+				if prepare != nil {
+					prepare(batch)
+				}
+				writeMu.Lock()
+				n, err := write(batch)
+				writeMu.Unlock()
+				if err != nil {
+					s.log.Error("batch index", "agent", col.Name(), "err", err)
+					fail(fmt.Errorf("index %s: %w", col.Name(), err))
+					return
+				}
+				mu.Lock()
+				total += n
+				mu.Unlock()
+			}
+
 			var batch []cass.Session
 			for sess := range ch {
 				batch = append(batch, sess)
 				if len(batch) >= 100 {
-					// Attribution forks git and is guarded by its own
-					// lock, so it runs outside the write lock: one
-					// collector's git work overlaps another's writes.
-					attr.attribute(batch)
-					write.Lock()
-					err := s.indexBatch(ctx, attr, batch)
-					write.Unlock()
-					if err != nil {
-						s.log.Error("batch index", "agent", col.Name(), "err", err)
-						fail(fmt.Errorf("index %s: %w", col.Name(), err))
-					} else {
-						mu.Lock()
-						total += len(batch)
-						mu.Unlock()
-					}
+					flush(batch)
 					batch = batch[:0]
 				}
 			}
-
-			// Flush remaining.
 			if len(batch) > 0 {
-				attr.attribute(batch)
-				write.Lock()
-				err := s.indexBatch(ctx, attr, batch)
-				write.Unlock()
-				if err != nil {
-					s.log.Error("batch index", "agent", col.Name(), "err", err)
-					fail(fmt.Errorf("index %s: %w", col.Name(), err))
-				} else {
-					mu.Lock()
-					total += len(batch)
-					mu.Unlock()
-				}
+				flush(batch)
 			}
 
 			if scanErr := <-errCh; scanErr != nil {
@@ -272,18 +306,7 @@ func (s *Service) Index(ctx context.Context, force bool, extraPaths ...string) (
 	}
 
 	wg.Wait()
-
-	if len(errs) > 0 {
-		return total, errors.Join(errs...)
-	}
-
-	// Record last indexed time. Only reached by a walk that covered every
-	// detected path, so the cursor is a truthful coverage claim.
-	if err := s.store.SetMeta(ctx, "last_indexed_at", strconv.FormatInt(start.Unix(), 10)); err != nil {
-		return total, fmt.Errorf("set last_indexed_at: %w", err)
-	}
-
-	return total, nil
+	return total, errors.Join(errs...)
 }
 
 // Search queries the index.
@@ -463,9 +486,20 @@ func (s *Service) Goals(ctx context.Context, status string, limit int) ([]cass.G
 	return s.store.Goals(ctx, status, limit)
 }
 
-// Skills returns skill usage records joined with parent session metadata.
-func (s *Service) Skills(ctx context.Context, skill string, kind string, limit int) ([]cass.SkillHit, error) {
-	return s.store.Skills(ctx, skill, kind, limit)
+// SkillSessions returns the sessions whose skill signals match q.
+func (s *Service) SkillSessions(ctx context.Context, q cass.SkillQuery) ([]cass.SkillSession, error) {
+	return s.store.SkillSessions(ctx, q)
+}
+
+// SkillStats summarizes skill use by skill name.
+func (s *Service) SkillStats(ctx context.Context, q cass.SkillQuery) ([]cass.SkillStat, error) {
+	return s.store.SkillStats(ctx, q)
+}
+
+// SkillsRefreshedAt reports when [Service.RefreshSkills] last completed, or
+// the zero time if it never has.
+func (s *Service) SkillsRefreshedAt(ctx context.Context) (time.Time, error) {
+	return s.store.SkillsRefreshedAt(ctx)
 }
 
 // Mappings returns iTerm2 <-> Claude session mappings.

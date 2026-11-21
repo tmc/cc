@@ -114,7 +114,7 @@ func trimSearchSkills(skills []cass.SkillUse) []cass.SkillUse {
 	seen := map[string]bool{}
 	for _, skill := range skills {
 		switch skill.Kind {
-		case "selected", "tool", "loaded":
+		case "selected", "loaded":
 		default:
 			continue
 		}
@@ -224,20 +224,46 @@ func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, goals)
 }
 
+// handleSkills looks up skill use. Parameters: skill (name, glob or path
+// substring), kind (comma list or "all"; default the kinds that count as
+// use), agent, workspace, since (duration), limit, and summary=1 for
+// per-skill totals instead of sessions.
 func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := 100
+	sq := cass.SkillQuery{
+		Skill:     q.Get("skill"),
+		Kinds:     cass.ParseSkillKinds(q.Get("kind")),
+		Agent:     q.Get("agent"),
+		Workspace: q.Get("workspace"),
+		Limit:     100,
+	}
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
+			sq.Limit = n
 		}
 	}
-	skills, err := s.svc.Skills(r.Context(), q.Get("skill"), q.Get("kind"), limit)
+	if v := q.Get("since"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			writeError(w, fmt.Errorf("since: %w", err), http.StatusBadRequest)
+			return
+		}
+		sq.Since = time.Now().Add(-d)
+	}
+	var (
+		out any
+		err error
+	)
+	if q.Get("summary") != "" {
+		out, err = s.svc.SkillStats(r.Context(), sq)
+	} else {
+		out, err = s.svc.SkillSessions(r.Context(), sq)
+	}
 	if err != nil {
 		writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, skills)
+	writeJSON(w, out)
 }
 
 func (s *Server) handleMappings(w http.ResponseWriter, r *http.Request) {

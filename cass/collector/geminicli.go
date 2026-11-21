@@ -221,6 +221,7 @@ func (c *GeminiCLI) parseSession(ctx context.Context, config cass.ScanConfig, pa
 		Messages:   messages,
 		Stats:      stats,
 		Usage:      cass.UsageEvents(ccusage.FromEntries(c.Name(), entries)),
+		Skills:     ExtractSkills(entries, c.Name()),
 		Metadata:   meta,
 		TeamName:   teamName,
 		AgentName:  agentName,

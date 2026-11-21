@@ -15,7 +15,7 @@
 //	search     Search indexed sessions.
 //	resume     Search and resume a session interactively.
 //	goals      List goal-mode objectives.
-//	skills     List skill usage.
+//	skills     Look up which sessions used a skill.
 //	links      Show inter-session communication graph.
 //	map        Show iTerm2 <-> Claude session ID mappings.
 //	stats      Show index statistics.
@@ -93,6 +93,35 @@
 // Rows appear only for sessions indexed since the usage table was added;
 // cass has no backfill, so run cass index --force once and the command
 // warns while the index predates the table.
+//
+// # Skills
+//
+// The skills command answers which sessions, in any harness, used a skill.
+// With no argument it lists skills by the number of sessions that used them;
+// with a skill it lists those sessions, most recent first, and how each one
+// used it:
+//
+//	cass skills
+//	cass skills go-team-codebase-review
+//	cass skills -agent codex -since 168h 'go-team-*'
+//	cass skills -summary -pwd
+//	cass search -skill nlm "notebook"
+//
+// A skill matches by name without regard to case or plugin prefix, so
+// deep-research matches anthropic-skills:deep-research. It may be a glob,
+// and an argument containing a slash matches the skill's path instead.
+//
+// A session uses a skill when it selects it (a Skill tool call, a slash
+// command, a Codex $skill mention, Pi's /skill:name, OpenCode's skill tool,
+// Gemini's activate_skill) or loads its SKILL.md. Skills that were only
+// listed as available, or only appeared in context, are kinds available and
+// expanded; -kind all includes them.
+//
+// Skill signals are re-extracted when a session is indexed. To apply a newer
+// extractor to sessions that have not changed, without rebuilding the
+// index, run:
+//
+//	cass index -skills
 //
 // List subagent runs for a session:
 //

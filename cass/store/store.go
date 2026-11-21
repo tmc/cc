@@ -373,6 +373,8 @@ func (s *DB) migrate() error {
 
 	` + workflowsSchema + `
 
+	` + sessionSkillsSchema + `
+
 	` + jobsAgentsSchema + `
 
 	` + usageSchema + `
@@ -546,6 +548,12 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 		return fmt.Errorf("prepare workflows: %w", err)
 	}
 	defer wfStmt.Close()
+
+	skillStmt, err := tx.PrepareContext(ctx, insertSessionSkillSQL)
+	if err != nil {
+		return fmt.Errorf("prepare session_skills: %w", err)
+	}
+	defer skillStmt.Close()
 
 	usageStmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO usage_events (
@@ -732,6 +740,10 @@ func (s *DB) BatchIndex(ctx context.Context, sessions []cass.Session) error {
 			}
 		}
 
+		if err := writeSessionSkills(ctx, tx, skillStmt, sess.ID, sess.Agent, sess.Skills); err != nil {
+			return err
+		}
+
 		// Usage events: clear and reinsert for this session. The hours the old
 		// and new rows touch are collected as they go and the rollup for those
 		// hours is recomputed once, before the transaction commits.
@@ -889,8 +901,12 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 		args = append(args, `%"effective_status":"`+req.Filters.GoalStatus+`"%`)
 	}
 	if req.Filters.Skill != "" {
-		where = append(where, skillUseFilter("s.skills_json"))
-		args = append(args, "%"+req.Filters.Skill+"%", "%"+req.Filters.Skill+"%")
+		cond, a := skillNameMatch(req.Filters.Skill)
+		where = append(where, `EXISTS (
+			SELECT 1 FROM session_skills k
+			WHERE k.session_id = s.id AND k.kind IN ('selected', 'loaded') AND `+cond+`
+		)`)
+		args = append(args, a...)
 	}
 	if req.Filters.ProducedArtifacts {
 		where = append(where, `EXISTS (
@@ -1037,6 +1053,9 @@ func (s *DB) Search(ctx context.Context, req cass.SearchRequest) (*cass.SearchRe
 	if err := s.attachArtifactEvents(ctx, hits); err != nil {
 		return nil, err
 	}
+	if err := s.attachSessionSkills(ctx, hits, req.SummaryOnly); err != nil {
+		return nil, err
+	}
 
 	return &cass.SearchResult{
 		Hits:            hits,
@@ -1078,14 +1097,6 @@ func (s *DB) attachArtifactEvents(ctx context.Context, hits []cass.Hit) error {
 		hits[i].ArtifactCount = len(events)
 	}
 	return nil
-}
-
-func skillUseFilter(col string) string {
-	return `EXISTS (
-		SELECT 1 FROM json_each(` + col + `) AS sk
-		WHERE json_extract(sk.value, '$.kind') IN ('selected', 'tool', 'loaded')
-		  AND (json_extract(sk.value, '$.name') LIKE ? OR json_extract(sk.value, '$.path') LIKE ?)
-	)`
 }
 
 // foldWorkflowMatches records workflow match badges for summary hits without
@@ -1342,6 +1353,9 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM workflows WHERE parent_session_id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete workflows by id: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM session_skills WHERE session_id IN (%s)", placeholders), args...); err != nil {
+			return fmt.Errorf("delete session_skills by id: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM artifact_events WHERE session_id IN (%s)", placeholders), args...); err != nil {
 			return fmt.Errorf("delete artifact events by id: %w", err)
 		}
@@ -1370,6 +1384,9 @@ func (s *DB) Delete(ctx context.Context, filter cass.DeleteFilter) error {
 			agentFilterArgs(filter.Agent)...,
 		); err != nil {
 			return fmt.Errorf("delete workflows by agent: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM session_skills WHERE "+agentFilter("agent"), agentFilterArgs(filter.Agent)...); err != nil {
+			return fmt.Errorf("delete session_skills by agent: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM artifact_events WHERE session_id IN (SELECT id FROM sessions WHERE "+agentFilter("agent")+")",
@@ -1791,7 +1808,7 @@ func (s *DB) AggregateStats(ctx context.Context, after, before time.Time) (map[s
 			}
 			skillCount++
 			switch sk.Kind {
-			case "selected", "tool":
+			case "selected":
 				selectedSkillCount++
 			case "loaded":
 				loadedSkillCount++
@@ -2126,70 +2143,6 @@ func (s *DB) Goals(ctx context.Context, status string, limit int) ([]cass.GoalHi
 			}
 			hits = append(hits, cass.GoalHit{
 				Goal:       g,
-				SessionID:  sessionID,
-				Agent:      agent,
-				Title:      title,
-				Workspace:  workspace,
-				SourcePath: sourcePath,
-				StartedAt:  started,
-				EndedAt:    ended,
-			})
-		}
-	}
-	return hits, rows.Err()
-}
-
-// Skills returns skill usage records joined with parent session metadata.
-func (s *DB) Skills(ctx context.Context, skill string, kind string, limit int) ([]cass.SkillHit, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	query := `SELECT id, agent, title, workspace, source_path, started_at, ended_at, skills_json FROM sessions WHERE ` + skillsJSONPresentExpr
-	var args []any
-	if skill != "" {
-		query += ` AND skills_json LIKE ?`
-		args = append(args, "%"+skill+"%")
-	}
-	if kind != "" {
-		query += ` AND skills_json LIKE ?`
-		args = append(args, `%"kind":"`+kind+`"%`)
-	}
-	query += ` ORDER BY ended_at DESC LIMIT ?`
-	args = append(args, limit)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query skills: %w", err)
-	}
-	defer rows.Close()
-
-	var hits []cass.SkillHit
-	for rows.Next() {
-		var sessionID, agent, title, workspace, sourcePath, skillsJSON string
-		var startedUnix, endedUnix int64
-		if err := rows.Scan(&sessionID, &agent, &title, &workspace, &sourcePath, &startedUnix, &endedUnix, &skillsJSON); err != nil {
-			return nil, fmt.Errorf("scan skill session: %w", err)
-		}
-		var skills []cass.SkillUse
-		if err := json.Unmarshal([]byte(skillsJSON), &skills); err != nil {
-			continue
-		}
-		started, ended := "", ""
-		if startedUnix > 0 {
-			started = time.Unix(startedUnix, 0).Format(time.RFC3339)
-		}
-		if endedUnix > 0 {
-			ended = time.Unix(endedUnix, 0).Format(time.RFC3339)
-		}
-		for _, sk := range skills {
-			if skill != "" && !strings.Contains(sk.Name, skill) && !strings.Contains(sk.Path, skill) {
-				continue
-			}
-			if kind != "" && sk.Kind != kind {
-				continue
-			}
-			hits = append(hits, cass.SkillHit{
-				SkillUse:   sk,
 				SessionID:  sessionID,
 				Agent:      agent,
 				Title:      title,
@@ -3397,7 +3350,7 @@ func skillCounts(skills []cass.SkillUse) (total, selected, loaded int) {
 	total = len(skills)
 	for _, s := range skills {
 		switch s.Kind {
-		case "selected", "tool":
+		case "selected":
 			selected++
 		case "loaded":
 			loaded++
@@ -3408,7 +3361,7 @@ func skillCounts(skills []cass.SkillUse) (total, selected, loaded int) {
 
 func skillCountsAsUse(kind string) bool {
 	switch kind {
-	case "selected", "tool", "loaded":
+	case "selected", "loaded":
 		return true
 	default:
 		return false

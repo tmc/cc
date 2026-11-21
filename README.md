@@ -91,7 +91,7 @@ the full API.
 | [`cass`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | Index and search AI coding-agent session history (Claude Code, Codex, etc.). Covers `detect`, `index`, `search`, `resume`, `links`, `map`, `stats`, `subagents`, `workflows`, `requests`, and `web`. |
 | [`cass web`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | Start the web UI server for browsing indexed sessions. |
 | [`cass goals`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | List goal-mode objectives indexed from sessions. |
-| [`cass skills`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | List skill usage indexed from sessions. |
+| [`cass skills`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | Look up which sessions, in any harness, used a skill. |
 | [`ccresume`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccresume) | Find a recent coding-agent session and resume it. |
 | [`ccstats`](https://pkg.go.dev/github.com/tmc/cc/cmd/ccstats) | Report token usage, tool counts, and timing for sessions, or run `ccstats characteristics` for cross-session usage characteristics. |
 | [`cass requests`](https://pkg.go.dev/github.com/tmc/cc/cmd/cass) | Show indexed API request breakdowns and capture metadata. |
