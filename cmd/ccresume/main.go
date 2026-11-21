@@ -1531,14 +1531,15 @@ func sessionRoots() ([]searchRoot, error) {
 			roots = append(roots, searchRoot{dir: d, kind: "pi"})
 		}
 	}
-	ah, _ := ccpaths.AntigravityHome()
-	if ah != "" {
-		if d := filepath.Join(ah, "brain"); dirExists(d) {
-			roots = append(roots, searchRoot{dir: d, kind: "antigravity"})
+	var brain string
+	if ah, _ := ccpaths.AntigravityHome(); ah != "" {
+		brain = filepath.Join(ah, "brain")
+		if dirExists(brain) {
+			roots = append(roots, searchRoot{dir: brain, kind: "antigravity"})
 		}
 	}
 	if gh != "" {
-		if d := filepath.Join(gh, "antigravity-cli", "brain"); dirExists(d) {
+		if d := filepath.Join(gh, "antigravity-cli", "brain"); d != brain && dirExists(d) {
 			roots = append(roots, searchRoot{dir: d, kind: "antigravity"})
 		}
 	}

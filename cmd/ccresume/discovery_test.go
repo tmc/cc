@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -165,4 +166,27 @@ func testSessionHomes(t *testing.T) string {
 	t.Setenv("NAC_HOME", filepath.Join(root, "nac-data"))
 	t.Setenv("CC_NAC_STORE", "")
 	return root
+}
+
+func TestSessionRootsDeduplicateAntigravity(t *testing.T) {
+	root := testSessionHomes(t)
+	home := filepath.Join(root, "gemini-data", "antigravity-cli")
+	brain := filepath.Join(home, "brain")
+	t.Setenv("ANTIGRAVITY_HOME", home)
+	if err := os.MkdirAll(brain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	roots, err := sessionRoots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	for _, root := range roots {
+		if root.dir == brain && root.kind == "antigravity" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("sessionRoots() contains %d copies of %q, want one", n, brain)
+	}
 }
