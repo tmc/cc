@@ -126,6 +126,7 @@ func AllIndexEntries(since time.Duration, project string) ([]IndexEntry, error) 
 	// run them concurrently.
 	scans := []func(time.Time, string) ([]IndexEntry, error){
 		openCodeIndexEntries,
+		geminiCLIIndexEntries,
 		piIndexEntries,
 		antigravityIndexEntries,
 	}
@@ -147,6 +148,42 @@ func AllIndexEntries(since time.Duration, project string) ([]IndexEntry, error) 
 		all = append(all, out[i]...)
 	}
 	return all, nil
+}
+
+func geminiCLIIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error) {
+	home, err := ccpaths.GeminiHome()
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	project = strings.ToLower(project)
+	var entries []IndexEntry
+	err = walkGeminiCLI(ctx, filepath.Join(home, "tmp"), cutoff, func(path string, mod time.Time) {
+		s, err := SummarizeFile(ctx, path)
+		if err != nil || s.TotalLines == 0 || !strings.Contains(strings.ToLower(s.CWD), project) {
+			return
+		}
+		if !s.LastTime.IsZero() {
+			mod = s.LastTime
+			if mod.Before(cutoff) {
+				return
+			}
+		}
+		created := s.FirstTime
+		if created.IsZero() {
+			created = mod
+		}
+		entries = append(entries, IndexEntry{
+			SessionID:    s.SessionID,
+			FullPath:     path,
+			ProjectPath:  s.CWD,
+			FirstPrompt:  s.FirstPrompt,
+			MessageCount: s.UserMessages + s.AsstMessages,
+			Created:      created.Format(time.RFC3339Nano),
+			Modified:     mod.Format(time.RFC3339Nano),
+		})
+	})
+	return entries, err
 }
 
 func piIndexEntries(cutoff time.Time, project string) ([]IndexEntry, error) {

@@ -789,6 +789,19 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if dir.kind == "gemini-cli" {
+			query := strings.ToLower(project)
+			err := walkGeminiCLI(ctx, dir.path, cutoff, func(path string, _ time.Time) {
+				rel, _ := filepath.Rel(dir.path, path)
+				if strings.Contains(strings.ToLower(rel), query) {
+					files = append(files, path)
+				}
+			})
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
 		err := filepath.Walk(dir.path, func(path string, info os.FileInfo, err error) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -839,10 +852,6 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 				if !opencoderead.IsSessionPath(path) {
 					return nil
 				}
-			} else if dir.kind == "gemini-cli" {
-				if !geminiread.IsSessionPath(path) {
-					return nil
-				}
 			} else if !strings.HasSuffix(path, ".jsonl") {
 				return nil
 			}
@@ -883,6 +892,28 @@ func FindSessionFiles(ctx context.Context, since time.Duration, project string) 
 		}
 	}
 	return files, nil
+}
+
+// walkGeminiCLI visits chat files modified at or after cutoff.
+func walkGeminiCLI(ctx context.Context, root string, cutoff time.Time, visit func(string, time.Time)) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if info.Name() == "subagents" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if geminiread.IsSessionPath(path) && !info.ModTime().Before(cutoff) {
+			visit(path, info.ModTime())
+		}
+		return nil
+	})
 }
 
 // openCodeModTime reports the newest file modification belonging to an

@@ -2,6 +2,7 @@ package cc
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -107,6 +108,40 @@ func TestAllIndexEntriesFilters(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Errorf("AllIndexEntries(48h, \"\") len = %d, want 2", len(got))
+	}
+}
+
+func TestAllIndexEntriesIncludesGeminiCLI(t *testing.T) {
+	root := t.TempDir()
+	gemini := filepath.Join(root, "gemini")
+	t.Setenv("CLAUDE_HOME", filepath.Join(root, "claude"))
+	t.Setenv("GEMINI_HOME", gemini)
+	t.Setenv("OPENCODE_HOME", filepath.Join(root, "opencode"))
+	t.Setenv("PI_CODING_AGENT_DIR", filepath.Join(root, "pi"))
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, "antigravity"))
+
+	now := time.Now().UTC()
+	project := filepath.Join(gemini, "tmp", "alias")
+	path := filepath.Join(project, "chats", "session-fixture.json")
+	writeIndexFile(t, filepath.Join(project, ".project_root"), "/work/canonical")
+	writeIndexFile(t, path, fmt.Sprintf(`{
+		"sessionId": "fixture",
+		"startTime": %q,
+		"messages": [{"id": "message", "timestamp": %q, "type": "user", "content": "hello index gemini"}]
+	}`, now.Add(-time.Minute).Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)))
+	writeIndexFile(t, filepath.Join(project, "chats", "logs.json"), "{}")
+
+	got, err := AllIndexEntries(time.Hour, "CANONICAL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("AllIndexEntries len = %d, want 1: %#v", len(got), got)
+	}
+	entry := got[0]
+	if entry.SessionID != "fixture" || entry.FullPath != path || entry.ProjectPath != "/work/canonical" ||
+		entry.FirstPrompt != "hello index gemini" || entry.MessageCount != 1 || !entry.ModifiedTime().Equal(now) {
+		t.Errorf("unexpected Gemini index entry: %#v", entry)
 	}
 }
 
