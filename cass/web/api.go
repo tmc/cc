@@ -21,6 +21,7 @@ import (
 	"github.com/tmc/cc/ccinboxstore"
 	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/ccteamcfg"
+	"github.com/tmc/cc/internal/geminiread"
 )
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -688,72 +689,10 @@ func readIndexedSessionEntries(ctx context.Context, path, id string) ([]cc.Entry
 }
 
 func readSessionEntries(path string) ([]cc.Entry, error) {
-	// Gemini CLI chat files are JSON objects, not JSONL.
 	if strings.HasSuffix(path, ".json") && strings.HasPrefix(filepath.Base(path), "session-") {
-		return readGeminiJSONSessionEntries(path)
+		return geminiread.ReadFile(context.Background(), path)
 	}
 	return cc.ReadFile(context.Background(), path)
-}
-
-func readGeminiJSONSessionEntries(path string) ([]cc.Entry, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var sess struct {
-		SessionID string `json:"sessionId"`
-		Messages  []struct {
-			ID        string          `json:"id"`
-			Timestamp string          `json:"timestamp"`
-			Type      string          `json:"type"`
-			Content   json.RawMessage `json:"content"`
-			Model     string          `json:"model"`
-			Tokens    struct {
-				Input  int `json:"input"`
-				Output int `json:"output"`
-				Cached int `json:"cached"`
-			} `json:"tokens"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(b, &sess); err != nil {
-		return nil, err
-	}
-
-	entries := make([]cc.Entry, 0, len(sess.Messages))
-	for _, m := range sess.Messages {
-		if len(m.Content) == 0 {
-			continue
-		}
-		if cc.ExtractAnyText(m.Content) == "" {
-			continue
-		}
-		role := "assistant"
-		if m.Type == "user" {
-			role = "user"
-		}
-		ts, _ := time.Parse(time.RFC3339, m.Timestamp)
-		e := cc.Entry{
-			Type:      "message",
-			SessionID: sess.SessionID,
-			UUID:      m.ID,
-			Timestamp: ts,
-			Message: &cc.Message{
-				ID:      m.ID,
-				Role:    role,
-				Content: m.Content,
-				Model:   m.Model,
-			},
-		}
-		if role == "assistant" {
-			e.Message.Usage = &cc.Usage{
-				InputTokens:          m.Tokens.Input,
-				OutputTokens:         m.Tokens.Output,
-				CacheReadInputTokens: m.Tokens.Cached,
-			}
-		}
-		entries = append(entries, e)
-	}
-	return entries, nil
 }
 
 // readSessionEntriesWithSubagents reads the parent session JSONL and merges

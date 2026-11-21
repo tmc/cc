@@ -109,3 +109,29 @@ func TestGeminiParseSession_ContentFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestGeminiParseSessionCountsToolOnlyTurn(t *testing.T) {
+	root := t.TempDir()
+	chat := filepath.Join(root, "chats")
+	if err := os.Mkdir(chat, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(chat, "session-fixture.json")
+	data := []byte(`{"sessionId":"native-id","messages":[
+		{"id":"u","type":"user","content":"read it","timestamp":"2026-11-19T10:00:00Z"},
+		{"id":"a","type":"gemini","timestamp":"2026-11-19T10:00:01Z","model":"gemini-test",
+		 "tokens":{"input":4,"output":5,"thoughts":2,"cached":1},
+		 "toolCalls":[{"id":"tc","name":"read_file","args":{"path":"README.md"},
+		               "result":[{"functionResponse":{"response":{"output":"sample result"}}}]}]}
+	]}`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := new(GeminiCLI).parseSession(t.Context(), cass.ScanConfig{}, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Stats.ToolBreakdown["View"] != 1 || len(s.Usage) != 1 || s.Usage[0].Output != 7 {
+		t.Fatalf("tool-only stats = %+v, usage = %+v", s.Stats, s.Usage)
+	}
+}

@@ -2,20 +2,17 @@ package collector
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/ccusage"
+	"github.com/tmc/cc/internal/geminiread"
 )
 
 // GeminiCLI collects sessions from Gemini CLI session files.
@@ -231,7 +228,21 @@ func (c *GeminiCLI) parseSession(ctx context.Context, config cass.ScanConfig, pa
 
 func (c *GeminiCLI) readEntries(ctx context.Context, config cass.ScanConfig, path string) ([]cc.Entry, string, error) {
 	if strings.HasSuffix(path, ".json") {
-		return c.readJSONSession(path)
+		entries, err := geminiread.ReadFile(ctx, path)
+		if err != nil {
+			return nil, "", err
+		}
+		var workspace string
+		if len(entries) > 0 {
+			workspace = entries[0].CWD
+			if entries[0].Type == "session_meta" {
+				entries = entries[1:]
+			}
+		}
+		sort.SliceStable(entries, func(i, j int) bool {
+			return entries[i].Timestamp.Before(entries[j].Timestamp)
+		})
+		return entries, workspace, nil
 	}
 
 	entries, err := readSessionFile(ctx, config, path)
@@ -257,139 +268,6 @@ func (c *GeminiCLI) readEntries(ctx context.Context, config cass.ScanConfig, pat
 		}
 	}
 	return entries, workspaceFromPath(path), nil
-}
-
-type geminiChatFile struct {
-	SessionID   string              `json:"sessionId"`
-	ProjectHash string              `json:"projectHash"`
-	StartTime   string              `json:"startTime"`
-	LastUpdated string              `json:"lastUpdated"`
-	Messages    []geminiChatMessage `json:"messages"`
-}
-
-type geminiChatMessage struct {
-	ID        string          `json:"id"`
-	Timestamp string          `json:"timestamp"`
-	Type      string          `json:"type"`
-	Content   json.RawMessage `json:"content"`
-	Model     string          `json:"model"`
-	Tokens    struct {
-		Input    int `json:"input"`
-		Output   int `json:"output"`
-		Cached   int `json:"cached"`
-		Thoughts int `json:"thoughts"`
-	} `json:"tokens"`
-}
-
-func (c *GeminiCLI) readJSONSession(path string) ([]cc.Entry, string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, "", err
-	}
-	var sess geminiChatFile
-	if err := json.Unmarshal(data, &sess); err != nil {
-		return nil, "", err
-	}
-
-	workspace := c.workspaceFromGeminiPath(path, sess.ProjectHash)
-	sid := sess.SessionID
-
-	entries := make([]cc.Entry, 0, len(sess.Messages))
-	for _, m := range sess.Messages {
-		if len(m.Content) == 0 {
-			continue
-		}
-		text := cc.ExtractAnyText(m.Content)
-		if text == "" {
-			continue
-		}
-		role := "assistant"
-		if m.Type == "user" {
-			role = "user"
-		}
-		ts, _ := time.Parse(time.RFC3339, m.Timestamp)
-		entry := cc.Entry{
-			Type:      "message",
-			SessionID: sid,
-			UUID:      m.ID,
-			Timestamp: ts,
-			CWD:       workspace,
-			Message: &cc.Message{
-				ID:      m.ID,
-				Role:    role,
-				Content: m.Content,
-				Model:   m.Model,
-			},
-		}
-		if role == "assistant" {
-			entry.Message.Usage = &cc.Usage{
-				InputTokens: m.Tokens.Input,
-				// Gemini counts thinking separately, and its own total is
-				// input plus output plus thoughts. Folding thoughts into
-				// output keeps the request whole; leaving it out halves the
-				// output of every gemini request.
-				OutputTokens:         m.Tokens.Output + m.Tokens.Thoughts,
-				CacheReadInputTokens: m.Tokens.Cached,
-			}
-		}
-		entries = append(entries, entry)
-	}
-
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].Timestamp.Before(entries[j].Timestamp)
-	})
-
-	return entries, workspace, nil
-}
-
-func (c *GeminiCLI) workspaceFromGeminiPath(path, projectHash string) string {
-	projectDir := filepath.Dir(filepath.Dir(path))
-	if b, err := os.ReadFile(filepath.Join(projectDir, ".project_root")); err == nil {
-		if s := strings.TrimSpace(string(b)); s != "" {
-			return s
-		}
-	}
-
-	hashToPath, nameToPath := c.projectMaps()
-	if projectHash != "" {
-		if p := hashToPath[projectHash]; p != "" {
-			return p
-		}
-	}
-	if p := nameToPath[filepath.Base(projectDir)]; p != "" {
-		return p
-	}
-	return ""
-}
-
-func (c *GeminiCLI) projectMaps() (map[string]string, map[string]string) {
-	hashToPath := map[string]string{}
-	nameToPath := map[string]string{}
-
-	gh, err := ccpaths.GeminiHome()
-	if err != nil {
-		return hashToPath, nameToPath
-	}
-	data, err := os.ReadFile(filepath.Join(gh, "projects.json"))
-	if err != nil {
-		return hashToPath, nameToPath
-	}
-	var cfg struct {
-		Projects map[string]string `json:"projects"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return hashToPath, nameToPath
-	}
-	for path, name := range cfg.Projects {
-		h := sha256.Sum256([]byte(path))
-		hashToPath[hex.EncodeToString(h[:])] = path
-		if name != "" {
-			if _, ok := nameToPath[name]; !ok {
-				nameToPath[name] = path
-			}
-		}
-	}
-	return hashToPath, nameToPath
 }
 
 func (c *GeminiCLI) roots() ([]string, error) {
