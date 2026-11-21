@@ -121,3 +121,55 @@ func serviceTestSessions(prefix string, n int) []cass.Session {
 	}
 	return sessions
 }
+
+func TestIndexRootsSelectsNativeCollectors(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ANTIGRAVITY_HOME", filepath.Join(root, ".gemini", "antigravity"))
+	ag := filepath.Join(root, ".gemini", "antigravity", "brain", "fixture", "task.md")
+	claw := filepath.Join(root, ".openclaw", "agents", "fixture", "sessions", "probe.jsonl")
+	if err := os.MkdirAll(filepath.Dir(ag), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ag, []byte("# antigravity fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(claw), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"type":"session","id":"openclaw-probe","timestamp":"2026-11-19T12:00:00Z","cwd":"/work"}
+{"type":"message","id":"m1","timestamp":"2026-11-19T12:00:01Z","message":{"role":"user","content":[{"type":"text","text":"openclaw fixture"}]}}
+`
+	if err := os.WriteFile(claw, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, err := New(Config{DBPath: filepath.Join(root, "index.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	ctx := t.Context()
+	if n, err := svc.IndexRoots(ctx, []string{ag, claw}); err != nil || n != 2 {
+		t.Fatalf("IndexRoots = %d, %v, want 2", n, err)
+	}
+	for _, want := range []struct{ id, agent string }{
+		{"ag-fixture", "antigravity"},
+		{"openclaw-probe", "openclaw"},
+	} {
+		hit, err := svc.Session(ctx, want.id)
+		if err != nil || hit.Agent != want.agent {
+			t.Fatalf("Session(%q) = %+v, %v, want %s", want.id, hit, err, want.agent)
+		}
+	}
+}
+
+func TestCollectorForCursorPath(t *testing.T) {
+	for _, path := range []string{
+		"/work/state.vscdb",
+		"/home/user/Library/Application Support/Cursor/User/workspaceStorage",
+	} {
+		if got := collectorForPath(filepath.FromSlash(path)).Name(); got != "cursor" {
+			t.Errorf("collectorForPath(%q) = %s, want cursor", path, got)
+		}
+	}
+}

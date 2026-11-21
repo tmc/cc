@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/tmc/cc"
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/cass/collector"
 	"github.com/tmc/cc/cass/collector/har"
@@ -617,7 +618,12 @@ func (s *Service) IndexPaths(ctx context.Context, filePaths []string) (int, erro
 			}
 			groups[name] = g
 		}
-		g.dirs[filepath.Dir(path)] = struct{}{}
+		switch name {
+		case "antigravity", "cursor", "openclaw":
+			g.dirs[path] = struct{}{}
+		default:
+			g.dirs[filepath.Dir(path)] = struct{}{}
+		}
 	}
 
 	// Scan walks each changed file's whole project directory, so without a
@@ -688,16 +694,23 @@ func changedFilesSince(filePaths []string) time.Time {
 }
 
 func collectorForPath(path string) cass.Collector {
-	path = strings.ToLower(path)
-	sep := string(filepath.Separator)
+	if cc.Harness(path) == "antigravity" {
+		return &collector.Antigravity{}
+	}
+	path = strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
 	switch {
-	case strings.Contains(path, sep+".codex"+sep):
+	case strings.Contains(path, "/.codex/"):
 		return &collector.Codex{}
-	case strings.Contains(path, sep+"opencode"+sep):
+	case strings.Contains(path, "/opencode/"):
 		return &collector.OpenCode{}
-	case strings.Contains(path, sep+".gemini"+sep):
+	case strings.Contains(path, "/.openclaw/agents/") || strings.HasSuffix(path, "/.openclaw/agents"):
+		return &collector.OpenClaw{}
+	case strings.Contains(path, "/cursor/user/workspacestorage/") ||
+		strings.HasSuffix(path, "/cursor/user/workspacestorage") || filepath.Base(path) == "state.vscdb":
+		return &collector.Cursor{}
+	case strings.Contains(path, "/.gemini/"):
 		return &collector.GeminiCLI{}
-	case strings.Contains(path, sep+".pi"+sep) || strings.Contains(path, sep+"agent"+sep+"sessions"+sep):
+	case strings.Contains(path, "/.pi/") || strings.Contains(path, "/agent/sessions/"):
 		return &collector.Pi{}
 	default:
 		return &collector.ClaudeCode{}

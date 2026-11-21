@@ -288,3 +288,20 @@ func writeFile(t *testing.T, path, data string) {
 func quoteJSON(s string) string {
 	return strconv.Quote(s)
 }
+
+func TestAntigravityScanFullOnlyTranscript(t *testing.T) {
+	root := t.TempDir()
+	logs := filepath.Join(root, "brain", "full-only", ".system_generated", "logs")
+	mkdirAll(t, logs)
+	data := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-04-01T10:00:00Z","content":"full only transcript"}`
+	writeFile(t, filepath.Join(logs, "transcript_full.jsonl"), data+"\n")
+	c := &Antigravity{Root: root}
+	out := make(chan cass.Session, 1)
+	if err := c.Scan(t.Context(), cass.ScanConfig{}, out); err != nil {
+		t.Fatal(err)
+	}
+	s, ok := <-out
+	if !ok || s.ID != "ag-full-only" {
+		t.Fatalf("scan yielded %q, %v, want full-only session", s.ID, ok)
+	}
+}

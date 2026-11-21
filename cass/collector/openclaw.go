@@ -55,58 +55,83 @@ func (c *OpenClaw) Scan(ctx context.Context, config cass.ScanConfig, out chan<- 
 	}
 
 	for _, root := range paths {
-		if err := c.scanAgentsDir(ctx, root, config, out); err != nil {
+		if err := c.scanPath(ctx, root, config, out); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// scanAgentsDir walks ~/.openclaw/agents/<agent-id>/sessions/*.jsonl
-func (c *OpenClaw) scanAgentsDir(ctx context.Context, agentsRoot string, config cass.ScanConfig, out chan<- cass.Session) error {
-	entries, err := os.ReadDir(agentsRoot)
+// scanPath handles an agents root, an agent's sessions directory, or one session file.
+func (c *OpenClaw) scanPath(ctx context.Context, root string, config cass.ScanConfig, out chan<- cass.Session) error {
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("stat openclaw path: %w", err)
+	}
+	if !info.IsDir() {
+		return c.scanSessionFile(ctx, root, info, config, out)
+	}
+	if filepath.Base(root) == "sessions" {
+		return c.scanSessionsDir(ctx, root, config, out)
+	}
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return fmt.Errorf("read agents dir: %w", err)
 	}
-
-	for _, agentEntry := range entries {
-		if !agentEntry.IsDir() {
+	for _, agent := range entries {
+		if !agent.IsDir() {
 			continue
 		}
-		sessionsDir := filepath.Join(agentsRoot, agentEntry.Name(), "sessions")
-		files, err := os.ReadDir(sessionsDir)
-		if err != nil {
-			continue // agent has no sessions dir yet
-		}
-
-		for _, f := range files {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
-				continue
-			}
-			path := filepath.Join(sessionsDir, f.Name())
-
-			// Use file mod time for the since filter (same as claudecode collector).
-			if !config.Since.IsZero() {
-				fi, err := f.Info()
-				if err == nil && fi.ModTime().Before(config.Since) {
-					continue
-				}
-			}
-
-			sess, err := c.parseSession(path, agentEntry.Name())
-			if err != nil {
-				continue
-			}
-			out <- sess
+		if err := c.scanSessionsDir(ctx, filepath.Join(root, agent.Name(), "sessions"), config, out); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// openclawEvent mirrors the JSONL event format written by the OpenClaw gateway.
+func (c *OpenClaw) scanSessionsDir(ctx context.Context, dir string, config cass.ScanConfig, out chan<- cass.Session) error {
+	files, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read openclaw sessions: %w", err)
+	}
+	for _, f := range files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+			continue
+		}
+		info, err := f.Info()
+		if err != nil {
+			continue
+		}
+		if err := c.scanSessionFile(ctx, filepath.Join(dir, f.Name()), info, config, out); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *OpenClaw) scanSessionFile(ctx context.Context, path string, info os.FileInfo, config cass.ScanConfig, out chan<- cass.Session) error {
+	if !strings.HasSuffix(path, ".jsonl") || (!config.Since.IsZero() && info.ModTime().Before(config.Since)) {
+		return nil
+	}
+	agent := filepath.Base(filepath.Dir(filepath.Dir(path)))
+	session, err := c.parseSession(path, agent)
+	if err != nil || (config.Project != "" && !matchProject(session, config.Project)) {
+		return nil
+	}
+	select {
+	case out <- session:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 type openclawEvent struct {
 	Type      string       `json:"type"`
 	ID        string       `json:"id"`

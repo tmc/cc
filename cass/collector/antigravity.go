@@ -15,6 +15,7 @@ import (
 	"github.com/tmc/cc/cass"
 	"github.com/tmc/cc/ccpaths"
 	"github.com/tmc/cc/ccusage"
+	"github.com/tmc/cc/internal/antigravityread"
 )
 
 var (
@@ -93,10 +94,15 @@ func (c *Antigravity) scanPath(ctx context.Context, root string, config cass.Sca
 		return nil
 	}
 	if !info.IsDir() {
+		for dir := filepath.Dir(root); dir != "." && dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+			if antigravityread.IsSessionPath(dir) {
+				return c.emitSession(ctx, dir, config, out)
+			}
+		}
 		return nil
 	}
 
-	if isAntigravityBrainSessionDir(root) {
+	if antigravityread.IsSessionPath(root) {
 		return c.emitSession(ctx, root, config, out)
 	}
 
@@ -125,7 +131,7 @@ func (c *Antigravity) scanBrainRoot(ctx context.Context, root string, config cas
 			continue
 		}
 		dir := filepath.Join(root, entry.Name())
-		if !isAntigravityBrainSessionDir(dir) {
+		if !antigravityread.IsSessionPath(dir) {
 			continue
 		}
 		if err := c.emitSession(ctx, dir, config, out); err != nil {
@@ -439,17 +445,4 @@ func antigravityTitle(entries []cc.Entry, dir string) string {
 		}
 	}
 	return filepath.Base(dir)
-}
-
-func isAntigravityBrainSessionDir(dir string) bool {
-	if _, err := os.Stat(filepath.Join(dir, ".system_generated", "logs", "transcript.jsonl")); err == nil {
-		return true
-	}
-	if _, err := os.Stat(filepath.Join(dir, "task.md")); err == nil {
-		return true
-	}
-	if _, err := os.Stat(filepath.Join(dir, "agent_prompt.md")); err == nil {
-		return true
-	}
-	return false
 }
