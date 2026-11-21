@@ -6,6 +6,7 @@ package transcript
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -130,7 +131,8 @@ func Render(entries []ccmodel.Entry, opts Options) string {
 				case "text":
 					leaveExplore()
 					if blk.Text != "" {
-						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, asstStyle.Render(st.Asst), wrap(mdInline(blk.Text), opts.Width-2, "  "))
+						txt := colorCode(wrap(mdInline(blk.Text), opts.Width-2, "  "))
+						fmt.Fprintf(&b, "%s%s %s\n\n", prefix, asstStyle.Render(st.Asst), txt)
 					}
 				case "tool_use":
 					if blk.Name == "AskUserQuestion" {
@@ -290,21 +292,43 @@ func renderQuestions(b *strings.Builder, prefix string, input json.RawMessage, s
 	b.WriteString("\n")
 }
 
-// mdInline strips inline markdown emphasis markers (**bold**, `code`) that
-// agent TUIs render as styling rather than literal characters. Only paired
-// markers are removed, so stray asterisks and backticks survive.
+// codeRe matches an inline code span on a single line.
+var codeRe = regexp.MustCompile("`([^`\n]+)`")
+
+// codeStyle colors inline code spans the way agent TUIs do.
+var codeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+
+// colorCode replaces `code` spans with colorized text (backticks dropped).
+// It runs after wrapping so styling codes don't skew width accounting; a
+// span split across wrapped lines keeps its backticks.
+func colorCode(txt string) string {
+	return codeRe.ReplaceAllStringFunc(txt, func(m string) string {
+		return codeStyle.Render(m[1 : len(m)-1])
+	})
+}
+
+// linkRe matches an inline markdown link, [label](target).
+var linkRe = regexp.MustCompile(`\[([^\[\]\n]+)\]\([^()\n]+\)`)
+
+// mdInline strips inline markdown that agent TUIs render as styling rather
+// than literal characters: **bold** markers (only when paired), heading
+// hashes, and [label](target) links, which collapse to their label.
 func mdInline(txt string) string {
-	for _, m := range []string{"**", "`"} {
-		if strings.Count(txt, m)%2 == 0 {
-			txt = strings.ReplaceAll(txt, m, "")
-		}
+	if strings.Count(txt, "**")%2 == 0 {
+		txt = strings.ReplaceAll(txt, "**", "")
 	}
-	// Heading markers likewise render as styling, not literal hashes.
-	lines := strings.Split(txt, "\n")
-	for i, l := range lines {
-		if t := strings.TrimLeft(l, "#"); t != l && strings.HasPrefix(t, " ") {
-			lines[i] = strings.TrimSpace(t)
+	txt = linkRe.ReplaceAllString(txt, "$1")
+	// Heading markers likewise render as styling, not literal hashes, and
+	// code-fence lines drop away with their content left in place.
+	var lines []string
+	for l := range strings.SplitSeq(txt, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "```") {
+			continue
 		}
+		if t := strings.TrimLeft(l, "#"); t != l && strings.HasPrefix(t, " ") {
+			l = strings.TrimSpace(t)
+		}
+		lines = append(lines, l)
 	}
 	return strings.Join(lines, "\n")
 }

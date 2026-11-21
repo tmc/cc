@@ -108,10 +108,10 @@ func TestHideResults(t *testing.T) {
 }
 
 func TestMdInline(t *testing.T) {
-	if got := mdInline("run **Go 1.26** on `darwin`"); got != "run Go 1.26 on darwin" {
+	if got := mdInline("run **Go 1.26** on `darwin`"); got != "run Go 1.26 on `darwin`" {
 		t.Errorf("mdInline = %q", got)
 	}
-	if got := mdInline("a ** unpaired `tick"); got != "a ** unpaired `tick" {
+	if got := mdInline("a ** unpaired"); got != "a ** unpaired" {
 		t.Errorf("mdInline(unpaired) = %q", got)
 	}
 }
@@ -231,5 +231,21 @@ func TestLineRange(t *testing.T) {
 	}
 	if got := lineRange(json.RawMessage(`{"file_path":"/a"}`), ClaudeStyle); got != "" {
 		t.Errorf("lineRange(no limit) = %q", got)
+	}
+}
+
+func TestColorCode(t *testing.T) {
+	got := colorCode("see `go.mod` here")
+	if strings.Contains(got, "`") || !strings.Contains(got, "go.mod") {
+		t.Errorf("colorCode = %q", got)
+	}
+	if got := colorCode("no spans"); got != "no spans" {
+		t.Errorf("colorCode(plain) = %q", got)
+	}
+}
+
+func TestMdLinks(t *testing.T) {
+	if got := mdInline("see [`go.mod`](file:///x/go.mod#L1) here"); got != "see `go.mod` here" {
+		t.Errorf("mdInline(link) = %q", got)
 	}
 }
